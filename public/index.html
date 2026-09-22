@@ -30,8 +30,26 @@
             <span>⚙</span> 連線設定
           </button>
         </nav>
-        <div class="section-label">最近的工作階段</div>
-        <div id="sessions" class="sessions"></div>
+        <button
+          id="toggle-history"
+          class="history-toggle"
+          aria-expanded="false"
+          aria-controls="history-panel"
+        >
+          最近的對話 <span>⌄</span>
+        </button>
+        <div id="history-panel" class="history-panel">
+          <div class="section-label">最近的工作階段</div>
+          <label class="session-search"
+            ><span class="sr-only">搜尋對話</span
+            ><input
+              id="session-search"
+              type="search"
+              placeholder="搜尋對話…"
+              autocomplete="off"
+          /></label>
+          <div id="sessions" class="sessions" aria-label="對話清單"></div>
+        </div>
         <div class="sidebar-bottom">
           <span class="local-icon">⌂</span>
           <div>本機工作空間<small>資料保存在你的電腦</small></div>
@@ -43,7 +61,9 @@
           <div class="breadcrumb">
             工作空間 <span>/</span> <strong id="page-name">工作台</strong>
           </div>
-          <span class="local-badge">LOCAL FIRST</span>
+          <span id="connection-state" class="local-badge" role="status"
+            >正在連接工作空間</span
+          >
         </header>
         <section id="chat-view" class="view chat-layout">
           <div class="conversation">
@@ -52,42 +72,81 @@
                 <span class="eyebrow">BUILD WITH YOUR AGENTS</span>
                 <h1 id="session-title">把想法，交給你的工作台。</h1>
               </div>
-              <span class="outline-tag">PI × HERMES</span>
+              <a
+                id="export-session"
+                class="quiet-button"
+                aria-disabled="true"
+                download
+                title="下載目前對話為 Markdown"
+                >匯出對話 ↗</a
+              >
             </div>
-            <div id="mode-banner" class="mode-banner">
-              示範模式 · 不會呼叫 AI，也不會消耗 API 額度
+            <div class="mode-strip">
+              <div id="mode-banner" class="mode-banner">
+                示範模式 · 不會呼叫 AI，也不會消耗 API 額度
+              </div>
+              <button
+                id="mode-setup"
+                class="text-button"
+                data-view="settings"
+                hidden
+              >
+                前往設定 →
+              </button>
             </div>
             <div id="messages" class="messages" role="log" aria-live="polite">
-              <div id="welcome" class="welcome">
-                <div class="weave-symbol">⌘</div>
-                <h2>從一個想法開始。</h2>
-                <p>
-                  讓 Pi 執行、讓經驗留下。<br />把任務、記憶與技能放在同一個工作空間。
-                </p>
-                <div class="suggestions">
-                  <button
-                    data-prompt="幫我規劃一個新的 Node.js 專案，先列出架構與實作步驟。"
-                  >
-                    <span>01 / PLAN</span><strong>規劃一個新專案</strong
-                    ><small>從想法到可執行的步驟 ↗</small></button
-                  ><button
-                    data-prompt="列出工作區檔案，幫我理解目前的專案結構。"
-                  >
-                    <span>02 / EXPLORE</span><strong>探索工作區</strong
-                    ><small>讀取檔案，理解現有程式 ↗</small></button
-                  ><button
-                    data-prompt="幫我整理一份可重複使用的程式碼審查流程，先給我草稿。"
-                  >
-                    <span>03 / LEARN</span><strong>建立可重用的技能</strong
-                    ><small>把有效的方法留下來 ↗</small>
-                  </button>
-                </div>
-              </div>
+              <template id="welcome-template"
+                ><div class="welcome">
+                  <div class="weave-symbol">⌘</div>
+                  <h2>從一個想法開始。</h2>
+                  <p>
+                    讓 Pi 執行、讓經驗留下。<br />把任務、記憶與技能放在同一個工作空間。
+                  </p>
+                  <div class="onboarding">
+                    <span class="step-index">01</span>
+                    <div>
+                      <strong data-setup-title>準備好你的第一個任務</strong
+                      ><small data-setup-description
+                        >先免費體驗示範，或連接模型開始工作。</small
+                      >
+                    </div>
+                    <button class="quiet-button" data-view="settings">
+                      連接模型 →
+                    </button>
+                  </div>
+                  <div class="suggestions">
+                    <button
+                      data-prompt="幫我規劃一個新的 Node.js 專案，先列出架構與實作步驟。"
+                    >
+                      <span>01 / PLAN</span><strong>規劃一個新專案</strong
+                      ><small>從想法到可執行的步驟 ↗</small></button
+                    ><button
+                      data-prompt="列出工作區檔案，幫我理解目前的專案結構。"
+                    >
+                      <span>02 / EXPLORE</span><strong>探索工作區</strong
+                      ><small>讀取檔案，理解現有程式 ↗</small></button
+                    ><button
+                      data-prompt="幫我整理一份可重複使用的程式碼審查流程，先給我草稿。"
+                    >
+                      <span>03 / LEARN</span><strong>建立可重用的技能</strong
+                      ><small>把有效的方法留下來 ↗</small>
+                    </button>
+                  </div>
+                </div></template
+              >
+            </div>
+            <button id="jump-latest" class="jump-latest" hidden>
+              回到最新訊息 ↓
+            </button>
+            <div class="run-strip">
+              <span id="run-status" role="status">準備就緒</span
+              ><span id="draft-status"></span>
             </div>
             <form id="chat-form" class="composer">
               <label class="sr-only" for="prompt">你的任務</label
               ><textarea
                 id="prompt"
+                aria-describedby="draft-status"
                 rows="3"
                 maxlength="16000"
                 placeholder="描述你的想法，或交給 agent 一個任務…"

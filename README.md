@@ -37,6 +37,15 @@ Pi includes `list_files`, `read_file`, `write_file`, `remember`, and `save_skill
 
 The Web UI provides streamed Pi output, activity events, saved conversations, memory/skill creation and deletion, connection status, and stop control. Mode changes create a new conversation so histories from different engines do not mix.
 
+## Everyday workspace experience
+
+- New conversations include starter tasks and guidance for connecting a model. Selecting an unconfigured engine explains what is missing before a request is sent.
+- Search saved conversations by title; mobile users can expand **最近的對話** to browse the same history.
+- Unsent drafts are stored per conversation in this browser, and restored after switching conversations or refreshing. A failed task restores its prompt for editing; it is never retried automatically.
+- Follow elapsed task time, copy individual messages, and download the current conversation as Markdown with **匯出對話**. Exports contain visible messages, not internal Pi transcripts or credentials.
+- Reading earlier messages during streaming keeps your scroll position. Use **回到最新訊息** to resume following the response.
+- Drafts use browser local storage; they are separate from server conversation history and are not shared between browsers. If browser storage is unavailable, the UI reports that drafts cannot be saved.
+
 ## Configure Pi from the UI
 
 1. Open **連線設定** in the sidebar.

@@ -1,3 +1,4 @@
+import { exportConversation } from "../shared/export.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Environment, Session, Skill, RunEvent } from "../shared/types.ts";
@@ -153,7 +154,7 @@ export async function createApp({
         return json(res, session, 201);
       }
       const match = path.match(
-        /^\/api\/sessions\/([a-f0-9-]+)(?:\/(chat|stop))?$/,
+        /^\/api\/sessions\/([a-f0-9-]+)(?:\/(chat|stop|export))?$/,
       );
       if (match) {
         const [, id, action] = match;
@@ -162,6 +163,15 @@ export async function createApp({
         if (!action && req.method === "GET") {
           const { piMessages, ...safe } = session;
           return json(res, { ...safe, running: running.has(id) });
+        }
+        if (action === "export" && req.method === "GET") {
+          if (running.has(id)) fail("請等待任務完成後再匯出。", 409);
+          res.writeHead(200, {
+            "Content-Type": "text/markdown; charset=utf-8",
+            "Content-Disposition":
+              'attachment; filename="talaria-' + id + '.md"',
+          });
+          return res.end(exportConversation(session));
         }
         if (action === "stop" && req.method === "POST") {
           running.get(id)?.abort();

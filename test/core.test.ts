@@ -296,6 +296,25 @@ test("HTTP chat streams, saves history, rejects cross-origin and invalid payload
   assert.equal(saved.messages.length, 2);
   assert.equal(saved.messages[0].status, "complete");
   assert.match(saved.messages[1].content, /示範/);
+  const exported = await fetch(
+    base + "/api/sessions/" + session.id + "/export",
+  );
+  assert.equal(exported.status, 200);
+  assert.match(
+    exported.headers.get("content-disposition")!,
+    /attachment; filename="talaria-/,
+  );
+  const markdown = await exported.text();
+  assert.ok(markdown.includes(saved.messages[1].content));
+  assert.ok(!markdown.includes("piMessages"));
+  assert.equal(
+    (
+      await fetch(base + "/api/sessions/" + session.id + "/export", {
+        headers: { Origin: "https://evil.example" },
+      })
+    ).status,
+    403,
+  );
   const memory = await (
     await request("/api/memories", { content: "<script>literal</script>" })
   ).json();

@@ -11,6 +11,7 @@ import type {
 import { asError } from "../shared/errors.ts";
 import { createSettingsUI } from "./settings.ts";
 import { $ } from "./dom.ts";
+import { modeRequirement, preferences } from "./workflow.ts";
 const state: {
   session: SessionView | null;
   sessions: SessionSummary[];
@@ -30,6 +31,46 @@ const labels: Record<string, string> = {
   hybrid: "Pi × Hermes",
   hermes: "Hermes",
 };
+let navigating = false;
+let followOutput = true;
+let runTimer: ReturnType<typeof setInterval> | undefined;
+const welcomeTemplate = $<HTMLTemplateElement>("#welcome-template");
+function draftKey() {
+  return "talaria-draft:" + (state.session?.id || "new");
+}
+function saveDraft() {
+  const text = $("#prompt").value;
+  const saved = preferences.set(draftKey(), text);
+  $("#draft-status").textContent = text
+    ? saved
+      ? "草稿已保存在此瀏覽器"
+      : "草稿暫存不可用，請先複製內容"
+    : "";
+  $<HTMLButtonElement>("#send").disabled = state.busy || !text.trim();
+}
+function restoreDraft() {
+  $("#prompt").value = preferences.get(draftKey()) || "";
+  saveDraft();
+}
+function renderWelcome() {
+  $("#messages").replaceChildren(welcomeTemplate.content.cloneNode(true));
+  if (state.status.piReady) {
+    $("[data-setup-title]").textContent = "模型已設定，開始你的第一個任務";
+    $("[data-setup-description]").textContent =
+      "在輸入框下方選擇 Pi Agent，即可使用真實模型。";
+  }
+}
+function scrollLatest(force = false) {
+  if (followOutput || force)
+    $("#messages").scrollTop = $("#messages").scrollHeight;
+}
+function updateExport() {
+  const link = $<HTMLAnchorElement>("#export-session");
+  const disabled = state.busy || !state.session?.messages.length;
+  link.setAttribute("aria-disabled", String(disabled));
+  if (disabled) link.removeAttribute("href");
+  else link.href = "/api/sessions/" + state.session!.id + "/export";
+}
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 function toast(text: string) {
   $("#toast").textContent = text;
@@ -64,12 +105,23 @@ function showView(view: string) {
   }
   if (!["chat", "memories", "skills", "settings"].includes(view)) return;
   state.view = view;
+  $("#history-panel").classList.remove("open");
+  $("#toggle-history").setAttribute("aria-expanded", "false");
+  history.replaceState(null, "", "#" + view);
   document.querySelectorAll<HTMLElement>(".view").forEach((el) => {
     el.hidden = el.id !== view + "-view";
   });
   document
     .querySelectorAll<HTMLElement>(".nav")
     .forEach((el) => el.classList.toggle("active", el.dataset.view === view));
+  document
+    .querySelectorAll(".nav")
+    .forEach((el) =>
+      el.setAttribute(
+        "aria-current",
+        (el as HTMLElement).dataset.view === view ? "page" : "false",
+      ),
+    );
   $("#page-name").textContent =
     {
       chat: "工作台",
@@ -78,28 +130,57 @@ function showView(view: string) {
       settings: "連線設定",
     }[view as "chat" | "memories" | "skills" | "settings"] ?? "";
 }
-document
-  .querySelectorAll<HTMLElement>("[data-view]")
-  .forEach((el) =>
-    el.addEventListener("click", () => showView(el.dataset.view || "chat")),
-  );
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element).closest<HTMLElement>("[data-view]");
+  if (button) showView(button.dataset.view || "chat");
+});
+window.addEventListener("hashchange", () =>
+  showView(location.hash.slice(1) || "chat"),
+);
+$("#toggle-history").addEventListener("click", () => {
+  const open = $("#toggle-history").getAttribute("aria-expanded") !== "true";
+  $("#toggle-history").setAttribute("aria-expanded", String(open));
+  $("#history-panel").classList.toggle("open", open);
+});
+$("#session-search").addEventListener("input", renderSessions);
 function renderSessions() {
   $("#sessions").replaceChildren();
-  if (!state.sessions.length) {
+  const query = $<HTMLInputElement>("#session-search")
+    .value.trim()
+    .toLocaleLowerCase();
+  const sessions = state.sessions.filter((session) =>
+    session.title.toLocaleLowerCase().includes(query),
+  );
+  if (!sessions.length) {
     const p = document.createElement("p");
     p.className = "muted";
-    p.textContent = "你的下一個想法，從這裡開始。";
+    p.textContent = query
+      ? "沒有符合的對話，試試其他關鍵字。"
+      : "你的下一個想法，從這裡開始。";
     $("#sessions").append(p);
   }
-  for (const item of state.sessions) {
+  for (const item of sessions) {
     const button = document.createElement("button");
     button.className = "session-button";
     button.classList.toggle("selected", item.id === state.session?.id);
-    button.textContent = item.title;
+    const title = document.createElement("span");
+    title.textContent = item.title;
+    const meta = document.createElement("small");
+    meta.textContent =
+      labels[item.mode] +
+      " · " +
+      (item.running ? "執行中" : item.count + " 則訊息");
+    button.append(title, meta);
+    button.setAttribute(
+      "aria-current",
+      item.id === state.session?.id ? "true" : "false",
+    );
     button.title = item.title + " · " + labels[item.mode];
     button.disabled = state.busy;
     button.addEventListener("click", () =>
-      loadSession(item.id).catch((error) => toast(error.message)),
+      loadSession(item.id).catch((error: unknown) =>
+        toast(asError(error).message),
+      ),
     );
     $("#sessions").append(button);
   }
@@ -119,6 +200,22 @@ function addMessage(role: "user" | "assistant", text: string, error = false) {
   const content = document.createElement("div");
   content.className = "message-content";
   content.textContent = text;
+  const copy = document.createElement("button");
+  copy.className = "copy-message quiet-button";
+  copy.textContent = "複製";
+  copy.setAttribute(
+    "aria-label",
+    "複製" + (role === "user" ? "你的訊息" : "Agent 回覆"),
+  );
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(content.textContent || "");
+      toast("已複製訊息。");
+    } catch {
+      toast("無法存取剪貼簿，請選取訊息文字複製。");
+    }
+  });
+  label.append(copy);
   body.append(label, content);
   item.append(avatar, body);
   $("#messages").append(item);
@@ -128,31 +225,52 @@ function renderConversation() {
   if (!state.session) return;
   $("#messages").replaceChildren();
   $("#activity").replaceChildren();
+  if (!state.session.messages.length) renderWelcome();
   for (const m of state.session.messages) {
-    addMessage(m.role, m.content, m.status === "error");
+    addMessage(
+      m.role,
+      m.content,
+      m.status === "error" || m.status === "failed",
+    );
     for (const text of m.activity || []) addActivity(text);
   }
   $("#session-title").textContent = state.session.title;
   $("#mode").value = state.session.mode;
   updateMode();
-  $("#messages").scrollTop = $("#messages").scrollHeight;
+  followOutput = true;
+  if (state.session.messages.length) scrollLatest(true);
+  else $("#messages").scrollTop = 0;
+  $("#jump-latest").hidden = true;
+  updateExport();
 }
 function updateMode() {
-  const mode = $("#mode").value;
+  const mode = $("#mode").value as Mode;
+  const requirement = modeRequirement(mode, state.status, true);
+  $("#mode-setup").hidden = !requirement;
+  $("#mode-banner").classList.toggle("needs-setup", Boolean(requirement));
   $("#mode-banner").textContent =
-    mode === "demo"
+    requirement ||
+    (mode === "demo"
       ? "示範模式 · 不會呼叫 AI，也不會消耗 API 額度"
       : mode === "hybrid"
         ? "Pi 主導任務，必要時委派 Hermes；修改與遠端工具需由你開啟。"
         : mode === "hermes"
           ? "Hermes 在 gateway 主機執行，完成後回傳結果。"
-          : "Pi 使用真實模型與本機工具；預設僅讀取工作區。";
+          : "Pi 使用真實模型與本機工具；預設僅讀取工作區。");
 }
 async function loadSession(id: string) {
-  if (state.busy) return;
-  state.session = await api<SessionView>("sessions/" + id);
+  if (state.busy || navigating) return;
+  saveDraft();
+  navigating = true;
+  try {
+    state.session = await api<SessionView>("sessions/" + id);
+  } finally {
+    navigating = false;
+  }
+  restoreDraft();
+  $("#run-status").textContent = "已載入對話";
   $("#allow-writes").checked = false;
-  localStorage.setItem("loom-session", id);
+  preferences.set("loom-session", id);
   renderConversation();
   renderSessions();
   showView("chat");
@@ -160,17 +278,25 @@ async function loadSession(id: string) {
     toast("此工作階段正在其他分頁執行，稍後重新開啟可查看結果。");
 }
 async function newSession() {
-  if (state.busy) return;
-  state.session = await post<SessionView>("sessions", {
-    mode: $("#mode").value,
-  });
-  localStorage.setItem("loom-session", state.session.id);
-  state.sessions = await api<SessionSummary[]>("sessions");
-  $("#allow-writes").checked = false;
-  renderConversation();
-  renderSessions();
-  showView("chat");
-  $("#prompt").focus();
+  if (state.busy || navigating) return;
+  saveDraft();
+  navigating = true;
+  try {
+    state.session = await post<SessionView>("sessions", {
+      mode: $("#mode").value,
+    });
+    restoreDraft();
+    $("#run-status").textContent = "準備就緒";
+    preferences.set("loom-session", state.session.id);
+    $("#allow-writes").checked = false;
+    renderConversation();
+    showView("chat");
+    state.sessions = await api<SessionSummary[]>("sessions");
+    renderSessions();
+    $("#prompt").focus({ preventScroll: true });
+  } finally {
+    navigating = false;
+  }
 }
 $("#new-session").addEventListener("click", () =>
   newSession().catch((e: unknown) => toast(asError(e).message)),
@@ -187,12 +313,25 @@ $("#mode").addEventListener("change", async () => {
     }
   }
 });
-document.querySelectorAll<HTMLElement>("[data-prompt]").forEach((el) =>
-  el.addEventListener("click", () => {
-    $("#prompt").value = el.dataset.prompt || "";
-    $("#prompt").focus();
-  }),
-);
+document.addEventListener("click", (event) => {
+  const button = (event.target as Element).closest<HTMLElement>(
+    "[data-prompt]",
+  );
+  if (!button || state.busy) return;
+  $("#prompt").value = button.dataset.prompt || "";
+  saveDraft();
+  $("#prompt").focus();
+});
+$("#prompt").addEventListener("input", saveDraft);
+$("#messages").addEventListener("scroll", () => {
+  const el = $("#messages");
+  followOutput = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  $("#jump-latest").hidden = followOutput;
+});
+$("#jump-latest").addEventListener("click", () => {
+  followOutput = true;
+  scrollLatest(true);
+});
 function addActivity(text: string) {
   if (document.querySelector("#activity .muted"))
     $("#activity").replaceChildren();
@@ -204,7 +343,10 @@ function addActivity(text: string) {
 }
 function busy(value: boolean) {
   state.busy = value;
-  $("#send").disabled = value;
+  $("#send").disabled = value || !$("#prompt").value.trim();
+  $("#messages").setAttribute("aria-busy", String(value));
+  $("#send").innerHTML = value ? "執行中…" : "開始執行 <span>↑</span>";
+  updateExport();
   $("#prompt").disabled = value;
   $("#stop").hidden = !value;
   $("#mode").disabled = value;
@@ -215,9 +357,29 @@ function busy(value: boolean) {
 }
 $("#chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (state.busy) return;
+  if (state.busy || navigating) return;
   const prompt = $("#prompt").value.trim();
   if (!prompt) return;
+  const requirement = modeRequirement(
+    $("#mode").value as Mode,
+    state.status,
+    $("#allow-writes").checked,
+  );
+  if (requirement) {
+    toast(requirement);
+    if (modeRequirement($("#mode").value as Mode, state.status, true))
+      showView("settings");
+    else $("#allow-writes").focus();
+    return;
+  }
+  const originalDraft = draftKey();
+  let failed = false;
+  const started = Date.now();
+  $("#run-status").textContent = "正在開始任務…";
+  runTimer = setInterval(() => {
+    $("#run-status").textContent =
+      "執行中 · " + Math.floor((Date.now() - started) / 1000) + " 秒";
+  }, 1000);
   let content: HTMLElement | undefined,
     output = "";
   try {
@@ -227,13 +389,18 @@ $("#chat-form").addEventListener("submit", async (event) => {
       state.session = await post<SessionView>("sessions", {
         mode: $("#mode").value,
       });
-      localStorage.setItem("loom-session", state.session.id);
+      preferences.set("loom-session", state.session.id);
       renderConversation();
     }
-    document.querySelector("#messages #welcome")?.remove();
+    document.querySelector("#messages .welcome")?.remove();
+    followOutput = true;
     addMessage("user", prompt);
-    content = addMessage("assistant", "");
+    content = addMessage("assistant", "正在準備回覆…");
+    content.classList.add("waiting");
+    scrollLatest(true);
     $("#prompt").value = "";
+    preferences.remove(originalDraft);
+    saveDraft();
     $("#activity").replaceChildren();
     const response = await fetch(
       "/api/sessions/" + state.session.id + "/chat",
@@ -255,7 +422,10 @@ $("#chat-form").addEventListener("submit", async (event) => {
       const data = JSON.parse(line) as RunEvent;
       if (data.type === "delta") {
         output += data.text;
-        if (content) content.textContent = output;
+        if (content) {
+          content.classList.remove("waiting");
+          content.textContent = output;
+        }
       }
       if (data.type === "activity") addActivity(data.text);
       if (data.type === "error") {
@@ -263,7 +433,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
         throw new Error(data.text);
       }
       if (data.type === "done") completed = true;
-      $("#messages").scrollTop = $("#messages").scrollHeight;
+      scrollLatest();
     };
     try {
       while (true) {
@@ -282,6 +452,9 @@ $("#chat-form").addEventListener("submit", async (event) => {
       reader.releaseLock();
     }
   } catch (caught) {
+    failed = true;
+    $("#prompt").value = prompt;
+    saveDraft();
     const error = asError(caught);
     if (content) {
       content.textContent = (output ? output + "\n\n" : "") + error.message;
@@ -289,18 +462,26 @@ $("#chat-form").addEventListener("submit", async (event) => {
     }
     toast(error.message);
   } finally {
-    busy(false);
+    clearInterval(runTimer);
+    content?.classList.remove("waiting");
+    $("#run-status").textContent =
+      (failed ? "任務未完成 · 草稿已保留" : "任務完成") +
+      " · " +
+      Math.max(1, Math.floor((Date.now() - started) / 1000)) +
+      " 秒";
     try {
       await refresh();
       if (state.session) {
         state.session = await api<SessionView>("sessions/" + state.session.id);
         $("#session-title").textContent = state.session.title;
+        updateExport();
       }
     } catch (cause) {
       const e = asError(cause);
       toast(e.message);
     }
-    $("#prompt").focus();
+    busy(false);
+    $("#prompt").focus({ preventScroll: true });
   }
 });
 $("#prompt").addEventListener("keydown", (event) => {
@@ -439,6 +620,9 @@ async function refresh() {
   $("#hermes-config").textContent = status.hermesReady
     ? "已設定 gateway · 實際連線於執行時確認"
     : "選用功能 · 尚未連接 gateway";
+  $("#connection-state").textContent = "本機工作空間 · 已連接";
+  updateMode();
+  if (!document.querySelector("#messages .message")) renderWelcome();
   await refreshFiles();
 }
 $("#refresh-files").addEventListener("click", () =>
@@ -448,10 +632,14 @@ const settingsUI = createSettingsUI({ api, onSaved: refresh, notify: toast });
 try {
   await refresh();
   await settingsUI.load();
-  const id = localStorage.getItem("loom-session");
+  const initialView = location.hash.slice(1);
+  restoreDraft();
+  const id = preferences.get("loom-session");
   if (id && state.sessions.some((s) => s.id === id)) await loadSession(id);
-  if (location.hash === "#settings") showView("settings");
+  showView(initialView || "chat");
 } catch (cause) {
   const e = asError(cause);
+  $("#connection-state").textContent = "工作空間連線失敗";
+  $("#run-status").textContent = "無法載入，請確認伺服器後重新整理";
   toast("無法載入工作台：" + e.message);
 }
