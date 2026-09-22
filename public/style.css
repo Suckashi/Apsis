@@ -841,6 +841,61 @@ main {
   grid-template-columns: 1fr 1fr;
   gap: 20px;
 }
+.settings-grid > * {
+  min-width: 0;
+}
+.channel-actions,
+.conversation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.conversation-actions {
+  justify-content: flex-end;
+  max-width: 300px;
+}
+.channel-actions {
+  margin-top: 16px;
+}
+.channel-error {
+  color: #a04433;
+}
+.pairing-box {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #c8ddd1;
+  background: #f1f7f3;
+  border-radius: 8px;
+}
+.pairing-box[hidden] {
+  display: none;
+}
+.connection-form #telegram-command {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+.legacy-connection {
+  grid-column: 1 / -1;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.legacy-connection summary {
+  cursor: pointer;
+  color: #597464;
+  font-size: 13px;
+}
+.legacy-connection .settings-card {
+  margin-top: 14px;
+  max-width: 650px;
+}
+.connection-form .field-help a {
+  color: #267454;
+  text-decoration: underline;
+}
 .settings-card {
   padding: 28px;
   background: white;

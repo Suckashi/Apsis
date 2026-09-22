@@ -35,6 +35,26 @@ export class Store {
         ],
       };
     }
+    if (
+      this.state.sessions.some((s) =>
+        s.messages.some((m) => m.status === "pending"),
+      )
+    ) {
+      await this.mutate((state) => {
+        for (const session of state.sessions) {
+          if (!session.messages.some((m) => m.status === "pending")) continue;
+          for (const message of session.messages)
+            if (message.status === "pending") message.status = "failed";
+          session.messages.push({
+            id: randomUUID(),
+            role: "assistant",
+            content:
+              "服務重新啟動，上次任務已中斷。請確認已完成的操作後再重試。",
+            status: "error",
+          });
+        }
+      });
+    }
     return this;
   }
   async mutate<T>(fn: (state: StoreState) => T): Promise<T> {

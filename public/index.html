@@ -82,14 +82,30 @@
                 <span class="eyebrow">BUILD WITH YOUR AGENTS</span>
                 <h1 id="session-title">把想法，交給你的工作台。</h1>
               </div>
-              <a
-                id="export-session"
-                class="quiet-button"
-                aria-disabled="true"
-                download
-                title="下載目前對話為 Markdown"
-                >匯出對話 ↗</a
-              >
+              <div class="conversation-actions">
+                <button
+                  id="background-stop"
+                  type="button"
+                  class="quiet-button"
+                  hidden
+                >
+                  停止背景任務</button
+                ><button
+                  id="resume-bot"
+                  type="button"
+                  class="quiet-button"
+                  hidden
+                >
+                  複製 Telegram 續聊指令</button
+                ><a
+                  id="export-session"
+                  class="quiet-button"
+                  aria-disabled="true"
+                  download
+                  title="下載目前對話為 Markdown"
+                  >匯出對話 ↗</a
+                >
+              </div>
             </div>
             <div class="mode-strip">
               <div id="mode-banner" class="mode-banner">
@@ -110,7 +126,7 @@
                   <div class="weave-symbol">⌘</div>
                   <h2>從一個想法開始。</h2>
                   <p>
-                    讓 Pi 執行、讓經驗留下。<br />把任務、記憶與技能放在同一個工作空間。
+                    在網頁或 Telegram 交辦，讓 Talaria 完成。<br />把任務、記憶與技能放在同一個工作空間。
                   </p>
                   <div class="onboarding">
                     <span class="step-index">01</span>
@@ -167,9 +183,11 @@
                   ><span>引擎</span
                   ><select id="mode" aria-label="Agent 模式">
                     <option value="demo">示範模式</option>
-                    <option value="pi">Pi Agent</option>
-                    <option value="hybrid">Pi × Hermes</option>
-                    <option value="hermes">Hermes</option>
+                    <option value="pi">Talaria</option>
+                    <option value="hybrid" hidden>
+                      外部 Hermes 協作（進階）
+                    </option>
+                    <option value="hermes" hidden>外部 Hermes（進階）</option>
                   </select></label
                 ><button id="stop" class="stop-button" type="button" hidden>
                   停止</button
@@ -189,14 +207,16 @@
             <div class="panel-heading">執行環境 <span>↗</span></div>
             <div class="engine-card">
               <div class="engine-icon">π</div>
-              <div><strong>Pi Agent</strong><small>推理與工具執行</small></div>
+              <div><strong>Talaria</strong><small>模型與工具執行</small></div>
               <span id="pi-state" class="state-tag">未設定</span>
             </div>
             <div class="connector-line"></div>
             <div class="engine-card">
-              <div class="engine-icon hermes">H</div>
-              <div><strong>Hermes</strong><small>委派與進階能力</small></div>
-              <span id="hermes-state" class="state-tag">未連接</span>
+              <div class="engine-icon hermes">⌁</div>
+              <div>
+                <strong>記憶與技能</strong><small>Web 與 bot 共用</small>
+              </div>
+              <span id="context-state" class="state-tag ready">已啟用</span>
             </div>
             <button class="text-button" data-view="settings">
               管理連線設定 →
@@ -286,8 +306,8 @@
               <div class="connection-title">
                 <span class="engine-icon">π</span>
                 <div>
-                  <h2>Pi Agent</h2>
-                  <p>模型推理與本機工具</p>
+                  <h2>Talaria 模型</h2>
+                  <p>Web 與 bot 共用這個模型</p>
                 </div>
                 <span class="setting-number">01</span>
               </div>
@@ -353,7 +373,7 @@
                   >
                 </div>
                 <button type="submit" class="primary settings-save">
-                  儲存 Pi 設定 <span>→</span>
+                  儲存模型設定 <span>→</span>
                 </button>
               </fieldset>
               <p
@@ -364,75 +384,191 @@
               ></p>
               <div id="pi-config" class="config-status"></div>
             </form>
-            <form
-              id="hermes-settings-form"
-              class="settings-card connection-form"
-            >
+            <form id="telegram-form" class="settings-card connection-form">
               <div class="connection-title">
-                <span class="engine-icon hermes">H</span>
+                <span class="engine-icon">↗</span>
                 <div>
-                  <h2>Hermes</h2>
-                  <p>連接既有 gateway（選用）</p>
+                  <h2>Telegram Bot</h2>
+                  <p>隨時交辦，在 Web 接著做</p>
                 </div>
                 <span class="setting-number">02</span>
               </div>
-              <fieldset id="hermes-settings-fields" disabled>
-                <label for="hermes-url">Gateway 網址</label>
-                <input
-                  id="hermes-url"
-                  name="url"
-                  type="url"
-                  required
-                  maxlength="2048"
-                  placeholder="http://127.0.0.1:8642"
-                  aria-describedby="hermes-url-help"
-                />
-                <small id="hermes-url-help" class="field-help"
-                  >填入你已啟動的 Hermes API server 網址。</small
+              <p class="field-help">
+                在 Telegram 的
+                <a
+                  href="https://t.me/BotFather"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >@BotFather</a
                 >
-                <label for="hermes-model">模型名稱</label>
-                <input
-                  id="hermes-model"
-                  name="model"
-                  required
-                  maxlength="256"
-                  placeholder="hermes-agent"
-                  autocomplete="off"
-                />
-                <label for="hermes-api-key">Gateway API key</label>
-                <input
-                  id="hermes-api-key"
-                  name="apiKey"
+                建立自己的 Bot，再填入 Token。使用長輪詢，不需要公開網址或
+                Cloudflare Tunnel。
+              </p>
+              <fieldset id="telegram-fields" disabled>
+                <label for="telegram-token">Bot Token</label
+                ><input
+                  id="telegram-token"
                   type="password"
-                  maxlength="4096"
+                  maxlength="160"
                   autocomplete="new-password"
                   spellcheck="false"
-                  placeholder="貼上 gateway API key"
-                  aria-describedby="hermes-key-help"
+                  placeholder="貼上 BotFather 提供的 Token"
                 />
-                <small id="hermes-key-help" class="field-help"></small>
-                <label class="remove-key"
-                  ><input id="hermes-clear-key" type="checkbox" />移除 gateway
-                  金鑰</label
+                <small class="field-help"
+                  >Token 只儲存在本機，不會回填。更換 Token
+                  會清除帳號配對。</small
                 >
-                <button type="submit" class="primary settings-save">
-                  儲存 Hermes 設定 <span>→</span>
+                <label class="remove-key"
+                  ><input id="telegram-clear" type="checkbox" />移除 Token
+                  並停用 Bot</label
+                >
+                <label class="remove-key"
+                  ><input id="telegram-enabled" type="checkbox" />啟用 Telegram
+                  Bot</label
+                >
+                <label class="remove-key"
+                  ><input id="telegram-writes" type="checkbox" />允許 Bot
+                  修改工作區、保存記憶與技能</label
+                >
+                <label for="telegram-group">允許回覆的群組 ID（選填）</label
+                ><input
+                  id="telegram-group"
+                  type="text"
+                  inputmode="text"
+                  placeholder="例如 -1001234567890"
+                  maxlength="17"
+                />
+                <small class="field-help"
+                  >留空只開放私訊。先配對，再在群組輸入 /where@你的Bot 取得
+                  ID。填入後，只回應你在該群組的 @
+                  或回覆；結果可能包含你的工作區、記憶與歷史內容，群組成員都看得到。</small
+                >
+                <button class="primary settings-save" type="submit">
+                  儲存 Bot 設定 <span>→</span>
                 </button>
               </fieldset>
               <p
-                id="hermes-save-status"
+                id="telegram-save-status"
                 class="save-status"
                 role="status"
-                aria-live="polite"
               ></p>
-              <div id="hermes-config" class="config-status"></div>
+              <div class="config-status">
+                <strong id="telegram-state">正在讀取…</strong>
+                <p id="telegram-owner"></p>
+                <p id="telegram-error" class="channel-error" role="status"></p>
+              </div>
+              <div class="channel-actions">
+                <button
+                  id="telegram-test"
+                  type="button"
+                  class="quiet-button"
+                  disabled
+                >
+                  測試連線</button
+                ><button
+                  id="telegram-pair"
+                  type="button"
+                  class="quiet-button"
+                  disabled
+                >
+                  產生配對碼</button
+                ><button
+                  id="telegram-unpair"
+                  type="button"
+                  class="quiet-button"
+                  disabled
+                >
+                  解除帳號綁定
+                </button>
+              </div>
+              <div id="telegram-pairing" class="pairing-box" hidden>
+                <label for="telegram-command">一次性配對指令</label
+                ><input
+                  id="telegram-command"
+                  type="text"
+                  readonly
+                  autocomplete="off"
+                /><button id="telegram-copy" type="button" class="quiet-button">
+                  複製指令</button
+                ><small id="telegram-expiry" class="field-help"></small>
+              </div>
             </form>
+            <details class="legacy-connection">
+              <summary>進階：連接既有外部 Hermes 服務</summary>
+              <p class="field-help">
+                Talaria 已內建記憶與技能，不需要部署 Hermes。此整合保留給既有
+                gateway 使用者。
+              </p>
+              <form
+                id="hermes-settings-form"
+                class="settings-card connection-form"
+              >
+                <div class="connection-title">
+                  <span class="engine-icon hermes">H</span>
+                  <div>
+                    <h2>外部 Hermes</h2>
+                    <p>連接既有 gateway（選用）</p>
+                  </div>
+                  <span class="setting-number">02</span>
+                </div>
+                <fieldset id="hermes-settings-fields" disabled>
+                  <label for="hermes-url">Gateway 網址</label>
+                  <input
+                    id="hermes-url"
+                    name="url"
+                    type="url"
+                    required
+                    maxlength="2048"
+                    placeholder="http://127.0.0.1:8642"
+                    aria-describedby="hermes-url-help"
+                  />
+                  <small id="hermes-url-help" class="field-help"
+                    >填入你已啟動的 Hermes API server 網址。</small
+                  >
+                  <label for="hermes-model">模型名稱</label>
+                  <input
+                    id="hermes-model"
+                    name="model"
+                    required
+                    maxlength="256"
+                    placeholder="hermes-agent"
+                    autocomplete="off"
+                  />
+                  <label for="hermes-api-key">Gateway API key</label>
+                  <input
+                    id="hermes-api-key"
+                    name="apiKey"
+                    type="password"
+                    maxlength="4096"
+                    autocomplete="new-password"
+                    spellcheck="false"
+                    placeholder="貼上 gateway API key"
+                    aria-describedby="hermes-key-help"
+                  />
+                  <small id="hermes-key-help" class="field-help"></small>
+                  <label class="remove-key"
+                    ><input id="hermes-clear-key" type="checkbox" />移除 gateway
+                    金鑰</label
+                  >
+                  <button type="submit" class="primary settings-save">
+                    儲存 Hermes 設定 <span>→</span>
+                  </button>
+                </fieldset>
+                <p
+                  id="hermes-save-status"
+                  class="save-status"
+                  role="status"
+                  aria-live="polite"
+                ></p>
+                <div id="hermes-config" class="config-status"></div>
+              </form>
+            </details>
           </div>
           <div class="setup-note">
-            <strong>儲存後，回到工作台選擇 Pi Agent 或 Pi × Hermes。</strong>
+            <strong>設定一次模型，Web 和 Telegram 都能使用。</strong>
             <p>
-              金鑰儲存在本機伺服器，不會回填至介面。「已設定」代表設定已保存；實際連線於送出任務時確認。Hermes
-              遠端工具使用 gateway 主機的權限與檔案。
+              金鑰儲存在本機伺服器，不會回填至介面。Telegram
+              對話會出現在左側歷史，也能從 Web 接續與停止任務。
             </p>
             <button id="refresh-status" class="text-button" type="button">
               重新載入已儲存設定 ↻

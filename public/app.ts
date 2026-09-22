@@ -10,6 +10,7 @@ import type {
 } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import { createSettingsUI } from "./settings.ts";
+import { createTelegramUI } from "./telegram.ts";
 import { $ } from "./dom.ts";
 import { modeRequirement, preferences } from "./workflow.ts";
 import { renderMarkdown } from "./markdown.ts";
@@ -28,9 +29,9 @@ const state: {
 };
 const labels: Record<string, string> = {
   demo: "示範模式",
-  pi: "Pi Agent",
-  hybrid: "Pi × Hermes",
-  hermes: "Hermes",
+  pi: "Talaria",
+  hybrid: "外部 Hermes 協作",
+  hermes: "外部 Hermes",
 };
 let navigating = false;
 let followOutput = true;
@@ -58,7 +59,7 @@ function renderWelcome() {
   if (state.status.piReady) {
     $("[data-setup-title]").textContent = "模型已設定，開始你的第一個任務";
     $("[data-setup-description]").textContent =
-      "在輸入框下方選擇 Pi Agent，即可使用真實模型。";
+      "直接交辦任務，或到連線設定接上你的 Telegram Bot。";
   }
 }
 function scrollLatest(force = false) {
@@ -67,7 +68,8 @@ function scrollLatest(force = false) {
 }
 function updateExport() {
   const link = $<HTMLAnchorElement>("#export-session");
-  const disabled = state.busy || !state.session?.messages.length;
+  const disabled =
+    state.busy || !!state.session?.running || !state.session?.messages.length;
   link.setAttribute("aria-disabled", String(disabled));
   if (disabled) link.removeAttribute("href");
   else link.href = "/api/sessions/" + state.session!.id + "/export";
@@ -170,6 +172,7 @@ function renderSessions() {
     title.textContent = item.title;
     const meta = document.createElement("small");
     meta.textContent =
+      (item.source === "telegram" ? "Telegram · " : "Web · ") +
       labels[item.mode] +
       " · " +
       (item.running ? "執行中" : item.count + " 則訊息");
@@ -245,6 +248,12 @@ function renderConversation() {
     );
     for (const text of m.activity || []) addActivity(text);
   }
+  if (state.session.running && state.session.live) {
+    addMessage("assistant", state.session.live.text || "正在處理任務…");
+    for (const text of state.session.live.activity) addActivity(text);
+  }
+  $("#background-stop").hidden = !state.session.running || state.busy;
+  $("#resume-bot").hidden = state.session.mode !== "pi";
   $("#session-title").textContent = state.session.title;
   $("#mode").value = state.session.mode;
   updateMode();
@@ -256,6 +265,10 @@ function renderConversation() {
 }
 function updateMode() {
   const mode = $("#mode").value as Mode;
+  for (const option of $("#mode").options) {
+    if (option.value === "hybrid" || option.value === "hermes")
+      option.hidden = !state.status.hermesReady && option.value !== mode;
+  }
   const requirement = modeRequirement(mode, state.status, true);
   $("#mode-setup").hidden = !requirement;
   $("#mode-banner").classList.toggle("needs-setup", Boolean(requirement));
@@ -267,7 +280,7 @@ function updateMode() {
         ? "Pi 主導任務，必要時委派 Hermes；修改與遠端工具需由你開啟。"
         : mode === "hermes"
           ? "Hermes 在 gateway 主機執行，完成後回傳結果。"
-          : "Pi 使用真實模型與本機工具；預設僅讀取工作區。");
+          : "Talaria · 自動選用工具與技能，與 bot 共用記憶；預設僅讀取工作區。");
 }
 async function loadSession(id: string) {
   if (state.busy || navigating) return;
@@ -285,8 +298,7 @@ async function loadSession(id: string) {
   renderConversation();
   renderSessions();
   showView("chat");
-  if (state.session.running)
-    toast("此工作階段正在其他分頁執行，稍後重新開啟可查看結果。");
+  if (state.session.running) toast("任務正在執行，此頁會自動更新進度。");
 }
 async function newSession() {
   if (state.busy || navigating) return;
@@ -369,6 +381,10 @@ function busy(value: boolean) {
 $("#chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.busy || navigating) return;
+  if (state.session?.running) {
+    toast("此對話仍在執行，請等待完成或先停止。");
+    return;
+  }
   const prompt = $("#prompt").value.trim();
   if (!prompt) return;
   const requirement = modeRequirement(
@@ -626,8 +642,8 @@ async function refresh() {
   $("#skill-count").textContent = String(skills.length);
   $("#pi-state").textContent = status.piReady ? "已設定" : "未設定";
   $("#pi-state").classList.toggle("ready", status.piReady);
-  $("#hermes-state").textContent = status.hermesReady ? "已設定" : "未連接";
-  $("#hermes-state").classList.toggle("ready", status.hermesReady);
+  $("#context-state").textContent =
+    memories.length + " 記憶 · " + skills.length + " 技能";
   $("#pi-config").textContent = status.piReady
     ? (status.provider === "ollama" ? "本機模型 · " : "已設定 · ") +
       status.provider +
@@ -648,13 +664,73 @@ $("#refresh-files").addEventListener("click", () =>
   refreshFiles().catch((e: unknown) => toast(asError(e).message)),
 );
 const settingsUI = createSettingsUI({ api, onSaved: refresh, notify: toast });
+const telegramUI = createTelegramUI(api, toast);
+$("#background-stop").addEventListener("click", async () => {
+  if (!state.session) return;
+  try {
+    await post("sessions/" + state.session.id + "/stop", {});
+    toast("已送出停止要求。");
+  } catch (error) {
+    toast(asError(error).message);
+  }
+});
+$("#resume-bot").addEventListener("click", async () => {
+  if (!state.session) return;
+  try {
+    await navigator.clipboard.writeText("/resume " + state.session.id);
+    toast("已複製續聊指令，請私訊已配對的 Telegram Bot。");
+  } catch {
+    toast("無法存取剪貼簿。");
+  }
+});
+let polling = false;
+setInterval(async () => {
+  if (polling || document.hidden || state.busy || navigating) return;
+  polling = true;
+  try {
+    const sessions = await api<SessionSummary[]>("sessions");
+    if (state.busy || navigating) return;
+    state.sessions = sessions;
+    renderSessions();
+    const id = state.session?.id;
+    const summary = sessions.find((s) => s.id === id);
+    if (
+      id &&
+      summary &&
+      (summary.running ||
+        state.session?.running ||
+        summary.count !== state.session?.messages.length)
+    ) {
+      const current = await api<SessionView>("sessions/" + id);
+      if (state.busy || navigating || state.session?.id !== id) return;
+      const position = $("#messages").scrollTop;
+      const follow = followOutput;
+      state.session = current;
+      renderConversation();
+      followOutput = follow;
+      if (!follow) $("#messages").scrollTop = position;
+      $("#run-status").textContent = current.running
+        ? "任務執行中 · 自動更新"
+        : "對話已同步";
+    }
+  } catch {
+    /* Temporary network failures should not discard drafts. */
+  } finally {
+    polling = false;
+  }
+}, 2000);
 try {
   await refresh();
   await settingsUI.load();
+  await telegramUI.load();
   const initialView = location.hash.slice(1);
   restoreDraft();
   const id = preferences.get("loom-session");
   if (id && state.sessions.some((s) => s.id === id)) await loadSession(id);
+  else if (state.status.piReady) {
+    $("#mode").value = "pi";
+    updateMode();
+  }
   showView(initialView || "chat");
 } catch (cause) {
   const e = asError(cause);

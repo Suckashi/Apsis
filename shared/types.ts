@@ -19,6 +19,7 @@ export interface ChatMessage {
   activity?: string[];
 }
 export interface Session {
+  source?: "web" | "telegram";
   id: string;
   title: string;
   mode: Mode;
@@ -26,7 +27,10 @@ export interface Session {
   messages: ChatMessage[];
   piMessages: AgentMessage[];
 }
-export type SessionView = Omit<Session, "piMessages"> & { running?: boolean };
+export type SessionView = Omit<Session, "piMessages"> & {
+  running?: boolean;
+  live?: { text: string; activity: string[] };
+};
 export type SessionSummary = Omit<Session, "piMessages" | "messages"> & {
   count: number;
   running: boolean;
@@ -74,4 +78,16 @@ export type Api = <T = unknown>(
 export interface WorkspaceFile {
   name: string;
   type: "directory" | "file";
+}
+export interface TelegramView {
+  configured: boolean;
+  enabled: boolean;
+  allowWrites: boolean;
+  groupId: string;
+  ownerId: string;
+  username: string;
+  status: "disabled" | "connecting" | "connected" | "error";
+  error: string;
+  running: number;
+  pairingExpiresAt: string;
 }

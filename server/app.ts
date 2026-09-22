@@ -2,7 +2,7 @@ import { discoverOllama } from "./ollama.ts";
 import { exportConversation } from "../shared/export.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Environment, Session, Skill, RunEvent } from "../shared/types.ts";
+import type { Environment, Session, Skill } from "../shared/types.ts";
 import type { RunOptions } from "./agent.ts";
 import { asError } from "../shared/errors.ts";
 import { createServer } from "node:http";
@@ -13,6 +13,8 @@ import { Store } from "./store.ts";
 import { Settings } from "./settings.ts";
 import { Workspace } from "./workspace.ts";
 import { configuration, runAgent } from "./agent.ts";
+import { TaskService } from "./tasks.ts";
+import { TelegramChannel, type TelegramCall } from "./telegram.ts";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
 const assets: Record<string, [string, string]> = {
@@ -56,6 +58,7 @@ function json(res: ServerResponse, value: unknown, status = 200) {
 }
 
 export interface AppOptions {
+  telegramCall?: TelegramCall;
   dataDir?: string;
   workspaceDir?: string;
   env?: Environment;
@@ -68,11 +71,18 @@ export async function createApp({
   workspaceDir = "workspace",
   env = process.env,
   runner = runAgent,
+  telegramCall,
 }: AppOptions = {}) {
   const store = await new Store(dataDir).init();
   const settings = await new Settings(dataDir, env).init();
   const workspace = await new Workspace(workspaceDir).init();
-  const running = new Map<string, AbortController>();
+  const tasks = new TaskService(store, workspace, settings, runner);
+  const running = tasks.running;
+  const telegram = await new TelegramChannel(
+    dataDir,
+    tasks,
+    telegramCall,
+  ).init();
   const server = createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-store");
@@ -127,6 +137,24 @@ export async function createApp({
         });
       if (req.method === "GET" && path === "/api/settings")
         return json(res, settings.view());
+      if (path === "/api/channels/telegram") {
+        if (req.method === "GET") return json(res, telegram.view());
+        if (req.method === "POST")
+          return json(res, await telegram.update(await body(req)));
+      }
+      if (req.method === "POST" && path.startsWith("/api/channels/telegram/")) {
+        await body(req);
+        if (path.endsWith("/pairing"))
+          return json(res, telegram.createPairing());
+        if (path.endsWith("/unpair")) return json(res, await telegram.unpair());
+        if (path.endsWith("/test")) {
+          try {
+            return json(res, await telegram.testConnection());
+          } catch (error) {
+            fail(asError(error).message);
+          }
+        }
+      }
       const settingsMatch = path.match(/^\/api\/settings\/(pi|hermes)$/);
       if (req.method === "POST" && settingsMatch)
         return json(
@@ -147,15 +175,7 @@ export async function createApp({
         const mode = input.mode || "demo";
         if (typeof mode !== "string" || !modes.includes(mode))
           fail("未知模式。");
-        const session: Session = {
-          id: randomUUID(),
-          title: "新的工作階段",
-          mode: mode as Session["mode"],
-          createdAt: new Date().toISOString(),
-          messages: [],
-          piMessages: [],
-        };
-        await store.mutate((s) => s.sessions.unshift(session));
+        const session = await tasks.create(mode as Session["mode"]);
         return json(res, session, 201);
       }
       const match = path.match(
@@ -166,8 +186,7 @@ export async function createApp({
         const session = store.state.sessions.find((s) => s.id === id);
         if (!session) fail("找不到工作階段。", 404);
         if (!action && req.method === "GET") {
-          const { piMessages, ...safe } = session;
-          return json(res, { ...safe, running: running.has(id) });
+          return json(res, tasks.view(id));
         }
         if (action === "export" && req.method === "GET") {
           if (running.has(id)) fail("請等待任務完成後再匯出。", 409);
@@ -179,7 +198,7 @@ export async function createApp({
           return res.end(exportConversation(session));
         }
         if (action === "stop" && req.method === "POST") {
-          running.get(id)?.abort();
+          tasks.stop(id);
           return json(res, { ok: true });
         }
         if (action === "chat" && req.method === "POST") {
@@ -189,98 +208,33 @@ export async function createApp({
           if (typeof input.allowWrites !== "boolean")
             fail("allowWrites 必須為布林值。");
           if (running.has(id)) fail("此工作階段正在執行。", 409);
-          const runEnv = settings.environment();
           const controller = new AbortController();
-          running.set(id, controller);
-          const timer = setTimeout(() => controller.abort(), 300000);
           const onClose = () => {
             if (!res.writableEnded) controller.abort();
           };
           res.on("close", onClose);
-          let output = "";
-          const activity: string[] = [];
-          const userId = randomUUID();
+          let emittedError = false;
           try {
-            await store.mutate((s) => {
-              const row = s.sessions.find((x) => x.id === id)!;
-              row.title = row.messages.length ? row.title : prompt.slice(0, 44);
-              row.messages.push({
-                id: userId,
-                role: "user",
-                content: prompt,
-                status: "pending",
-              });
-            });
-            res.writeHead(200, {
-              "Content-Type": "application/x-ndjson; charset=utf-8",
-            });
-            const emit = (event: RunEvent) => {
-              if (event.type === "delta") output += event.text;
-              if (event.type === "activity") activity.push(event.text);
-              if (!res.destroyed) res.write(JSON.stringify(event) + "\n");
-            };
-            const result = await runner({
-              mode: session.mode,
+            await tasks.run(
+              id,
               prompt,
-              session: structuredClone(session),
-              store,
-              workspace,
-              allowWrites: input.allowWrites,
-              emit,
-              signal: controller.signal,
-              env: runEnv,
-            });
-            controller.signal.throwIfAborted();
-            await store.mutate((s) => {
-              const row = s.sessions.find((x) => x.id === id)!;
-              row.messages.find((m) => m.id === userId)!.status = "complete";
-              row.messages.push({
-                id: randomUUID(),
-                role: "assistant",
-                content: result.text,
-                status: "complete",
-                activity,
-              });
-              if (result.piMessages) row.piMessages = result.piMessages;
-            });
-            emit({ type: "done" });
-          } catch (caught) {
-            const error = asError(caught);
-            let message = controller.signal.aborted
-              ? "已停止執行。"
-              : String(error.message || "執行失敗。");
-            for (const key of [
-              runEnv.OPENAI_API_KEY,
-              runEnv.ANTHROPIC_API_KEY,
-              runEnv.HERMES_API_KEY,
-            ].filter((key): key is string => Boolean(key)))
-              message = message.replaceAll(key, "[redacted]");
-            await store.mutate((s) => {
-              const row = s.sessions.find((x) => x.id === id)!;
-              const user = row.messages.find((m) => m.id === userId);
-              if (user) user.status = "failed";
-              row.messages.push({
-                id: randomUUID(),
-                role: "assistant",
-                content: output ? output + "\n\n" + message : message,
-                status: "error",
-                activity,
-              });
-            });
-            if (!res.destroyed) {
-              if (!res.headersSent)
-                res.writeHead(200, {
-                  "Content-Type": "application/x-ndjson; charset=utf-8",
-                });
-              res.write(
-                JSON.stringify({ type: "error", text: message }) + "\n",
-              );
-            }
+              input.allowWrites,
+              (event) => {
+                if (event.type === "error") emittedError = true;
+                if (res.destroyed) return;
+                if (!res.headersSent)
+                  res.writeHead(200, {
+                    "Content-Type": "application/x-ndjson; charset=utf-8",
+                  });
+                res.write(JSON.stringify(event) + "\n");
+              },
+              controller.signal,
+            );
+          } catch (error) {
+            if (!emittedError) throw error;
           } finally {
-            clearTimeout(timer);
-            running.delete(id);
             res.off("close", onClose);
-            res.end();
+            if (res.headersSent) res.end();
           }
           return;
         }
@@ -339,7 +293,9 @@ export async function createApp({
     }
   });
   server.on("close", () => {
-    for (const controller of running.values()) controller.abort();
+    tasks.stopAll();
+    void telegram.stop();
   });
-  return { server, store, workspace };
+  server.once("listening", () => telegram.start());
+  return { server, store, workspace, tasks, telegram };
 }
