@@ -53,7 +53,7 @@ export function createShareGateway({
   const server = createServer(async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Referrer-Policy", "same-origin");
     res.setHeader(
       "Content-Security-Policy",
       "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
@@ -182,7 +182,7 @@ export function createShareGateway({
             ...response.headers,
             "Cache-Control": "no-store",
             "X-Talaria-Shared": "1",
-            "Referrer-Policy": "no-referrer",
+            "Referrer-Policy": "same-origin",
           });
           response.on("error", () => res.destroy());
           response.pipe(res);

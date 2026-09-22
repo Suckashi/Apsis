@@ -42,7 +42,7 @@ Remote login uses an HttpOnly, Secure, SameSite cookie, expires after eight hour
 
 Press Ctrl+C in the sharing terminal to close the tunnel and its gateway. A pre-existing local dev server stays running; a dev server started by the share command stops with it. Restarting sharing replaces the URL, password and all login sessions. Your computer must remain awake and online; Ollama must also be running for local-model tasks.
 
-Quick Tunnels are intended for development, have no uptime guarantee, and do not support SSE. Talaria uses fetch with NDJSON instead; chunk timing over an actual tunnel still needs external verification. For a permanent URL with Cloudflare Access, configure an owned domain and an Access policy separately. That deployment is not included in this temporary-sharing command.
+Quick Tunnels are intended for development, have no uptime guarantee, and do not support SSE. Talaria uses fetch with NDJSON instead. A live Quick Tunnel test verified password login/logout, anonymous and cross-origin rejection, Qwen replies, and incremental delivery (25 received chunks in a short demo run). For a permanent URL with Cloudflare Access, configure an owned domain and an Access policy separately. That deployment is not included in this temporary-sharing command.
 
 ## What works
 

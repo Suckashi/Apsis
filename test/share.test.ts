@@ -114,6 +114,8 @@ test("share gateway fails closed, authenticates exact origin and strips forwarde
   );
   assert.equal((await login(port, "wrong")).status, 401);
   assert.equal(hits, 0);
+  const loginPage = await call(port, "/__share/login");
+  assert.equal(loginPage.headers["referrer-policy"], "same-origin");
   const response = await login(port);
   assert.equal(response.status, 303);
   const setCookie = response.headers["set-cookie"]![0];
