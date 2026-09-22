@@ -1,4 +1,4 @@
-# AgentLoom
+# Talaria
 
 A local-first agent workspace that combines **Pi's Node.js agent runtime**, persistent memory and reusable skills, with an **optional real Hermes Agent gateway**.
 
@@ -9,8 +9,8 @@ A local-first agent workspace that combines **Pi's Node.js agent runtime**, pers
 Requires **Node.js 22.19+** (Node 24 LTS recommended) and npm.
 
 ```sh
-git clone https://github.com/Suckashi/AgentLoom.git
-cd AgentLoom
+git clone https://github.com/Suckashi/Talaria.git
+cd Talaria
 npm ci
 npm run dev
 ```
@@ -58,7 +58,7 @@ Restart `npm run dev` after editing `.env`. Keys stay on the server and are not 
 
 ## Connect a real Hermes Agent (optional)
 
-Hermes is an independent upstream application. **AgentLoom does not reimplement or bundle the Python Hermes runtime.** Your Node.js development environment stays independent; point the connector at a local or remote Hermes installation.
+Hermes is an independent upstream application. **Talaria does not reimplement or bundle the Python Hermes runtime.** Your Node.js development environment stays independent; point the connector at a local or remote Hermes installation.
 
 On the Hermes host, configure its `~/.hermes/.env`:
 
@@ -67,7 +67,7 @@ API_SERVER_ENABLED=true
 API_SERVER_KEY=your-gateway-secret
 ```
 
-Then run `hermes gateway` there. In AgentLoom's `.env`:
+Then run `hermes gateway` there. In Talaria's `.env`:
 
 ```dotenv
 HERMES_URL=http://127.0.0.1:8642
@@ -75,7 +75,7 @@ HERMES_API_KEY=your-gateway-secret
 HERMES_MODEL=hermes-agent
 ```
 
-Both a gateway root URL and a URL ending in `/v1` are accepted. Select **Pi × Hermes** or **Hermes** and explicitly enable **允許修改 / 遠端工具**. The gateway may execute tools on its own host, using its own files, permissions, memory and skills. Its workspace is **not** automatically synchronized with AgentLoom's local workspace.
+Both a gateway root URL and a URL ending in `/v1` are accepted. Select **Pi × Hermes** or **Hermes** and explicitly enable **允許修改 / 遠端工具**. The gateway may execute tools on its own host, using its own files, permissions, memory and skills. Its workspace is **not** automatically synchronized with Talaria's local workspace.
 
 The connector uses the [documented Hermes Chat Completions API](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/) with Bearer authentication. Direct Hermes mode sends successful conversation turns each time; delegated Pi tasks are self-contained. Hermes results currently arrive when the remote call finishes; Pi's own text streams live.
 
@@ -87,7 +87,7 @@ The connector uses the [documented Hermes Chat Completions API](https://hermes-a
 - `workspace/` is the only directory accessible through Pi file tools. Put the files you want the agent to work on there.
 - Both paths are created on first start and ignored by Git.
 - Memories and skills are included as reference context at the start of each Pi run. The current prompt budget includes up to 16,000 characters of memories and 24,000 characters of skills.
-- These are **AgentLoom's own Node.js implementations**, inspired by durable agent workflows; they are not a port of Hermes' memory/skill engine. Hermes continues to use its own capabilities on the gateway.
+- These are **Talaria's own Node.js implementations**, inspired by durable agent workflows; they are not a port of Hermes' memory/skill engine. Hermes continues to use its own capabilities on the gateway.
 - Pi can save new memories and skills when the model decides it is useful and writes are enabled. There is no automatic offline learning worker.
 - File tools are UTF-8 oriented, limit content to 256 KB, reject hidden paths, traversal and symlinks, and offer no shell execution.
 
@@ -136,7 +136,7 @@ The tests run the actual Pi SDK with a deterministic mock model transport to ver
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent) — independently operated optional gateway.
 - [Hermes API documentation](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/).
 
-AgentLoom is an independent integration and is not affiliated with either upstream project.
+Talaria is an independent integration and is not affiliated with either upstream project.
 
 ## Optional GitHub Actions
 

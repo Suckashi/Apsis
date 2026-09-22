@@ -1,4 +1,4 @@
-# Contributing to AgentLoom
+# Contributing to Talaria
 
 1. Install Node.js 22.19+ and run `npm ci`.
 2. Run `npm run dev`; demo mode needs no credentials.
