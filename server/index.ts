@@ -1,4 +1,5 @@
-import { createApp } from "./app.js";
+import { asError } from "../shared/errors.ts";
+import { createApp } from "./app.ts";
 const port = Number(process.env.PORT || 3100);
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error("PORT 必須是 1–65535 的整數。");
@@ -12,7 +13,7 @@ server.listen(port, "127.0.0.1", () =>
 );
 server.on("error", (error) => {
   console.error(
-    error.code === "EADDRINUSE"
+    asError(error).code === "EADDRINUSE"
       ? "Port " + port + " 已被使用；請修改 .env 的 PORT。"
       : error.message,
   );

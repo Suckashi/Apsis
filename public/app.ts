@@ -1,19 +1,37 @@
-const $ = (selector) => document.querySelector(selector);
-const state = {
+import type {
+  Mode,
+  SessionView,
+  SessionSummary,
+  Memory,
+  Skill,
+  Status,
+  WorkspaceFile,
+  RunEvent,
+} from "../shared/types.ts";
+import { asError } from "../shared/errors.ts";
+import { createSettingsUI } from "./settings.ts";
+import { $ } from "./dom.ts";
+const state: {
+  session: SessionView | null;
+  sessions: SessionSummary[];
+  busy: boolean;
+  view: string;
+  status: Partial<Status>;
+} = {
   session: null,
   sessions: [],
   busy: false,
   view: "chat",
   status: {},
 };
-const labels = {
+const labels: Record<string, string> = {
   demo: "示範模式",
   pi: "Pi Agent",
   hybrid: "Pi × Hermes",
   hermes: "Hermes",
 };
-let toastTimer;
-function toast(text) {
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+function toast(text: string) {
   $("#toast").textContent = text;
   $("#toast").hidden = false;
   clearTimeout(toastTimer);
@@ -21,7 +39,10 @@ function toast(text) {
     $("#toast").hidden = true;
   }, 5000);
 }
-async function api(path, options = {}) {
+async function api<T = unknown>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
   const response = await fetch("/api/" + path, {
     ...options,
     headers: {
@@ -30,35 +51,37 @@ async function api(path, options = {}) {
       ...options.headers,
     },
   });
-  const data = await response.json();
+  const data = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new Error(data.error || "請求失敗。");
   return data;
 }
-const post = (path, data) =>
-  api(path, { method: "POST", body: JSON.stringify(data) });
-function showView(view) {
+const post = <T = unknown>(path: string, data: unknown) =>
+  api<T>(path, { method: "POST", body: JSON.stringify(data) });
+function showView(view: string) {
   if (state.busy && view !== "chat") {
     toast("請先停止或等待目前任務完成。");
     return;
   }
+  if (!["chat", "memories", "skills", "settings"].includes(view)) return;
   state.view = view;
-  document.querySelectorAll(".view").forEach((el) => {
+  document.querySelectorAll<HTMLElement>(".view").forEach((el) => {
     el.hidden = el.id !== view + "-view";
   });
   document
-    .querySelectorAll(".nav")
+    .querySelectorAll<HTMLElement>(".nav")
     .forEach((el) => el.classList.toggle("active", el.dataset.view === view));
-  $("#page-name").textContent = {
-    chat: "工作台",
-    memories: "長期記憶",
-    skills: "技能庫",
-    settings: "連線設定",
-  }[view];
+  $("#page-name").textContent =
+    {
+      chat: "工作台",
+      memories: "長期記憶",
+      skills: "技能庫",
+      settings: "連線設定",
+    }[view as "chat" | "memories" | "skills" | "settings"] ?? "";
 }
 document
-  .querySelectorAll("[data-view]")
+  .querySelectorAll<HTMLElement>("[data-view]")
   .forEach((el) =>
-    el.addEventListener("click", () => showView(el.dataset.view)),
+    el.addEventListener("click", () => showView(el.dataset.view || "chat")),
   );
 function renderSessions() {
   $("#sessions").replaceChildren();
@@ -81,7 +104,7 @@ function renderSessions() {
     $("#sessions").append(button);
   }
 }
-function addMessage(role, text, error = false) {
+function addMessage(role: "user" | "assistant", text: string, error = false) {
   const item = document.createElement("article");
   item.className = "message " + role + (error ? " error" : "");
   const avatar = document.createElement("div");
@@ -102,6 +125,7 @@ function addMessage(role, text, error = false) {
   return content;
 }
 function renderConversation() {
+  if (!state.session) return;
   $("#messages").replaceChildren();
   $("#activity").replaceChildren();
   for (const m of state.session.messages) {
@@ -124,9 +148,9 @@ function updateMode() {
           ? "Hermes 在 gateway 主機執行，完成後回傳結果。"
           : "Pi 使用真實模型與本機工具；預設僅讀取工作區。";
 }
-async function loadSession(id) {
+async function loadSession(id: string) {
   if (state.busy) return;
-  state.session = await api("sessions/" + id);
+  state.session = await api<SessionView>("sessions/" + id);
   $("#allow-writes").checked = false;
   localStorage.setItem("loom-session", id);
   renderConversation();
@@ -137,9 +161,11 @@ async function loadSession(id) {
 }
 async function newSession() {
   if (state.busy) return;
-  state.session = await post("sessions", { mode: $("#mode").value });
+  state.session = await post<SessionView>("sessions", {
+    mode: $("#mode").value,
+  });
   localStorage.setItem("loom-session", state.session.id);
-  state.sessions = await api("sessions");
+  state.sessions = await api<SessionSummary[]>("sessions");
   $("#allow-writes").checked = false;
   renderConversation();
   renderSessions();
@@ -147,7 +173,7 @@ async function newSession() {
   $("#prompt").focus();
 }
 $("#new-session").addEventListener("click", () =>
-  newSession().catch((e) => toast(e.message)),
+  newSession().catch((e: unknown) => toast(asError(e).message)),
 );
 $("#mode").addEventListener("change", async () => {
   updateMode();
@@ -155,26 +181,28 @@ $("#mode").addEventListener("change", async () => {
     try {
       await newSession();
       toast("已使用選擇的引擎建立新工作階段。");
-    } catch (e) {
+    } catch (cause) {
+      const e = asError(cause);
       toast(e.message);
     }
   }
 });
-document.querySelectorAll("[data-prompt]").forEach((el) =>
+document.querySelectorAll<HTMLElement>("[data-prompt]").forEach((el) =>
   el.addEventListener("click", () => {
-    $("#prompt").value = el.dataset.prompt;
+    $("#prompt").value = el.dataset.prompt || "";
     $("#prompt").focus();
   }),
 );
-function addActivity(text) {
-  if ($("#activity .muted")) $("#activity").replaceChildren();
+function addActivity(text: string) {
+  if (document.querySelector("#activity .muted"))
+    $("#activity").replaceChildren();
   const p = document.createElement("div");
   p.className = "activity-item";
   p.textContent = text;
   $("#activity").append(p);
   $("#activity").scrollTop = $("#activity").scrollHeight;
 }
-function busy(value) {
+function busy(value: boolean) {
   state.busy = value;
   $("#send").disabled = value;
   $("#prompt").disabled = value;
@@ -190,17 +218,19 @@ $("#chat-form").addEventListener("submit", async (event) => {
   if (state.busy) return;
   const prompt = $("#prompt").value.trim();
   if (!prompt) return;
-  let content,
+  let content: HTMLElement | undefined,
     output = "";
   try {
     const allowWrites = $("#allow-writes").checked;
     busy(true);
     if (!state.session) {
-      state.session = await post("sessions", { mode: $("#mode").value });
+      state.session = await post<SessionView>("sessions", {
+        mode: $("#mode").value,
+      });
       localStorage.setItem("loom-session", state.session.id);
       renderConversation();
     }
-    $("#messages #welcome")?.remove();
+    document.querySelector("#messages #welcome")?.remove();
     addMessage("user", prompt);
     content = addMessage("assistant", "");
     $("#prompt").value = "";
@@ -215,16 +245,17 @@ $("#chat-form").addEventListener("submit", async (event) => {
     );
     if (!response.ok)
       throw new Error((await response.json()).error || "請求失敗。");
+    if (!response.body) throw new Error("伺服器沒有回傳串流。");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "",
       completed = false;
-    const consume = (line) => {
+    const consume = (line: string) => {
       if (!line.trim()) return;
-      const data = JSON.parse(line);
+      const data = JSON.parse(line) as RunEvent;
       if (data.type === "delta") {
         output += data.text;
-        content.textContent = output;
+        if (content) content.textContent = output;
       }
       if (data.type === "activity") addActivity(data.text);
       if (data.type === "error") {
@@ -240,7 +271,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop();
+        buffer = lines.pop() ?? "";
         for (const line of lines) consume(line);
       }
       buffer += decoder.decode();
@@ -250,10 +281,11 @@ $("#chat-form").addEventListener("submit", async (event) => {
     } finally {
       reader.releaseLock();
     }
-  } catch (error) {
+  } catch (caught) {
+    const error = asError(caught);
     if (content) {
       content.textContent = (output ? output + "\n\n" : "") + error.message;
-      content.closest(".message").classList.add("error");
+      content.closest(".message")?.classList.add("error");
     }
     toast(error.message);
   } finally {
@@ -261,10 +293,11 @@ $("#chat-form").addEventListener("submit", async (event) => {
     try {
       await refresh();
       if (state.session) {
-        state.session = await api("sessions/" + state.session.id);
+        state.session = await api<SessionView>("sessions/" + state.session.id);
         $("#session-title").textContent = state.session.title;
       }
-    } catch (e) {
+    } catch (cause) {
+      const e = asError(cause);
       toast(e.message);
     }
     $("#prompt").focus();
@@ -277,10 +310,12 @@ $("#prompt").addEventListener("keydown", (event) => {
   }
 });
 $("#stop").addEventListener("click", async () => {
+  if (!state.session) return;
   try {
     await post("sessions/" + state.session.id + "/stop", {});
     addActivity("已送出停止要求。Hermes 遠端任務可能需要在 gateway 另行確認。");
-  } catch (e) {
+  } catch (cause) {
+    const e = asError(cause);
     toast(e.message);
   }
 });
@@ -290,11 +325,16 @@ document.addEventListener("keydown", (event) => {
     !event.ctrlKey &&
     !event.metaKey &&
     !event.altKey &&
-    !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)
+    !["INPUT", "TEXTAREA", "SELECT"].includes(
+      document.activeElement?.tagName || "",
+    )
   )
-    newSession().catch((e) => toast(e.message));
+    newSession().catch((e: unknown) => toast(asError(e).message));
 });
-function renderLibrary(name, rows) {
+function renderLibrary(
+  name: "memories" | "skills",
+  rows: (Memory & { name?: string })[],
+) {
   const list = $("#" + name + "-list");
   list.replaceChildren();
   if (!rows.length) {
@@ -318,7 +358,8 @@ function renderLibrary(name, rows) {
     p.textContent = row.content;
     const small = document.createElement("small");
     small.textContent =
-      new Date(row.createdAt).toLocaleDateString("zh-TW") + " · 儲存在本機";
+      new Date(row.createdAt || Date.now()).toLocaleDateString("zh-TW") +
+      " · 儲存在本機";
     const del = document.createElement("button");
     del.className = "delete-button";
     del.textContent = "刪除";
@@ -329,7 +370,8 @@ function renderLibrary(name, rows) {
       try {
         await api(name + "/" + row.id, { method: "DELETE" });
         await refresh();
-      } catch (e) {
+      } catch (cause) {
+        const e = asError(cause);
         toast(e.message);
       }
     });
@@ -341,10 +383,11 @@ $("#memory-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
     await post("memories", { content: $("#memory-content").value });
-    event.target.reset();
+    $("#memory-form").reset();
     await refresh();
     toast("記憶已儲存，下一次 Pi 執行時生效。");
-  } catch (e) {
+  } catch (cause) {
+    const e = asError(cause);
     toast(e.message);
   }
 });
@@ -355,15 +398,16 @@ $("#skill-form").addEventListener("submit", async (event) => {
       name: $("#skill-name").value,
       content: $("#skill-content").value,
     });
-    event.target.reset();
+    $("#skill-form").reset();
     await refresh();
     toast("技能已加入。");
-  } catch (e) {
+  } catch (cause) {
+    const e = asError(cause);
     toast(e.message);
   }
 });
 async function refreshFiles() {
-  const files = await api("files");
+  const files = await api<WorkspaceFile[]>("files");
   $("#files").textContent = files.length
     ? files
         .map((f) => (f.type === "directory" ? "▱ " : "▧ ") + f.name)
@@ -373,18 +417,18 @@ async function refreshFiles() {
 }
 async function refresh() {
   const [status, sessions, memories, skills] = await Promise.all([
-    api("status"),
-    api("sessions"),
-    api("memories"),
-    api("skills"),
+    api<Status>("status"),
+    api<SessionSummary[]>("sessions"),
+    api<Memory[]>("memories"),
+    api<Skill[]>("skills"),
   ]);
   state.status = status;
   state.sessions = sessions;
   renderSessions();
   renderLibrary("memories", memories);
   renderLibrary("skills", skills);
-  $("#memory-count").textContent = memories.length;
-  $("#skill-count").textContent = skills.length;
+  $("#memory-count").textContent = String(memories.length);
+  $("#skill-count").textContent = String(skills.length);
   $("#pi-state").textContent = status.piReady ? "已設定" : "未設定";
   $("#pi-state").classList.toggle("ready", status.piReady);
   $("#hermes-state").textContent = status.hermesReady ? "已設定" : "未連接";
@@ -398,17 +442,16 @@ async function refresh() {
   await refreshFiles();
 }
 $("#refresh-files").addEventListener("click", () =>
-  refreshFiles().catch((e) => toast(e.message)),
+  refreshFiles().catch((e: unknown) => toast(asError(e).message)),
 );
-$("#refresh-status").addEventListener("click", () =>
-  refresh()
-    .then(() => toast("已更新設定狀態。"))
-    .catch((e) => toast(e.message)),
-);
+const settingsUI = createSettingsUI({ api, onSaved: refresh, notify: toast });
 try {
   await refresh();
+  await settingsUI.load();
   const id = localStorage.getItem("loom-session");
   if (id && state.sessions.some((s) => s.id === id)) await loadSession(id);
-} catch (e) {
+  if (location.hash === "#settings") showView("settings");
+} catch (cause) {
+  const e = asError(cause);
   toast("無法載入工作台：" + e.message);
 }

@@ -7,3 +7,5 @@ workspace/
 coverage/
 *.log
 artifacts/
+
+dist/

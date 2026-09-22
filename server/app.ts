@@ -1,28 +1,35 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import type { Environment, Session, Skill, RunEvent } from "../shared/types.ts";
+import type { RunOptions } from "./agent.ts";
+import { asError } from "../shared/errors.ts";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { Store } from "./store.js";
-import { Workspace } from "./workspace.js";
-import { configuration, runAgent } from "./agent.js";
+import { Store } from "./store.ts";
+import { Settings } from "./settings.ts";
+import { Workspace } from "./workspace.ts";
+import { configuration, runAgent } from "./agent.ts";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
-const assets = {
+const assets: Record<string, [string, string]> = {
   "/": ["index.html", "text/html"],
   "/app.js": ["app.js", "text/javascript"],
+  "/app.js.map": ["app.js.map", "application/json"],
   "/style.css": ["style.css", "text/css"],
   "/favicon.svg": ["favicon.svg", "image/svg+xml"],
 };
 const modes = ["demo", "pi", "hybrid", "hermes"];
-function fail(message, status = 400) {
+function fail(message: string, status = 400): never {
   throw Object.assign(new Error(message), { status });
 }
-function string(value, max, label) {
+function string(value: unknown, max: number, label: string) {
   if (typeof value !== "string" || !value.trim() || value.length > max)
     fail(label + "需為 1–" + max + " 字。");
   return value.trim();
 }
-async function body(req) {
+async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   if (!req.headers["content-type"]?.startsWith("application/json"))
     fail("需要 application/json。", 415);
   const chunks = [];
@@ -33,25 +40,37 @@ async function body(req) {
     chunks.push(chunk);
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!input || typeof input !== "object" || Array.isArray(input))
+      fail("需要 JSON 物件。");
+    return input;
   } catch {
     fail("JSON 格式錯誤。");
   }
 }
-function json(res, value, status = 200) {
+function json(res: ServerResponse, value: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(value));
 }
 
+export interface AppOptions {
+  dataDir?: string;
+  workspaceDir?: string;
+  env?: Environment;
+  runner?: (
+    options: RunOptions,
+  ) => Promise<import("../shared/types.ts").RunResult>;
+}
 export async function createApp({
   dataDir = ".loom",
   workspaceDir = "workspace",
   env = process.env,
   runner = runAgent,
-} = {}) {
+}: AppOptions = {}) {
   const store = await new Store(dataDir).init();
+  const settings = await new Settings(dataDir, env).init();
   const workspace = await new Workspace(workspaceDir).init();
-  const running = new Map();
+  const running = new Map<string, AbortController>();
   const server = createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-store");
@@ -60,9 +79,11 @@ export async function createApp({
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
     try {
-      const port = server.address()?.port;
+      const port = (server.address() as AddressInfo | null)?.port;
       if (
-        !["localhost:" + port, "127.0.0.1:" + port].includes(req.headers.host)
+        !["localhost:" + port, "127.0.0.1:" + port].includes(
+          req.headers.host || "",
+        )
       )
         fail("不允許的 Host。", 403);
       if (
@@ -74,26 +95,38 @@ export async function createApp({
         fail("不允許跨來源請求。", 403);
       if (req.headers["sec-fetch-site"] === "cross-site")
         fail("不允許跨網站請求。", 403);
-      const url = new URL(req.url, "http://localhost");
+      const url = new URL(req.url || "/", "http://localhost");
       const path = url.pathname;
       if (
-        !["GET", "HEAD"].includes(req.method) &&
+        !["GET", "HEAD"].includes(req.method || "") &&
         req.headers["x-loom-client"] !== "1"
       )
         fail("缺少工作台請求標頭。", 403);
       if (req.method === "GET" && assets[path]) {
         const [file, type] = assets[path];
-        const content = await readFile(publicDir + file);
+        const content = await readFile(
+          path === "/app.js" || path === "/app.js.map"
+            ? new URL("../dist/public/" + file, import.meta.url)
+            : publicDir + file,
+        );
         res.writeHead(200, { "Content-Type": type + "; charset=utf-8" });
         return res.end(content);
       }
       if (req.method === "GET" && path === "/api/status")
         return json(res, {
-          ...configuration(env),
+          ...configuration(settings.environment()),
           version: "0.1.0",
           workspace: "workspace/",
           running: running.size,
         });
+      if (req.method === "GET" && path === "/api/settings")
+        return json(res, settings.view());
+      const settingsMatch = path.match(/^\/api\/settings\/(pi|hermes)$/);
+      if (req.method === "POST" && settingsMatch)
+        return json(
+          res,
+          await settings.update(settingsMatch[1], await body(req)),
+        );
       if (req.method === "GET" && path === "/api/sessions")
         return json(
           res,
@@ -106,11 +139,12 @@ export async function createApp({
       if (req.method === "POST" && path === "/api/sessions") {
         const input = await body(req);
         const mode = input.mode || "demo";
-        if (!modes.includes(mode)) fail("未知模式。");
-        const session = {
+        if (typeof mode !== "string" || !modes.includes(mode))
+          fail("未知模式。");
+        const session: Session = {
           id: randomUUID(),
           title: "新的工作階段",
-          mode,
+          mode: mode as Session["mode"],
           createdAt: new Date().toISOString(),
           messages: [],
           piMessages: [],
@@ -140,6 +174,7 @@ export async function createApp({
           if (typeof input.allowWrites !== "boolean")
             fail("allowWrites 必須為布林值。");
           if (running.has(id)) fail("此工作階段正在執行。", 409);
+          const runEnv = settings.environment();
           const controller = new AbortController();
           running.set(id, controller);
           const timer = setTimeout(() => controller.abort(), 300000);
@@ -148,11 +183,11 @@ export async function createApp({
           };
           res.on("close", onClose);
           let output = "";
-          const activity = [];
+          const activity: string[] = [];
           const userId = randomUUID();
           try {
             await store.mutate((s) => {
-              const row = s.sessions.find((x) => x.id === id);
+              const row = s.sessions.find((x) => x.id === id)!;
               row.title = row.messages.length ? row.title : prompt.slice(0, 44);
               row.messages.push({
                 id: userId,
@@ -164,7 +199,7 @@ export async function createApp({
             res.writeHead(200, {
               "Content-Type": "application/x-ndjson; charset=utf-8",
             });
-            const emit = (event) => {
+            const emit = (event: RunEvent) => {
               if (event.type === "delta") output += event.text;
               if (event.type === "activity") activity.push(event.text);
               if (!res.destroyed) res.write(JSON.stringify(event) + "\n");
@@ -178,12 +213,12 @@ export async function createApp({
               allowWrites: input.allowWrites,
               emit,
               signal: controller.signal,
-              env,
+              env: runEnv,
             });
             controller.signal.throwIfAborted();
             await store.mutate((s) => {
-              const row = s.sessions.find((x) => x.id === id);
-              row.messages.find((m) => m.id === userId).status = "complete";
+              const row = s.sessions.find((x) => x.id === id)!;
+              row.messages.find((m) => m.id === userId)!.status = "complete";
               row.messages.push({
                 id: randomUUID(),
                 role: "assistant",
@@ -194,12 +229,19 @@ export async function createApp({
               if (result.piMessages) row.piMessages = result.piMessages;
             });
             emit({ type: "done" });
-          } catch (error) {
-            const message = controller.signal.aborted
+          } catch (caught) {
+            const error = asError(caught);
+            let message = controller.signal.aborted
               ? "已停止執行。"
-              : error.message;
+              : String(error.message || "執行失敗。");
+            for (const key of [
+              runEnv.OPENAI_API_KEY,
+              runEnv.ANTHROPIC_API_KEY,
+              runEnv.HERMES_API_KEY,
+            ].filter((key): key is string => Boolean(key)))
+              message = message.replaceAll(key, "[redacted]");
             await store.mutate((s) => {
-              const row = s.sessions.find((x) => x.id === id);
+              const row = s.sessions.find((x) => x.id === id)!;
               const user = row.messages.find((m) => m.id === userId);
               if (user) user.status = "failed";
               row.messages.push({
@@ -232,11 +274,13 @@ export async function createApp({
         /^\/api\/(memories|skills)(?:\/([a-f0-9-]+|starter))?$/,
       );
       if (collection) {
-        const [, name, id] = collection;
+        const [, rawName, id] = collection;
+        const name = rawName as "memories" | "skills";
         if (!id && req.method === "GET") return json(res, store.state[name]);
         if (!id && req.method === "POST") {
           const input = await body(req);
-          const item = {
+          const item: Skill = {
+            name: "",
             id: randomUUID(),
             content: string(
               input.content,
@@ -253,7 +297,9 @@ export async function createApp({
           if (!store.state[name].some((x) => x.id === id))
             fail("項目不存在。", 404);
           await store.mutate((s) => {
-            s[name] = s[name].filter((x) => x.id !== id);
+            if (name === "skills")
+              s.skills = s.skills.filter((x) => x.id !== id);
+            else s.memories = s.memories.filter((x) => x.id !== id);
           });
           return json(res, { ok: true });
         }
@@ -261,7 +307,8 @@ export async function createApp({
       if (path === "/api/files" && req.method === "GET")
         return json(res, await workspace.list());
       fail("找不到此頁面。", 404);
-    } catch (error) {
+    } catch (caught) {
+      const error = asError(caught);
       if (!res.headersSent)
         json(
           res,

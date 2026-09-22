@@ -2,7 +2,7 @@
 
 A local-first agent workspace that combines **Pi's Node.js agent runtime**, persistent memory and reusable skills, with an **optional real Hermes Agent gateway**.
 
-以 Node.js 啟動的 AI 工作台。Web 介面、API、agent 編排與資料保存都使用 JavaScript；開發本專案不用安裝 Python、Docker、Redis 或資料庫。
+以 Node.js 啟動的 AI 工作台。Web 介面、API、agent 編排與資料保存都使用 TypeScript；開發本專案不用安裝 Python、Docker、Redis 或資料庫。
 
 ## Quick start / 三個步驟
 
@@ -17,11 +17,12 @@ npm run dev
 
 Open **http://localhost:3100**. With no API keys, select **示範模式** to try the interface. Demo responses are clearly labelled deterministic examples, not AI output.
 
-- `npm run dev` — starts the Node server with automatic restart when imported server modules change. Refresh the browser after editing frontend files.
-- `npm start` — starts without file watching.
+- `npm run dev` — type-checks the project, builds and watches browser TypeScript with esbuild, and starts the Node server with automatic restart. Refresh the browser after frontend edits.
+- `npm start` — builds the browser assets and starts without file watching.
 - `npm test` — Node's built-in test runner; no paid API calls.
-- `npm run check` — checks JavaScript syntax.
-- There is no frontend compilation or separate backend startup step.
+- `npm run check` — runs strict TypeScript checks.
+- `npm run build` — checks types and compiles browser assets to `dist/public/`.
+- `npm run dev` handles frontend compilation and backend startup together. Node.js 22.19+ executes server TypeScript natively.
 
 ## What works
 
@@ -36,25 +37,18 @@ Pi includes `list_files`, `read_file`, `write_file`, `remember`, and `save_skill
 
 The Web UI provides streamed Pi output, activity events, saved conversations, memory/skill creation and deletion, connection status, and stop control. Mode changes create a new conversation so histories from different engines do not mix.
 
-## Configure Pi
+## Configure Pi from the UI
 
-Copy `.env.example` to `.env` and set:
+1. Open **連線設定** in the sidebar.
+2. Choose **OpenAI** or **Anthropic**, select a supported model, and enter your API key.
+3. Click **儲存 Pi 設定**. The next task uses the saved connection immediately; no restart is needed.
+4. Return to the workspace and select **Pi Agent**.
 
-```dotenv
-PI_PROVIDER=openai
-PI_MODEL=gpt-4.1-mini
-OPENAI_API_KEY=your-key
-```
+Keys are never returned by the settings API or populated into password fields. Leave a key field blank to keep its value, enter a new value to replace it, or check the explicit removal option and save to disable that provider key. OpenAI and Anthropic keys are stored independently. Configuration indicators report saved state, not successful live authentication.
 
-Or use Anthropic:
+Settings are stored in `.loom/settings.json`, separate from conversation history and excluded from Git. This is a local plaintext configuration file; on POSIX systems it is created with mode 0600. Protect your OS user account and backups. A running task keeps its original settings snapshot.
 
-```dotenv
-PI_PROVIDER=anthropic
-PI_MODEL=claude-sonnet-4-6
-ANTHROPIC_API_KEY=your-key
-```
-
-Restart `npm run dev` after editing `.env`. Keys stay on the server and are not sent to the browser. The connection indicator means variables are configured; it does not claim the credentials have been validated.
+Existing `.env` settings still work as a fallback. UI-saved fields take priority. Removing a key explicitly masks the environment key; entering a new key enables it again. The UI does not modify `.env`. If you edit environment variables manually, restart the server.
 
 ## Connect a real Hermes Agent (optional)
 
@@ -67,7 +61,7 @@ API_SERVER_ENABLED=true
 API_SERVER_KEY=your-gateway-secret
 ```
 
-Then run `hermes gateway` there. In Talaria's `.env`:
+Then run `hermes gateway` there. In Talaria, open **連線設定 → Hermes**, enter the gateway URL, model name and gateway API key, then click **儲存 Hermes 設定**. Changes apply to the next task. For environment-based configuration, these fields remain supported:
 
 ```dotenv
 HERMES_URL=http://127.0.0.1:8642
@@ -85,7 +79,7 @@ The connector uses the [documented Hermes Chat Completions API](https://hermes-a
 
 - `.loom/state.json` stores conversations, Pi transcripts, memories and skills using serialized atomic file replacement.
 - `workspace/` is the only directory accessible through Pi file tools. Put the files you want the agent to work on there.
-- Both paths are created on first start and ignored by Git.
+- These local data paths are created on first start and ignored by Git.
 - Memories and skills are included as reference context at the start of each Pi run. The current prompt budget includes up to 16,000 characters of memories and 24,000 characters of skills.
 - These are **Talaria's own Node.js implementations**, inspired by durable agent workflows; they are not a port of Hermes' memory/skill engine. Hermes continues to use its own capabilities on the gateway.
 - Pi can save new memories and skills when the model decides it is useful and writes are enabled. There is no automatic offline learning worker.
@@ -102,7 +96,7 @@ Each run is capped at five minutes and Pi at twelve model turns. Errors and canc
 ## Architecture
 
 ```text
-Browser (native ES modules + CSS)
+Browser (TypeScript → esbuild → ES modules + CSS)
   └─ Node HTTP server + NDJSON streaming
       ├─ Pi SDK (@earendil-works/pi-agent-core + pi-ai)
       │   ├─ workspace file tools
@@ -113,22 +107,25 @@ Browser (native ES modules + CSS)
 ```
 
 ```text
-public/           Browser interface; no bundler
-server/agent.js   Pi orchestration, demo mode and tool definitions
-server/hermes.js  Hermes HTTP integration
-server/app.js     HTTP API, streaming and local access checks
-server/store.js   Persistence
-server/workspace.js  Restricted local file operations
-test/            Built-in Node tests
+public/           Browser TypeScript interface
+server/agent.ts   Pi orchestration, demo mode and tool definitions
+server/hermes.ts  Hermes HTTP integration
+server/app.ts     HTTP API, streaming and local access checks
+server/store.ts   Persistence
+server/workspace.ts  Restricted local file operations
+server/settings.ts  Local credentials and configuration
+shared/          API, session and event types
+scripts/         TypeScript build and development entry points
+test/            TypeScript tests using the built-in Node runner
 ```
 
 ### Add a tool
 
-Add a definition to `createTools()` in `server/agent.js`. Give it a JSON schema and an async implementation; return tool content through the shared helper. Wrap any mutating or remote execution with the existing permission gate. Keep integrations behind server-side adapters so the browser never handles provider keys.
+Add a definition to `createTools()` in `server/agent.ts`. Give it a JSON schema and an async implementation; return tool content through the shared helper. Wrap any mutating or remote execution with the existing permission gate. Keep integrations behind server-side adapters so the browser never handles provider keys.
 
 ### Testing
 
-The tests run the actual Pi SDK with a deterministic mock model transport to verify tool execution, transcript continuation and memory injection. They also cover persistence, file boundaries, permissions, Hermes request shape, streamed HTTP conversations, request isolation and cancellation. **Live provider responses and a real Hermes gateway require your credentials and are not exercised by the offline suite.**
+The tests run the actual Pi SDK with a deterministic mock model transport to verify tool execution, transcript continuation and memory injection. They also cover persistence, file boundaries, permissions, Hermes request shape, streamed HTTP conversations, request isolation, cancellation, credential storage and removal, secret redaction, and applying saved settings without restarting. **Live provider responses and a real Hermes gateway require your credentials and are not exercised by the offline suite.**
 
 ## Upstream projects
 
@@ -140,4 +137,4 @@ Talaria is an independent integration and is not affiliated with either upstream
 
 ## Optional GitHub Actions
 
-A Windows/Linux Node 22/24 CI template is included at `docs/github-actions.yml.example`. To enable it, copy the file to `.github/workflows/ci.yml` and commit using a GitHub credential that permits workflow changes. Local validation is available immediately through `npm run check` and `npm test`.
+A Windows/Linux Node 22/24 CI template is included at `docs/github-actions.yml.example`. To enable it, copy the file to `.github/workflows/ci.yml` and commit using a GitHub credential that permits workflow changes. Local validation is available through `npm run build` and `npm test`.

@@ -1,9 +1,15 @@
+import type { StoreState } from "../shared/types.ts";
+import { asError } from "../shared/errors.ts";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export class Store {
-  constructor(directory) {
+  directory: string;
+  file!: string;
+  state!: StoreState;
+  tail: Promise<unknown>;
+  constructor(directory: string) {
     this.directory = directory;
     this.tail = Promise.resolve();
   }
@@ -12,7 +18,8 @@ export class Store {
     this.file = join(this.directory, "state.json");
     try {
       this.state = JSON.parse(await readFile(this.file, "utf8"));
-    } catch (error) {
+    } catch (caught) {
+      const error = asError(caught);
       if (error.code !== "ENOENT") throw error;
       this.state = {
         sessions: [],
@@ -30,7 +37,7 @@ export class Store {
     }
     return this;
   }
-  async mutate(fn) {
+  async mutate<T>(fn: (state: StoreState) => T): Promise<T> {
     const operation = this.tail.then(async () => {
       const next = structuredClone(this.state);
       const result = fn(next);

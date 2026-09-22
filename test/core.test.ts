@@ -1,14 +1,17 @@
+import type { AddressInfo } from "node:net";
+import type { Api, Model, AssistantMessage } from "@earendil-works/pi-ai";
+import type { RunEvent } from "../shared/types.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import { Store } from "../server/store.js";
-import { Workspace } from "../server/workspace.js";
-import { createApp } from "../server/app.js";
-import { askHermes, hermesEndpoint } from "../server/hermes.js";
-import { createTools, runPi } from "../server/agent.js";
+import { Store } from "../server/store.ts";
+import { Workspace } from "../server/workspace.ts";
+import { createApp } from "../server/app.ts";
+import { askHermes, hermesEndpoint } from "../server/hermes.ts";
+import { createTools, runPi } from "../server/agent.ts";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 const temporary = () => mkdtemp(join(tmpdir(), "loom-test-"));
 
@@ -103,13 +106,13 @@ test("write and Hermes tools enforce explicit run permission", async () => {
     ["delegate_to_hermes", { task: "x" }],
   ]) {
     await assert.rejects(
-      tools.find((t) => t.name === name).execute("id", args),
+      tools.find((t) => t.name === name)!.execute("id", args),
       /尚未開啟/,
     );
   }
   assert.equal(store.state.memories.length, 0);
 });
-const model = {
+const model: Model<Api> = {
   id: "test",
   name: "Test",
   api: "openai-responses",
@@ -121,7 +124,10 @@ const model = {
   contextWindow: 128000,
   maxTokens: 4096,
 };
-function message(content, stopReason = "stop") {
+function message(
+  content: AssistantMessage["content"],
+  stopReason: AssistantMessage["stopReason"] = "stop",
+): AssistantMessage {
   return {
     role: "assistant",
     content,
@@ -140,18 +146,23 @@ function message(content, stopReason = "stop") {
     timestamp: Date.now(),
   };
 }
-function streamMessage(msg) {
+function streamMessage(msg: AssistantMessage) {
   const stream = createAssistantMessageEventStream();
   queueMicrotask(() => {
     stream.push({ type: "start", partial: msg });
-    for (let i = 0; i < msg.content.length; i++)
-      if (msg.content[i].type === "text")
+    for (const [i, part] of msg.content.entries())
+      if (part.type === "text")
         stream.push({
           type: "text_delta",
           contentIndex: i,
-          delta: msg.content[i].text,
+          delta: part.text,
           partial: msg,
         });
+    assert.ok(
+      msg.stopReason !== "error" &&
+        msg.stopReason !== "aborted" &&
+        msg.stopReason !== "pending",
+    );
     stream.push({ type: "done", reason: msg.stopReason, message: msg });
   });
   return stream;
@@ -164,7 +175,7 @@ test("real Pi SDK executes file tools, injects memory, resumes transcript, strea
     s.memories.push({ id: "m", content: "Use Node only" }),
   );
   let calls = 0;
-  const events = [];
+  const events: RunEvent[] = [];
   const first = await runPi({
     prompt: "Create file",
     session: {},
@@ -203,7 +214,8 @@ test("real Pi SDK executes file tools, injects memory, resumes transcript, strea
   });
   assert.equal(first.text, "File created.");
   assert.equal(await workspace.read("hello.txt"), "from Pi");
-  assert.ok(events.some((e) => e.tool === "write_file"));
+  assert.ok(events.some((e) => "tool" in e && e.tool === "write_file"));
+  assert.ok(first.piMessages);
   assert.ok(first.piMessages.some((m) => m.role === "toolResult"));
   const second = await runPi({
     prompt: "Continue",
@@ -236,8 +248,8 @@ test("HTTP chat streams, saves history, rejects cross-origin and invalid payload
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => server.close());
-  const base = "http://127.0.0.1:" + server.address().port;
-  const request = (path, data) =>
+  const base = "http://127.0.0.1:" + (server.address() as AddressInfo).port;
+  const request = (path: string, data: unknown) =>
     fetch(base + path, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Loom-Client": "1" },
@@ -272,7 +284,10 @@ test("HTTP chat streams, saves history, rejects cross-origin and invalid payload
     prompt: "hello",
     allowWrites: false,
   });
-  const events = (await response.text()).trim().split("\n").map(JSON.parse);
+  const events = (await response.text())
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
   assert.ok(events.some((e) => e.type === "delta"));
   assert.equal(events.at(-1).type, "done");
   const saved = await (
@@ -308,13 +323,14 @@ test("stop and session concurrency protect in-flight work", async (t) => {
           once: true,
         }),
       );
+      throw new Error("Unexpected completion");
     },
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => server.close());
-  const base = "http://127.0.0.1:" + server.address().port;
-  const post = (path, data) =>
+  const base = "http://127.0.0.1:" + (server.address() as AddressInfo).port;
+  const post = (path: string, data: unknown) =>
     fetch(base + path, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Loom-Client": "1" },
@@ -372,7 +388,7 @@ test("Pi hybrid tool delegates over HTTP to Hermes and consumes its result", asy
     emit() {},
     signal: new AbortController().signal,
     env: {
-      HERMES_URL: "http://127.0.0.1:" + gateway.address().port,
+      HERMES_URL: "http://127.0.0.1:" + (gateway.address() as AddressInfo).port,
       HERMES_API_KEY: "fixture-key",
     },
     runtime: {
@@ -395,6 +411,7 @@ test("Pi hybrid tool delegates over HTTP to Hermes and consumes its result", asy
         const toolResponse = context.messages.find(
           (m) => m.role === "toolResult",
         );
+        assert.ok(toolResponse);
         assert.equal(toolResponse.isError, false);
         assert.ok(JSON.stringify(toolResponse).includes("Hermes evidence"));
         return streamMessage(

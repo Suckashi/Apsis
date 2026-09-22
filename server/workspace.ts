@@ -1,3 +1,5 @@
+import type { WorkspaceFile } from "../shared/types.ts";
+import { asError } from "../shared/errors.ts";
 import {
   lstat,
   mkdir,
@@ -10,7 +12,8 @@ import path from "node:path";
 
 // A deliberately narrow file toolset. No shell, absolute paths, or symlinks.
 export class Workspace {
-  constructor(root) {
+  root: string;
+  constructor(root: string) {
     this.root = path.resolve(root);
   }
   async init() {
@@ -35,14 +38,15 @@ export class Workspace {
       try {
         if ((await lstat(current)).isSymbolicLink())
           throw new Error("不允許 symbolic link。");
-      } catch (error) {
+      } catch (caught) {
+        const error = asError(caught);
         if (error.code !== "ENOENT" || !create) throw error;
         if (i < segments.length - 1) await mkdir(current);
       }
     }
     return current;
   }
-  async list(input = "") {
+  async list(input = ""): Promise<WorkspaceFile[]> {
     return (await readdir(await this.resolve(input), { withFileTypes: true }))
       .filter((f) => !f.name.startsWith(".") && !f.isSymbolicLink())
       .slice(0, 200)
@@ -51,13 +55,13 @@ export class Workspace {
         type: f.isDirectory() ? "directory" : "file",
       }));
   }
-  async read(input) {
+  async read(input: string) {
     const file = await this.resolve(input);
     if ((await lstat(file)).size > 256_000)
       throw new Error("檔案超過 256 KB 上限。");
     return readFile(file, "utf8");
   }
-  async write(input, content) {
+  async write(input: string, content: string) {
     if (typeof content !== "string" || Buffer.byteLength(content) > 256_000)
       throw new Error("內容超過 256 KB 上限。");
     await writeFile(await this.resolve(input, true), content, "utf8");

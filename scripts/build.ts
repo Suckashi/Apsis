@@ -1,0 +1,10 @@
+import { build } from "esbuild";
+await build({
+  entryPoints: ["public/app.ts"],
+  bundle: true,
+  format: "esm",
+  target: "es2022",
+  outdir: "dist/public",
+  sourcemap: true,
+});
+console.log("Browser TypeScript compiled to dist/public.");

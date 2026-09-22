@@ -1,37 +1,62 @@
+import type {
+  AgentMessage,
+  AgentTool,
+  AgentToolResult,
+  StreamFn,
+} from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
+import type {
+  Environment,
+  Status,
+  Session,
+  RunEvent,
+  RunResult,
+} from "../shared/types.ts";
+import type { Store } from "./store.ts";
+import type { Workspace } from "./workspace.ts";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { createModels } from "@earendil-works/pi-ai";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { askHermes } from "./hermes.js";
+import { askHermes } from "./hermes.ts";
 
-const schema = (properties) => ({
-  type: "object",
-  properties: Object.fromEntries(
-    properties.map((name) => [name, { type: "string" }]),
-  ),
-  required: properties,
-  additionalProperties: false,
-});
-const result = (value) => ({
+type ToolHandler = (
+  args: Record<string, string>,
+  signal?: AbortSignal,
+) => unknown | Promise<unknown>;
+const schema = (properties: string[]) =>
+  Type.Object(
+    Object.fromEntries(properties.map((name) => [name, Type.String()])),
+    { additionalProperties: false },
+  );
+const result = (value: unknown): AgentToolResult => ({
   content: [
     {
       type: "text",
-      text: typeof value === "string" ? value : JSON.stringify(value),
+      text:
+        typeof value === "string" ? value : (JSON.stringify(value) ?? "null"),
     },
   ],
   details: {},
 });
-const tool = (name, description, fields, run) => ({
+const tool = (
+  name: string,
+  description: string,
+  fields: string[],
+  run: ToolHandler,
+): AgentTool => ({
   name,
   label: name,
   description,
   parameters: schema(fields),
-  execute: async (_id, args, signal) => result(await run(args, signal)),
+  execute: async (_id, args, signal) =>
+    result(await run(args as Record<string, string>, signal)),
 });
 
-export function configuration(env = process.env) {
+export function configuration(env: Environment = process.env): Status {
   const provider = env.PI_PROVIDER || "openai";
   const model =
     env.PI_MODEL ||
@@ -48,15 +73,34 @@ export function configuration(env = process.env) {
   };
 }
 
+export interface ToolOptions {
+  store: Store;
+  workspace: Workspace;
+  allowWrites: boolean;
+  hybrid?: boolean;
+  env?: Environment;
+}
+export interface PiOptions extends ToolOptions {
+  prompt: string;
+  session: { piMessages?: AgentMessage[] };
+  emit: (event: RunEvent) => void;
+  signal: AbortSignal;
+  runtime?: { model: Model<Api>; streamFn: StreamFn };
+}
+export interface RunOptions extends PiOptions {
+  mode: Session["mode"];
+  session: Session;
+}
+
 export function createTools({
   store,
   workspace,
   allowWrites,
   hybrid,
   env = process.env,
-}) {
+}: ToolOptions) {
   const writable =
-    (fn) =>
+    (fn: ToolHandler): ToolHandler =>
     async (...args) => {
       if (!allowWrites) throw new Error("使用者尚未開啟「允許修改」。");
       return fn(...args);
@@ -109,7 +153,8 @@ export function createTools({
         await store.mutate((s) =>
           s.skills.push({
             id: randomUUID(),
-            ...a,
+            name: a.name,
+            content: a.content,
             createdAt: new Date().toISOString(),
           }),
         );
@@ -148,13 +193,17 @@ export async function runPi({
   signal,
   env = process.env,
   runtime,
-}) {
+}: PiOptions): Promise<RunResult> {
   const config = configuration(env);
-  let models, model, streamFn;
+  let models;
+  let model: Model<Api> | undefined;
+  let streamFn: StreamFn;
   if (runtime) ({ model, streamFn } = runtime);
   else {
     if (!config.piReady)
-      throw new Error("Pi 尚未設定。請在 .env 加入 API key，或選擇示範模式。");
+      throw new Error(
+        "Pi 尚未設定。請前往「連線設定」儲存 API key，或選擇示範模式。",
+      );
     models = createModels();
     models.setProvider(
       config.provider === "anthropic" ? anthropicProvider() : openaiProvider(),
@@ -162,7 +211,7 @@ export async function runPi({
     model = models.getModel(config.provider, config.model);
     if (!model)
       throw new Error(
-        `找不到模型 ${config.provider}/${config.model}，請檢查 PI_MODEL。`,
+        `找不到模型 ${config.provider}/${config.model}，請在「連線設定」選擇支援的模型。`,
       );
     streamFn = models.streamSimple.bind(models);
   }
@@ -176,6 +225,10 @@ export async function runPi({
       tools: createTools({ store, workspace, allowWrites, hybrid, env }),
     },
     streamFn,
+    getApiKey: () =>
+      config.provider === "anthropic"
+        ? env.ANTHROPIC_API_KEY
+        : env.OPENAI_API_KEY,
     toolExecution: "sequential",
     finishTurn: () => {
       if (++turns >= 12) {
@@ -229,7 +282,7 @@ export async function runPi({
   }
 }
 
-export async function runAgent(options) {
+export async function runAgent(options: RunOptions): Promise<RunResult> {
   const { mode, prompt, session, emit, signal, env = process.env } = options;
   if (mode === "demo") {
     emit({

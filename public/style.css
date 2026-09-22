@@ -951,3 +951,124 @@ pre {
     transition: none !important;
   }
 }
+
+/* Connection settings */
+.settings-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.settings-label {
+  color: #587368;
+  font-size: 12px;
+  padding: 7px 10px;
+  border: 1px solid #d7e4df;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.connection-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+}
+.connection-title h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+.connection-title p {
+  margin: 0;
+  font-size: 12px;
+}
+.connection-title .setting-number {
+  margin-left: auto;
+}
+.connection-title .engine-icon {
+  height: 42px;
+  width: 42px;
+}
+.connection-form fieldset {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.connection-form label {
+  font-size: 14px;
+  color: #3f5b4c;
+  margin-top: 6px;
+}
+.connection-form input:not([type="checkbox"]),
+.connection-form select {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #ceded4;
+  border-radius: 6px;
+  background: #fbfdfc;
+  font-size: 14px;
+  color: #273f33;
+}
+.connection-form input:disabled {
+  background: #edf1ee;
+}
+.connection-form .field-help {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #657d6b;
+  min-height: 20px;
+}
+.connection-form .remove-key {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  color: #6c7d72;
+  line-height: 1.7;
+}
+.remove-key input {
+  accent-color: var(--teal);
+  margin-top: 4px;
+}
+.settings-save {
+  margin-top: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+}
+.connection-form .save-status {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1d7457;
+  margin: 16px 0 0;
+  min-height: 21px;
+}
+.connection-form .save-status.error {
+  color: #a04433;
+}
+.connection-form .config-status {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  margin-top: 12px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 680px) {
+  .settings-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 20px;
+  }
+  .connection-form input:not([type="checkbox"]),
+  .connection-form select {
+    font-size: 16px;
+  }
+}

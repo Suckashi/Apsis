@@ -1,4 +1,15 @@
-export function hermesEndpoint(base) {
+export interface HermesOptions {
+  url?: string;
+  key?: string;
+  model?: string;
+  messages: { role: string; content: string }[];
+  signal?: AbortSignal;
+  fetchImpl?: (
+    url: URL,
+    options: RequestInit & { headers: Record<string, string>; body: string },
+  ) => Promise<Response>;
+}
+export function hermesEndpoint(base: string) {
   const url = new URL(base);
   if (
     !["http:", "https:"].includes(url.protocol) ||
@@ -23,11 +34,9 @@ export async function askHermes({
   messages,
   signal,
   fetchImpl = fetch,
-}) {
+}: HermesOptions): Promise<string> {
   if (!key || !url)
-    throw new Error(
-      "請先在 .env 設定 HERMES_URL 與 HERMES_API_KEY，再重新啟動。",
-    );
+    throw new Error("請先前往「連線設定」儲存 Hermes gateway 網址與 API key。");
   const response = await fetchImpl(hermesEndpoint(url), {
     method: "POST",
     headers: {

@@ -201,58 +201,150 @@
           <div id="skills-list" class="library-list"></div>
         </section>
         <section id="settings-view" class="view library-view" hidden>
-          <span class="eyebrow">CONNECT YOUR ENGINES</span>
-          <h1>連線設定</h1>
+          <div class="settings-heading">
+            <div>
+              <span class="eyebrow">CONNECT YOUR ENGINES</span>
+              <h1>連線設定</h1>
+            </div>
+            <span class="settings-label">本機儲存 · 即時生效</span>
+          </div>
           <p class="view-description">
-            API key 只在 Node.js 伺服器使用，不會儲存在瀏覽器。
+            選擇模型、填入金鑰，開始你的第一個真實任務。儲存後不需重新啟動。
           </p>
           <div class="settings-grid">
-            <article class="settings-card">
-              <span class="setting-number">01</span>
-              <h2>啟用 Pi</h2>
-              <p>
-                將專案的 <code>.env.example</code> 複製為
-                <code>.env</code>，填入你的模型服務金鑰。
-              </p>
-              <pre>
-PI_PROVIDER=openai
-PI_MODEL=gpt-4.1-mini
-OPENAI_API_KEY=你的金鑰</pre
-              >
-              <p>
-                也支援 Anthropic：設定 <code>PI_PROVIDER=anthropic</code>、<code
-                  >PI_MODEL=claude-sonnet-4-6</code
+            <form id="pi-settings-form" class="settings-card connection-form">
+              <div class="connection-title">
+                <span class="engine-icon">π</span>
+                <div>
+                  <h2>Pi Agent</h2>
+                  <p>模型推理與本機工具</p>
+                </div>
+                <span class="setting-number">01</span>
+              </div>
+              <fieldset id="pi-settings-fields" disabled>
+                <label for="pi-provider">模型服務</label>
+                <select id="pi-provider" name="provider">
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                </select>
+                <label for="pi-model">模型</label>
+                <input
+                  id="pi-model"
+                  name="model"
+                  list="pi-model-options"
+                  required
+                  maxlength="256"
+                  placeholder="選擇或輸入模型 ID"
+                  autocomplete="off"
+                  aria-describedby="pi-model-help"
+                />
+                <datalist id="pi-model-options"></datalist
+                ><small id="pi-model-help" class="field-help"
+                  >可從建議清單選擇目前支援的模型。</small
                 >
-                與 <code>ANTHROPIC_API_KEY</code>。
-              </p>
+                <label for="pi-api-key">API key</label>
+                <input
+                  id="pi-api-key"
+                  name="apiKey"
+                  type="password"
+                  maxlength="4096"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                  placeholder="貼上你的 API key"
+                  aria-describedby="pi-key-help"
+                />
+                <small id="pi-key-help" class="field-help"></small>
+                <label class="remove-key"
+                  ><input
+                    id="pi-clear-key"
+                    type="checkbox"
+                  />移除此服務的金鑰</label
+                >
+                <button type="submit" class="primary settings-save">
+                  儲存 Pi 設定 <span>→</span>
+                </button>
+              </fieldset>
+              <p
+                id="pi-save-status"
+                class="save-status"
+                role="status"
+                aria-live="polite"
+              ></p>
               <div id="pi-config" class="config-status"></div>
-            </article>
-            <article class="settings-card">
-              <span class="setting-number">02</span>
-              <h2>連接 Hermes（選用）</h2>
-              <p>
-                連接既有的 Hermes API server，讓 Pi 能委派任務；本工作台不需要
-                Python。
-              </p>
-              <pre>
-HERMES_URL=http://127.0.0.1:8642
-HERMES_API_KEY=你的 gateway 金鑰
-HERMES_MODEL=hermes-agent</pre
-              >
-              <p>
-                Hermes
-                本體需另行運行。遠端工具使用該主機的權限與工作目錄，請確認是你信任的
-                gateway。
-              </p>
+            </form>
+            <form
+              id="hermes-settings-form"
+              class="settings-card connection-form"
+            >
+              <div class="connection-title">
+                <span class="engine-icon hermes">H</span>
+                <div>
+                  <h2>Hermes</h2>
+                  <p>連接既有 gateway（選用）</p>
+                </div>
+                <span class="setting-number">02</span>
+              </div>
+              <fieldset id="hermes-settings-fields" disabled>
+                <label for="hermes-url">Gateway 網址</label>
+                <input
+                  id="hermes-url"
+                  name="url"
+                  type="url"
+                  required
+                  maxlength="2048"
+                  placeholder="http://127.0.0.1:8642"
+                  aria-describedby="hermes-url-help"
+                />
+                <small id="hermes-url-help" class="field-help"
+                  >填入你已啟動的 Hermes API server 網址。</small
+                >
+                <label for="hermes-model">模型名稱</label>
+                <input
+                  id="hermes-model"
+                  name="model"
+                  required
+                  maxlength="256"
+                  placeholder="hermes-agent"
+                  autocomplete="off"
+                />
+                <label for="hermes-api-key">Gateway API key</label>
+                <input
+                  id="hermes-api-key"
+                  name="apiKey"
+                  type="password"
+                  maxlength="4096"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                  placeholder="貼上 gateway API key"
+                  aria-describedby="hermes-key-help"
+                />
+                <small id="hermes-key-help" class="field-help"></small>
+                <label class="remove-key"
+                  ><input id="hermes-clear-key" type="checkbox" />移除 gateway
+                  金鑰</label
+                >
+                <button type="submit" class="primary settings-save">
+                  儲存 Hermes 設定 <span>→</span>
+                </button>
+              </fieldset>
+              <p
+                id="hermes-save-status"
+                class="save-status"
+                role="status"
+                aria-live="polite"
+              ></p>
               <div id="hermes-config" class="config-status"></div>
-            </article>
+            </form>
           </div>
           <div class="setup-note">
-            <strong>修改後重新啟動 <code>npm run dev</code></strong>
+            <strong>儲存後，回到工作台選擇 Pi Agent 或 Pi × Hermes。</strong>
             <p>
-              連線狀態表示環境變數已設定；實際可用性會在第一次執行時確認。沒有金鑰也可以使用示範模式。
+              金鑰儲存在本機伺服器，不會回填至介面。「已設定」代表設定已保存；實際連線於送出任務時確認。Hermes
+              遠端工具使用 gateway 主機的權限與檔案。
             </p>
-            <button id="refresh-status" class="primary">重新檢查設定</button>
+            <button id="refresh-status" class="text-button" type="button">
+              重新載入已儲存設定 ↻
+            </button>
           </div>
         </section>
       </main>
