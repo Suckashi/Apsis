@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.loom/
+workspace/
+coverage/
+*.log
+artifacts/
