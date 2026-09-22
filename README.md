@@ -26,12 +26,12 @@ Open **http://localhost:3100**. With no API keys, select **示範模式** to try
 
 ## What works
 
-| Mode        | What runs                                                       | Configuration           |
-| ----------- | --------------------------------------------------------------- | ----------------------- |
-| Demo / 示範 | Local scripted streaming response                               | None                    |
-| Pi          | Official Pi SDK agent loop with local tools                     | OpenAI or Anthropic key |
-| Pi × Hermes | Pi can delegate tasks to the real Hermes HTTP gateway as a tool | Pi key + Hermes gateway |
-| Hermes      | Send the conversation directly to Hermes                        | Hermes gateway          |
+| Mode        | What runs                                                       | Configuration                        |
+| ----------- | --------------------------------------------------------------- | ------------------------------------ |
+| Demo / 示範 | Local scripted streaming response                               | None                                 |
+| Pi          | Official Pi SDK agent loop with local tools                     | OpenAI/Anthropic key or local Ollama |
+| Pi × Hermes | Pi can delegate tasks to the real Hermes HTTP gateway as a tool | Pi model + Hermes gateway            |
+| Hermes      | Send the conversation directly to Hermes                        | Hermes gateway                       |
 
 Pi includes `list_files`, `read_file`, `write_file`, `remember`, and `save_skill`. Hybrid mode additionally exposes `delegate_to_hermes`; Pi chooses when delegation is useful. Selecting hybrid does **not** force a Hermes call on every message.
 
@@ -45,6 +45,21 @@ The Web UI provides streamed Pi output, activity events, saved conversations, me
 - Follow elapsed task time, copy individual messages, and download the current conversation as Markdown with **匯出對話**. Exports contain visible messages, not internal Pi transcripts or credentials.
 - Reading earlier messages during streaming keeps your scroll position. Use **回到最新訊息** to resume following the response.
 - Drafts use browser local storage; they are separate from server conversation history and are not shared between browsers. If browser storage is unavailable, the UI reports that drafts cannot be saved.
+
+## Local Qwen / Ollama
+
+Talaria can run real Pi conversations and tools against an existing local Ollama installation without a cloud API key. The app uses Ollama's [OpenAI-compatible Chat Completions API](https://docs.ollama.com/api/openai-compatibility); the rest of the development setup remains Node.js and TypeScript.
+
+1. Start your installed Ollama application (or run `ollama serve`).
+2. In **連線設定**, choose **Ollama（本機）** and keep `http://127.0.0.1:11434` unless you use a different local port.
+3. Click **讀取已安裝模型**, choose an installed model such as `qwen3.5:9b`, then **儲存 Pi 設定**.
+4. Return to the workspace and select **Pi Agent**. Local tools keep the same per-run permissions. Pi × Hermes still requires a separate Hermes gateway.
+
+This does not download models or install Ollama. The connector accepts loopback HTTP addresses only. Model discovery filters cloud entries; use an installed local model with tool support. The UI hides cloud key fields for Ollama, and switching providers preserves existing cloud credentials. Saved status is configuration state; reading models verifies the server, and a task verifies generation. Initial model loading may take longer than subsequent replies.
+
+The local adapter uses text input, a 2,048-token output limit, and requests thinking off. Ollama controls the actual context size; the SDK's 8,192-token metadata does not change the server configuration. Long conversations may require a new session or a larger context configured in Ollama.
+
+Run the optional real-model test with `npm run test:ollama`. It creates an isolated temporary workspace, checks file-tool execution and streamed output through the actual Talaria API, then checks conversation recall. It defaults to `qwen3.5:9b`; override with `OLLAMA_MODEL` and `OLLAMA_URL`. This test needs your running local model and is separate from the offline `npm test` suite. No cloud keys or existing Talaria settings are used.
 
 ## Configure Pi from the UI
 

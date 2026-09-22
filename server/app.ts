@@ -1,3 +1,4 @@
+import { discoverOllama } from "./ollama.ts";
 import { exportConversation } from "../shared/export.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -103,6 +104,10 @@ export async function createApp({
         req.headers["x-loom-client"] !== "1"
       )
         fail("缺少工作台請求標頭。", 403);
+      if (req.method === "POST" && path === "/api/ollama/models") {
+        const input = await body(req);
+        return json(res, await discoverOllama(input.url));
+      }
       if (req.method === "GET" && assets[path]) {
         const [file, type] = assets[path];
         const content = await readFile(

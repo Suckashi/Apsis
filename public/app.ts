@@ -615,8 +615,11 @@ async function refresh() {
   $("#hermes-state").textContent = status.hermesReady ? "已設定" : "未連接";
   $("#hermes-state").classList.toggle("ready", status.hermesReady);
   $("#pi-config").textContent = status.piReady
-    ? "已設定 · " + status.provider + " / " + status.model
-    : "尚未設定模型 API key";
+    ? (status.provider === "ollama" ? "本機模型 · " : "已設定 · ") +
+      status.provider +
+      " / " +
+      status.model
+    : "尚未設定模型連線";
   $("#hermes-config").textContent = status.hermesReady
     ? "已設定 gateway · 實際連線於執行時確認"
     : "選用功能 · 尚未連接 gateway";

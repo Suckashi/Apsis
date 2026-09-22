@@ -1,3 +1,4 @@
+import { defaultOllamaUrl, ollamaUrl, ollamaModelName } from "./ollama.ts";
 import type {
   Environment,
   SettingsView,
@@ -22,13 +23,18 @@ const keyFields = {
 const allowedFields = [
   "PI_PROVIDER",
   "PI_MODEL",
+  "OLLAMA_URL",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "HERMES_URL",
   "HERMES_API_KEY",
   "HERMES_MODEL",
 ];
-const defaults = { openai: "gpt-4.1-mini", anthropic: "claude-sonnet-4-6" };
+const defaults = {
+  openai: "gpt-4.1-mini",
+  anthropic: "claude-sonnet-4-6",
+  ollama: "qwen3.5:9b",
+};
 const models = createModels();
 models.setProvider(openaiProvider());
 models.setProvider(anthropicProvider());
@@ -57,16 +63,32 @@ function validateInput(section: string, value: unknown): Environment {
     invalid("設定必須為 JSON 物件。");
   const allowed =
     section === "pi"
-      ? ["provider", "model", "apiKey"]
+      ? ["provider", "model", "apiKey", "url"]
       : ["url", "model", "apiKey"];
   if (Object.keys(input).some((key) => !allowed.includes(key)))
     invalid("設定包含不支援的欄位。");
   const patch: Environment = {};
   if (section === "pi") {
-    if (input.provider !== "openai" && input.provider !== "anthropic")
-      invalid("請選擇 OpenAI 或 Anthropic。");
+    if (
+      input.provider !== "openai" &&
+      input.provider !== "anthropic" &&
+      input.provider !== "ollama"
+    )
+      invalid("請選擇 OpenAI、Anthropic 或 Ollama。");
     const model = text(input.model, "模型");
-    if (!catalog[input.provider].some((item) => item.id === model))
+    if (input.provider === "ollama") {
+      ollamaModelName(model);
+      patch.OLLAMA_URL = ollamaUrl(
+        Object.hasOwn(input, "url") ? input.url : defaultOllamaUrl,
+      );
+      if (Object.hasOwn(input, "apiKey"))
+        invalid("本機 Ollama 不需要 API key。");
+    } else if (Object.hasOwn(input, "url"))
+      invalid("只有 Ollama 支援本機網址設定。");
+    if (
+      input.provider !== "ollama" &&
+      !catalog[input.provider].some((item) => item.id === model)
+    )
       invalid("此模型不在目前 Pi SDK 的支援清單，請從建議模型中選擇。");
     patch.PI_PROVIDER = input.provider;
     patch.PI_MODEL = model;
@@ -82,7 +104,11 @@ function validateInput(section: string, value: unknown): Environment {
   }
   if (Object.hasOwn(input, "apiKey")) {
     const field =
-      keyFields[section === "pi" ? (input.provider as Provider) : "hermes"];
+      keyFields[
+        section === "pi"
+          ? (input.provider as Exclude<Provider, "ollama">)
+          : "hermes"
+      ];
     if (input.apiKey === null)
       patch[field] = ""; // Explicitly disable, including an environment fallback.
     else if (input.apiKey !== "") {
@@ -141,7 +167,9 @@ export class Settings {
   view(): SettingsView {
     const env = this.environment();
     const config = configuration(env);
-    const credential = (provider: Provider | "hermes"): CredentialState => {
+    const credential = (
+      provider: Exclude<Provider, "ollama"> | "hermes",
+    ): CredentialState => {
       const field = keyFields[provider];
       return {
         configured: Boolean(env[field]),
@@ -156,6 +184,7 @@ export class Settings {
       pi: {
         provider: config.provider,
         model: config.model,
+        ollamaUrl: env.OLLAMA_URL || defaultOllamaUrl,
         credentials: {
           openai: credential("openai"),
           anthropic: credential("anthropic"),

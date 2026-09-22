@@ -6,7 +6,7 @@ export function modeRequirement(
   allowWrites: boolean,
 ): string | null {
   if ((mode === "pi" || mode === "hybrid") && !status.piReady)
-    return "先設定 Pi 的模型與 API key，就能開始真實任務。";
+    return "先設定 Pi 模型（雲端 API 或本機 Ollama），就能開始真實任務。";
   if ((mode === "hermes" || mode === "hybrid") && !status.hermesReady)
     return "先連接 Hermes gateway，才能使用這個引擎。";
   if (mode === "hermes" && !allowWrites)

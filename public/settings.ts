@@ -46,7 +46,16 @@ export function createSettingsUI({
     $("#pi-api-key").value = "";
     $("#pi-api-key").disabled = false;
     $("#pi-clear-key").checked = false;
-    const credential = saved.pi.credentials[provider as Provider];
+    const local = provider === "ollama";
+    $("#ollama-fields").hidden = !local;
+    $("#pi-key-fields").hidden = local;
+    $<HTMLInputElement>("#ollama-url").required = local;
+    $("#pi-model-help").textContent = local
+      ? "先讀取已安裝模型，或輸入完整模型名稱（含標籤）。"
+      : "可從建議清單選擇目前支援的模型。";
+    const credential = local
+      ? undefined
+      : saved.pi.credentials[provider as Exclude<Provider, "ollama">];
     $("#pi-key-help").textContent = credentialHint(credential);
     $("#pi-api-key").placeholder = credential?.configured
       ? "留空保留目前金鑰"
@@ -56,6 +65,7 @@ export function createSettingsUI({
     if (section === "pi") {
       $("#pi-provider").value = saved.pi.provider;
       piFields(saved.pi.provider, saved.pi.model);
+      $<HTMLInputElement>("#ollama-url").value = saved.pi.ollamaUrl;
     } else {
       $("#hermes-url").value = saved.hermes.url;
       $("#hermes-model").value = saved.hermes.model;
@@ -136,10 +146,12 @@ export function createSettingsUI({
               url: $("#hermes-url").value.trim(),
               model: $("#hermes-model").value.trim(),
             };
+      const local = section === "pi" && input.provider === "ollama";
+      if (local) input.url = $<HTMLInputElement>("#ollama-url").value.trim();
       const key = $<HTMLInputElement>("#" + section + "-api-key").value.trim();
-      if ($<HTMLInputElement>("#" + section + "-clear-key").checked)
+      if (!local && $<HTMLInputElement>("#" + section + "-clear-key").checked)
         input.apiKey = null;
-      else if (key) input.apiKey = key;
+      else if (!local && key) input.apiKey = key;
       active.add(section);
       $<HTMLFieldSetElement>("#" + section + "-settings-fields").disabled =
         true;
@@ -177,6 +189,44 @@ export function createSettingsUI({
     } catch (caught) {
       const error = asError(caught);
       notify(error.message);
+    }
+  });
+  $("#discover-ollama").addEventListener("click", async () => {
+    const button = $<HTMLButtonElement>("#discover-ollama");
+    button.disabled = true;
+    const url = $<HTMLInputElement>("#ollama-url").value.trim();
+    $("#ollama-discovery").textContent = "正在讀取本機模型…";
+    try {
+      const models = await api<{ id: string; name: string }[]>(
+        "ollama/models",
+        { method: "POST", body: JSON.stringify({ url }) },
+      );
+      if (
+        $("#pi-provider").value !== "ollama" ||
+        $<HTMLInputElement>("#ollama-url").value.trim() !== url
+      )
+        return;
+      saved.models.ollama = models;
+      const current = $("#pi-model").value;
+      const options = $("#pi-model-options");
+      options.replaceChildren(
+        ...models.map((model) => {
+          const option = document.createElement("option");
+          option.value = model.id;
+          return option;
+        }),
+      );
+      if (models.length && !models.some((model) => model.id === current)) {
+        $("#pi-model").value = models[0].id;
+        status("pi", "模型已選擇，請儲存設定。");
+      }
+      $("#ollama-discovery").textContent = models.length
+        ? "已連接 Ollama · 找到 " + models.length + " 個本機模型。"
+        : "已連接 Ollama，但沒有已安裝的本機模型。";
+    } catch (caught) {
+      $("#ollama-discovery").textContent = asError(caught).message;
+    } finally {
+      button.disabled = false;
     }
   });
   return { load };

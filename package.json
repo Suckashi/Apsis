@@ -14,7 +14,8 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build": "npm run check && node scripts/build.ts"
+    "build": "npm run check && node scripts/build.ts",
+    "test:ollama": "node scripts/test-ollama.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.87.0",

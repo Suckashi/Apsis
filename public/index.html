@@ -268,7 +268,8 @@
             <span class="settings-label">本機儲存 · 即時生效</span>
           </div>
           <p class="view-description">
-            選擇模型、填入金鑰，開始你的第一個真實任務。儲存後不需重新啟動。
+            選擇雲端服務或本機
+            Ollama，開始你的第一個真實任務。儲存後不需重新啟動。
           </p>
           <div class="settings-grid">
             <form id="pi-settings-form" class="settings-card connection-form">
@@ -285,7 +286,27 @@
                 <select id="pi-provider" name="provider">
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
+                  <option value="ollama">Ollama（本機）</option>
                 </select>
+                <div id="ollama-fields" class="local-model-fields" hidden>
+                  <label for="ollama-url">Ollama 網址</label>
+                  <input
+                    id="ollama-url"
+                    type="url"
+                    value="http://127.0.0.1:11434"
+                    maxlength="2048"
+                  />
+                  <button
+                    id="discover-ollama"
+                    class="quiet-button"
+                    type="button"
+                  >
+                    讀取已安裝模型 ↻
+                  </button>
+                  <small id="ollama-discovery" class="field-help" role="status"
+                    >使用已安裝的本機模型，不需要 API key。</small
+                  >
+                </div>
                 <label for="pi-model">模型</label>
                 <input
                   id="pi-model"
@@ -301,24 +322,26 @@
                 ><small id="pi-model-help" class="field-help"
                   >可從建議清單選擇目前支援的模型。</small
                 >
-                <label for="pi-api-key">API key</label>
-                <input
-                  id="pi-api-key"
-                  name="apiKey"
-                  type="password"
-                  maxlength="4096"
-                  autocomplete="new-password"
-                  spellcheck="false"
-                  placeholder="貼上你的 API key"
-                  aria-describedby="pi-key-help"
-                />
-                <small id="pi-key-help" class="field-help"></small>
-                <label class="remove-key"
-                  ><input
-                    id="pi-clear-key"
-                    type="checkbox"
-                  />移除此服務的金鑰</label
-                >
+                <div id="pi-key-fields" class="local-model-fields">
+                  <label for="pi-api-key">API key</label>
+                  <input
+                    id="pi-api-key"
+                    name="apiKey"
+                    type="password"
+                    maxlength="4096"
+                    autocomplete="new-password"
+                    spellcheck="false"
+                    placeholder="貼上你的 API key"
+                    aria-describedby="pi-key-help"
+                  />
+                  <small id="pi-key-help" class="field-help"></small>
+                  <label class="remove-key"
+                    ><input
+                      id="pi-clear-key"
+                      type="checkbox"
+                    />移除此服務的金鑰</label
+                  >
+                </div>
                 <button type="submit" class="primary settings-save">
                   儲存 Pi 設定 <span>→</span>
                 </button>

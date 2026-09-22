@@ -1,3 +1,4 @@
+import { ollamaProvider, defaultOllamaUrl } from "./ollama.ts";
 import type {
   AgentMessage,
   AgentTool,
@@ -60,14 +61,20 @@ export function configuration(env: Environment = process.env): Status {
   const provider = env.PI_PROVIDER || "openai";
   const model =
     env.PI_MODEL ||
-    (provider === "anthropic" ? "claude-sonnet-4-6" : "gpt-4.1-mini");
+    (provider === "ollama"
+      ? "qwen3.5:9b"
+      : provider === "anthropic"
+        ? "claude-sonnet-4-6"
+        : "gpt-4.1-mini");
   return {
     provider,
     model,
     piReady: Boolean(
-      provider === "anthropic"
-        ? env.ANTHROPIC_API_KEY
-        : provider === "openai" && env.OPENAI_API_KEY,
+      provider === "ollama"
+        ? true
+        : provider === "anthropic"
+          ? env.ANTHROPIC_API_KEY
+          : provider === "openai" && env.OPENAI_API_KEY,
     ),
     hermesReady: Boolean(env.HERMES_URL && env.HERMES_API_KEY),
   };
@@ -206,7 +213,11 @@ export async function runPi({
       );
     models = createModels();
     models.setProvider(
-      config.provider === "anthropic" ? anthropicProvider() : openaiProvider(),
+      config.provider === "ollama"
+        ? ollamaProvider(config.model, env.OLLAMA_URL || defaultOllamaUrl)
+        : config.provider === "anthropic"
+          ? anthropicProvider()
+          : openaiProvider(),
     );
     model = models.getModel(config.provider, config.model);
     if (!model)
@@ -226,9 +237,11 @@ export async function runPi({
     },
     streamFn,
     getApiKey: () =>
-      config.provider === "anthropic"
-        ? env.ANTHROPIC_API_KEY
-        : env.OPENAI_API_KEY,
+      config.provider === "ollama"
+        ? "ollama"
+        : config.provider === "anthropic"
+          ? env.ANTHROPIC_API_KEY
+          : env.OPENAI_API_KEY,
     toolExecution: "sequential",
     finishTurn: () => {
       if (++turns >= 12) {

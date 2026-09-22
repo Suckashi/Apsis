@@ -1412,3 +1412,8 @@ a.quiet-button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
+.local-model-fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
