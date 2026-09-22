@@ -625,6 +625,137 @@ main {
 .message.error .message-content {
   color: #a04433;
 }
+.message-content.markdown {
+  white-space: normal;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown pre,
+.markdown .markdown-table {
+  margin: 0 0 1em;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  line-height: 1.45;
+  margin: 1.3em 0 0.55em;
+  color: #284f3c;
+  font-weight: 650;
+}
+.markdown h1 {
+  font-size: 1.5em;
+}
+.markdown h2 {
+  font-size: 1.3em;
+}
+.markdown h3 {
+  font-size: 1.15em;
+}
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 1.6em;
+}
+.markdown li + li {
+  margin-top: 0.3em;
+}
+.markdown li > p {
+  margin-bottom: 0.4em;
+}
+.markdown li > ul,
+.markdown li > ol {
+  margin: 0.3em 0;
+}
+.markdown blockquote {
+  border-left: 3px solid #b1cbbb;
+  padding: 0.2em 1em;
+  color: #61756a;
+}
+.markdown blockquote > :last-child {
+  margin-bottom: 0;
+}
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.9em;
+  background: #eaf0ec;
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+}
+.markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  background: #f1f5f2;
+  color: #284f3c;
+  font-size: 1em;
+  border: 1px solid #dce6df;
+  border-radius: 8px;
+  padding: 14px 16px;
+  line-height: 1.65;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.markdown pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+}
+.markdown a {
+  color: #267454;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.markdown hr {
+  border: 0;
+  border-top: 1px solid #dce6df;
+  margin: 1.5em 0;
+}
+.markdown-table {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.markdown table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: 0.95em;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid #dce6df;
+  padding: 8px 12px;
+  text-align: left;
+  min-width: 100px;
+}
+.markdown th {
+  background: #edf3ef;
+  font-weight: 600;
+}
+.markdown .align-left {
+  text-align: left;
+}
+.markdown .align-center {
+  text-align: center;
+}
+.markdown .align-right {
+  text-align: right;
+}
+.markdown-image {
+  color: #61756a;
+}
 .library-view {
   padding: 44px 48px;
   max-width: 1150px;

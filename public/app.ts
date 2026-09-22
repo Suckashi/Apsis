@@ -12,6 +12,7 @@ import { asError } from "../shared/errors.ts";
 import { createSettingsUI } from "./settings.ts";
 import { $ } from "./dom.ts";
 import { modeRequirement, preferences } from "./workflow.ts";
+import { renderMarkdown } from "./markdown.ts";
 const state: {
   session: SessionView | null;
   sessions: SessionSummary[];
@@ -187,6 +188,13 @@ function renderSessions() {
     $("#sessions").append(button);
   }
 }
+const messageSources = new WeakMap<HTMLElement, string>();
+function setMessageContent(content: HTMLElement, text: string) {
+  messageSources.set(content, text);
+  if (content.classList.contains("markdown"))
+    content.innerHTML = renderMarkdown(text);
+  else content.textContent = text;
+}
 function addMessage(role: "user" | "assistant", text: string, error = false) {
   const item = document.createElement("article");
   item.className = "message " + role + (error ? " error" : "");
@@ -200,8 +208,9 @@ function addMessage(role: "user" | "assistant", text: string, error = false) {
   label.textContent =
     role === "user" ? "你" : labels[state.session?.mode || $("#mode").value];
   const content = document.createElement("div");
-  content.className = "message-content";
-  content.textContent = text;
+  content.className =
+    "message-content" + (role === "assistant" ? " markdown" : "");
+  setMessageContent(content, text);
   const copy = document.createElement("button");
   copy.className = "copy-message quiet-button";
   copy.textContent = "複製";
@@ -211,7 +220,7 @@ function addMessage(role: "user" | "assistant", text: string, error = false) {
   );
   copy.addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText(content.textContent || "");
+      await navigator.clipboard.writeText(messageSources.get(content) || "");
       toast("已複製訊息。");
     } catch {
       toast("無法存取剪貼簿，請選取訊息文字複製。");
@@ -426,7 +435,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
         output += data.text;
         if (content) {
           content.classList.remove("waiting");
-          content.textContent = output;
+          setMessageContent(content, output);
         }
       }
       if (data.type === "activity") addActivity(data.text);
@@ -459,7 +468,10 @@ $("#chat-form").addEventListener("submit", async (event) => {
     saveDraft();
     const error = asError(caught);
     if (content) {
-      content.textContent = (output ? output + "\n\n" : "") + error.message;
+      setMessageContent(
+        content,
+        (output ? output + "\n\n" : "") + error.message,
+      );
       content.closest(".message")?.classList.add("error");
     }
     toast(error.message);

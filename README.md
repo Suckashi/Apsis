@@ -63,6 +63,7 @@ The Web UI provides streamed Pi output, activity events, saved conversations, me
 - Search saved conversations by title; mobile users can expand **最近的對話** to browse the same history.
 - Unsent drafts are stored per conversation in this browser, and restored after switching conversations or refreshing. A failed task restores its prompt for editing; it is never retried automatically.
 - Follow elapsed task time, copy individual messages, and download the current conversation as Markdown with **匯出對話**. Exports contain visible messages, not internal Pi transcripts or credentials.
+- Agent replies render Markdown during streaming and when reopening conversations: headings, lists, quotes, links, code blocks, and tables. Copy preserves the original Markdown. Raw HTML is displayed as text, unsafe link schemes are rejected, and image references display their description without loading remote images.
 - Reading earlier messages during streaming keeps your scroll position. Use **回到最新訊息** to resume following the response.
 - Drafts use browser local storage; they are separate from server conversation history and are not shared between browsers. If browser storage is unavailable, the UI reports that drafts cannot be saved.
 
