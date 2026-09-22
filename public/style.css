@@ -1417,3 +1417,21 @@ a.quiet-button[aria-disabled="true"] {
   gap: 10px;
   min-width: 0;
 }
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+@media (max-width: 680px) {
+  .topbar-actions {
+    gap: 5px;
+  }
+  .topbar-actions .quiet-button {
+    font-size: 10px;
+    padding: 6px;
+  }
+  .topbar-actions .local-badge {
+    display: none;
+  }
+}

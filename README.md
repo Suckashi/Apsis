@@ -24,6 +24,26 @@ Open **http://localhost:3100**. With no API keys, select **示範模式** to try
 - `npm run build` — checks types and compiles browser assets to `dist/public/`.
 - `npm run dev` handles frontend compilation and backend startup together. Node.js 22.19+ executes server TypeScript natively.
 
+## Remote preview with a password
+
+Local development still uses `npm run dev`. Optional sharing uses:
+
+```sh
+npm run dev:share
+```
+
+Install [Cloudflare's official cloudflared client](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) first. On Windows, use `winget install --id Cloudflare.cloudflared --exact`, or put the official standalone executable at `.tools/cloudflared.exe`. The project detects that location without changing your system PATH. The executable is not committed to Git and is not required for ordinary development.
+
+The share command reuses a running Talaria on `PORT` (default 3100), or starts the development server. It launches a separate password-protected gateway on loopback `SHARE_PORT` (default 3102), then connects a Quick Tunnel to that gateway. It never tunnels directly to the unprotected app or Ollama.
+
+The terminal prints the random HTTPS URL and a newly generated 144-bit password. Both are also saved locally in the Git-ignored `.loom/share-connection.json`; keep that file private. Someone with both can log in and use the full workspace, including conversations, settings, agent runs, file-tool permissions and exports. This is **full owner access**, not a read-only preview. Cloudflare carries the remote traffic. This mode uses Talaria password authentication, **not Cloudflare Access**.
+
+Remote login uses an HttpOnly, Secure, SameSite cookie, expires after eight hours and can be ended using **登出遠端**. Authentication is required for all app pages and APIs. The gateway validates the exact assigned hostname, validates request origins, limits failed login attempts and forwards a restricted header set to the local app. Changing a forwarded Host header does not bypass authentication.
+
+Press Ctrl+C in the sharing terminal to close the tunnel and its gateway. A pre-existing local dev server stays running; a dev server started by the share command stops with it. Restarting sharing replaces the URL, password and all login sessions. Your computer must remain awake and online; Ollama must also be running for local-model tasks.
+
+Quick Tunnels are intended for development, have no uptime guarantee, and do not support SSE. Talaria uses fetch with NDJSON instead; chunk timing over an actual tunnel still needs external verification. For a permanent URL with Cloudflare Access, configure an owned domain and an Access policy separately. That deployment is not included in this temporary-sharing command.
+
 ## What works
 
 | Mode        | What runs                                                       | Configuration                        |
@@ -111,7 +131,7 @@ The connector uses the [documented Hermes Chat Completions API](https://hermes-a
 
 ## Scope and boundaries
 
-This first version is a **single-user local development product**. The server binds to `127.0.0.1`, validates Host/Origin headers, requires a custom header for mutations, and applies a restrictive Content Security Policy. Do not expose it through a public tunnel or change its bind address without adding authentication and authorization.
+This first version is a **single-user local development product**. The server binds to `127.0.0.1`, validates Host/Origin headers, requires a custom header for mutations, and applies a restrictive Content Security Policy. Keep this app bound to loopback. Optional remote previews must use the authenticated sharing gateway described above; do not point a tunnel directly at port 3100.
 
 Writes and remote Hermes tools are off by default and enabled per run from the UI. This is not an OS sandbox: another local process can still modify files or race file operations. Only use trusted local workspaces. The project does not yet include multi-user login, terminal execution, schedules, MCP management, or cloud deployment.
 

@@ -61,9 +61,19 @@
           <div class="breadcrumb">
             工作空間 <span>/</span> <strong id="page-name">工作台</strong>
           </div>
-          <span id="connection-state" class="local-badge" role="status"
-            >正在連接工作空間</span
-          >
+          <div class="topbar-actions">
+            <form
+              id="remote-logout"
+              method="post"
+              action="/__share/logout"
+              hidden
+            >
+              <button type="submit" class="quiet-button">登出遠端</button>
+            </form>
+            <span id="connection-state" class="local-badge" role="status"
+              >正在連接工作空間</span
+            >
+          </div>
         </header>
         <section id="chat-view" class="view chat-layout">
           <div class="conversation">

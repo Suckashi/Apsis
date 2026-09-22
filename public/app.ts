@@ -92,6 +92,8 @@ async function api<T = unknown>(
       ...options.headers,
     },
   });
+  if (response.headers.get("X-Talaria-Shared") === "1")
+    $("#remote-logout").hidden = false;
   const data = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new Error(data.error || "請求失敗。");
   return data;
@@ -623,7 +625,9 @@ async function refresh() {
   $("#hermes-config").textContent = status.hermesReady
     ? "已設定 gateway · 實際連線於執行時確認"
     : "選用功能 · 尚未連接 gateway";
-  $("#connection-state").textContent = "本機工作空間 · 已連接";
+  $("#connection-state").textContent = $("#remote-logout").hidden
+    ? "本機工作空間 · 已連接"
+    : "遠端工作空間 · 已登入";
   updateMode();
   if (!document.querySelector("#messages .message")) renderWelcome();
   await refreshFiles();

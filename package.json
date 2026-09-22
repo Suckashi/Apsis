@@ -15,7 +15,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "build": "npm run check && node scripts/build.ts",
-    "test:ollama": "node scripts/test-ollama.ts"
+    "test:ollama": "node scripts/test-ollama.ts",
+    "dev:share": "npm run check && node --env-file-if-exists=.env scripts/share.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.87.0",
