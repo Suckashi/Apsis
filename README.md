@@ -1,20 +1,39 @@
 # Apsis
 
-## New Bot workspace
-
-`npm run dev` now opens the rebuilt Bot interface: persistent conversations, third-party LLMs, queued work, approvals, browser tools, artifacts, routines and MCP. New data lives in `.apsis/`; existing data is retained.
-
-See the [current Bot workspace guide](docs/bot-workspace.md) for operation and limitations. Run `npm run test:bots:browser` for the complete local integration check.
-
-The sections below document the legacy interface and underlying runtimes. Use `npm run dev:legacy` to open that interface.
-
----
-
 **English** | [繁體中文](README.zh-TW.md)
+
+Apsis is a local Bot workspace for persistent conversations and third-party LLM APIs. Each Bot has its own name, instructions, model choice, one of six avatars, conversation, schedules, and results. Tasks run in the background; shell, browser changes, and external MCP actions require approval. The interface supports light and dark themes, mobile layouts, and Telegram access to the same conversation.
+
+## Run the current workspace
+
+Requires Node.js 22.19 or later and npm.
+
+```sh
+git clone https://github.com/Suckashi/Apsis.git
+cd Apsis
+npm ci
+npm run dev
+```
+
+Open [http://localhost:3100](http://localhost:3100). Go to **Settings & Tools → Model connections** to add a provider, enter its model ID, test streaming and tool calls, and set the default model. For a local Ollama model such as `qwen3.5:9b`, select **Ollama** and use `http://127.0.0.1:11434`. To test Ollama through Apsis's **OpenAI-compatible** provider, use `http://127.0.0.1:11434/v1` and the same model ID. The Ollama service and model must already be available locally; no API key is needed for this local endpoint. Other compatible services use their own base URL and key.
+
+Click **New Bot** to choose its avatar, name, instructions, and model. To edit or delete a Bot later, click its name at the top of the conversation or **Customize Bot** in the details panel. Deletion stops its work and removes its Bot records; workspace files, run logs, and completed external actions remain. See the [Bot workspace guide](docs/bot-workspace.md) for tools, approvals, schedules, Telegram, and limitations.
+
+```sh
+npm run build
+npm test
+npm run test:bots:browser
+```
+
+The browser integration test uses an isolated fixture and a deterministic model substitute. Use **Test** in Model connections to check a real model. Current data is stored in `.apsis/` and excluded from Git. The previous interface and `.loom/` data remain available with `npm run dev:legacy` after stopping the current server.
+
+## Legacy interface and architecture
+
+The following sections document the previous interface and underlying runtimes.
 
 A local-first personal AI workspace with a Web interface and a Telegram bot. Apsis uses **TypeScript and Node.js**, selectable Pi, Deep Agents and OpenAI Agents SDK runtimes, and a local memory architecture inspired by Hermes Agent.
 
-Start development with `npm run dev`. Python, Docker, Redis, and a separate database server are not required. Ollama is optional for local models; cloud APIs can be used instead.
+Start the legacy interface with `npm run dev:legacy`. Python, Docker, Redis, and a separate database server are not required. Ollama is optional for local models; cloud APIs can be used instead.
 
 ## What Apsis does
 
@@ -63,7 +82,7 @@ Requires **Node.js 22.19 or later** and npm.
 git clone https://github.com/Suckashi/Apsis.git
 cd Apsis
 npm ci
-npm run dev
+npm run dev:legacy
 ```
 
 Open [http://localhost:3100](http://localhost:3100).
@@ -204,7 +223,7 @@ Telegram currently accepts text and sends completed plain-text replies. Voice, i
 
 ## Remote preview
 
-Ordinary development uses `npm run dev`. For optional remote access, install [Cloudflare's cloudflared client](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) and run:
+Legacy development uses `npm run dev:legacy`. For optional remote access, install [Cloudflare's cloudflared client](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) and run:
 
 ```sh
 npm run dev:share

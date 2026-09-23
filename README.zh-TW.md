@@ -1,24 +1,43 @@
 # Apsis
 
-## 新版 Bot 工作空間
+[English](README.md) | **繁體中文**
 
-`npm run dev` 現在預設開啟重新製作的 Bot 介面：持續對話、第三方 LLM、工作佇列、工具核准、瀏覽器、成果、排程與 MCP。新資料使用 `.apsis/`，舊資料保留。
+Apsis 是本機 Bot 工作空間，提供持續對話與第三方 LLM API 連線。每位 Bot 可設定名稱、角色指令、模型和六款圖示，並擁有自己的對話、排程與成果。任務可在背景執行；Shell、瀏覽器頁面變更及外部 MCP 操作需先核准。介面支援淺色／深色模式、手機版，以及與 Web 共用對話的 Telegram Bot。
 
-**目前的操作與限制請看 [Bot 工作空間指南](docs/bot-workspace.md)。** 執行 `npm run test:bots:browser` 可驗證完整流程。
+## 啟動目前的 Bot 工作空間
 
-以下保留舊介面與底層架構說明；舊介面可用 `npm run dev:legacy` 開啟。
+需要 Node.js 22.19 以上及 npm。
 
----
+```sh
+git clone https://github.com/Suckashi/Apsis.git
+cd Apsis
+npm ci
+npm run dev
+```
+
+開啟 [http://localhost:3100](http://localhost:3100)，到**設定與工具 → 模型連線**新增服務、填入模型 ID，測試串流與工具呼叫後設為預設。若使用本機 Ollama 的 `qwen3.5:9b`，選 **Ollama** 並填入 `http://127.0.0.1:11434`。若要測試 Apsis 的 **OpenAI 相容**連線，可使用 `http://127.0.0.1:11434/v1` 和相同的模型 ID。本機 Ollama 端點不需 API key，但 Ollama 服務與模型須先可用；其他相容服務可填入自己的網址與金鑰。
+
+按**新增 Bot**可選圖示、名稱、角色指令與模型。之後點聊天頂端的 Bot 名稱，或詳情中的**自訂 Bot**，即可修改或刪除。刪除會停止任務並移除 Bot 紀錄；工作區實體檔案、執行日誌與已完成的外部操作會保留。完整操作與限制請見 [Bot 工作空間說明](docs/bot-workspace.md)。
+
+```sh
+npm run build
+npm test
+npm run test:bots:browser
+```
+
+瀏覽器整合測試使用隔離資料與可重現的模型替身；實際模型請在「模型連線」按**測試**確認。新版資料放在 `.apsis/`，不會加入 Git。停止目前伺服器後，可用 `npm run dev:legacy` 開啟舊介面與 `.loom/` 資料。
+
+## 舊版介面與底層架構
+
+以下章節記錄舊版介面與執行引擎。
 
 一般聊天不必建立 Agent，也不用開啟寫入權限。預設引擎已接入 `@earendil-works/pi-coding-agent` 0.87.0，支援對話延續、上下文壓縮、精準修改與可取消的命令工具，舊對話可繼續使用。
 
 開啟修改檔案後，可用 `edit_file` 精準替換文字。在任務選項開啟「允許執行命令」也會開啟修改檔案；Windows 使用 PowerShell，其他系統使用 Bash。命令從工作區開始，但可存取主機其他位置，不是沙箱。Shell 預設關閉，Telegram 尚未開放；單次命令預設 60 秒、最高 120 秒，可隨任務停止。自建 Agent 還需勾選 shell 工具，既有對話保留建立時的工具設定。SDK 使用 Apsis 提供的模型、工具與知識，不載入 Pi 全域設定或擴充。
 
-[English](README.md) | **繁體中文**
-
 Apsis 是優先在本機運作的個人 AI 工作區，提供 Web 介面與 Telegram Bot。專案使用 **TypeScript 與 Node.js**，可選擇 Pi、Deep Agents 與 OpenAI Agents SDK 執行任務，並參考 Hermes Agent 架構實作本機記憶與技能管理。
 
-執行 `npm run dev` 即可開始開發，不需要 Python、Docker、Redis 或獨立資料庫伺服器。本機模型可選用 Ollama，也可以直接連接雲端 API。
+執行 `npm run dev:legacy` 可開啟舊版介面，不需要 Python、Docker、Redis 或獨立資料庫伺服器。本機模型可選用 Ollama，也可以直接連接雲端 API。
 
 ## Apsis 可以做什麼
 
@@ -63,7 +82,7 @@ Telegram ───── 長輪詢 ────────┤
 git clone https://github.com/Suckashi/Apsis.git
 cd Apsis
 npm ci
-npm run dev
+npm run dev:legacy
 ```
 
 開啟 [http://localhost:3100](http://localhost:3100)。
@@ -204,7 +223,7 @@ Telegram 目前只接收文字，並在任務完成後傳送純文字回覆，�
 
 ## 遠端預覽
 
-一般開發使用 `npm run dev`。若需要遠端存取，請安裝 [Cloudflare 的 cloudflared 用戶端](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)，再執行：
+舊版介面使用 `npm run dev:legacy`。若需要遠端存取，請安裝 [Cloudflare 的 cloudflared 用戶端](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)，再執行：
 
 ```sh
 npm run dev:share
