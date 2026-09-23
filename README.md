@@ -53,13 +53,13 @@ npm run dev
 
 Open [http://localhost:3100](http://localhost:3100).
 
-Click the **Settings** gear, open **Model connections (模型連線)** in the dialog, choose a provider, enter its credential and one or more model IDs, and save. Set a default connection and model for ordinary Apsis conversations; you can also choose a model in the chat composer before starting a conversation. Changes apply without restarting. If no model is configured, select **Demo mode (示範模式)** under the input's **Task options (任務選項)** to try scripted streaming responses without an API call.
+Click the **Settings** gear, open **Model connections (模型連線)** in the dialog, choose a provider, enter its credential and one or more model IDs, and save. Set a default connection and model for ordinary Apsis conversations; you can also choose a model in the chat composer before starting a conversation. Changes apply without restarting. If no model is configured, the home screen guides you to add a service. Demo mode is no longer part of everyday controls; existing demo conversations remain available.
 
 Development starts the server and browser build together. Browser assets are rebuilt on changes, and the backend restarts automatically. Refresh the browser after frontend changes.
 
 ## Creating agents
 
-Open **Settings → My Agents (我的 Agents) → Create Agent (建立 Agent)**. Start from a research, code-reading or writing template, then configure instructions, a named connection, model ID, tools, skills and memory scope. Engine selection lives under Advanced settings. Save, then select **Start conversation (開始對話)** to try it. An agent can also be selected in the input's task options.
+Open **Settings → My Agents (我的 Agents) → Create Agent (建立 Agent)**. Start from a research, code-reading or writing template, then configure instructions, a named connection, model ID, tools, skills and memory scope. Engine selection lives under Advanced settings. Save, then select **Start conversation (開始對話)** to try it. Switch agents from the sidebar.
 
 | Engine            | Model connections                                | Runtime behavior                                                                         |
 | ----------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
@@ -67,7 +67,7 @@ Open **Settings → My Agents (我的 Agents) → Create Agent (建立 Agent)**.
 | Deep Agents       | OpenAI, Anthropic, Ollama, custom compatible API | Planning, internal subagents, virtual scratch files and framework summarization          |
 | OpenAI Agents SDK | OpenAI, Ollama, custom compatible API            | SDK agent loop; OpenAI uses Responses, others use Chat Completions; SDK tracing disabled |
 
-All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a named model connection and one of its model IDs. Connections have independent URLs and credentials. Existing Bot settings remain available for Telegram and legacy configurations.
+All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a named model connection and one of its model IDs. Connections have independent URLs and credentials. Web and Telegram share the same model connection manager.
 
 Private memory and history retrieval are scoped to the agent. Shared agents use Apsis's shared memories and shared-conversation search. Agents see selected shared skills and skills they create themselves. Workspace files remain shared; the owner can inspect all knowledge in the management UI. This is not multi-user isolation.
 
@@ -81,7 +81,7 @@ In **Model connections**, choose a service first, configure its endpoint and cre
 
 ## Background tasks and operation history
 
-Tasks belong to the server. Select **Run in background (背景執行)** to navigate away and work elsewhere; closing the tab or losing the network does not cancel a task. **Task history (任務紀錄)** shows status, output, tool names, targets, operation outcomes and provider-reported token usage, with 50 runs per page. Stop an active run or open its conversation from its card.
+Tasks belong to the server. After sending, switch conversations or open settings directly; closing the tab or losing the network does not cancel a task. **Task history (任務紀錄)** shows status, output, tool names, targets, operation outcomes and provider-reported token usage, with 50 runs per page. Stop an active run or open its conversation from its card.
 
 The server and computer must remain running. Restart marks unfinished runs interrupted and started-but-unconfirmed operations unknown, without automatic replay. A new message creates a new run; inspect previous side effects first. Deep Agents usage covers available main-flow message statistics, not a complete subagent bill. No estimated prices are shown.
 
@@ -132,7 +132,7 @@ The adapter supports text input and requests up to 4,096 output tokens. Its cont
 
 Saved named connections apply to new Web conversations and agents. The selected connection and model belong to the conversation, so resuming an existing conversation keeps its choice. An already-running task keeps its settings snapshot. Keys are never returned by the configuration APIs or repopulated into password fields. To remove one, select the explicit key-removal option and save.
 
-Named connections and their credentials are stored in `.loom/connections.json`. The legacy Bot settings used by Telegram and existing configurations are stored in `.loom/settings.json` and take precedence over environment values. Removing a legacy key also masks the environment fallback. The UI does not edit `.env`; restart the server after changing environment variables manually.
+Named connections and their credentials are stored in `.loom/connections.json`. Configured legacy services are imported from `.loom/settings.json` (which takes precedence over environment values), keeping their IDs and binding existing conversations and agents. Edit imported credentials and endpoints in Model connections. Restarting does not overwrite edits or revive archived services. The UI does not edit `.env`; environment values initialize services that have not yet been imported and require a restart.
 
 See [.env.example](.env.example) for configuration examples:
 
@@ -147,24 +147,25 @@ See [.env.example](.env.example) for configuration examples:
 
 ## Using the Web interface
 
-- The **Settings** gear opens one dialog with sections for model connections, agents, memory, skills, and Bot settings. Switch sections inside the dialog; **Task history (任務紀錄)** remains a separate view.
+- The **Settings** gear opens one dialog with sections for model connections, agents, memory, skills, and Telegram. Switch sections inside the dialog; **Task history (任務紀錄)** remains a separate view.
 - The **＋** beside Apsis opens a new topic. It keeps saved memories and skills and creates a conversation when the first message is sent.
 - The **＋** inside the input opens task options. File, memory and skill writes have independent switches, all off by default.
 - The composer model picker selects a configured connection and model before the first message in a new ordinary Apsis conversation. Agent conversations use the model saved with that agent.
+- Switch agents from the sidebar. Model diagnostics are inside each service’s Advanced section; knowledge editing, merging and revisions are inside each entry’s Manage menu.
 - **Ctrl/Cmd + K** searches conversation titles and opens quick navigation. **Conversation history (對話紀錄)** expands the saved list.
 - On desktop, Enter sends and Shift+Enter adds a line. On mobile, Enter adds a line; use the send button or Ctrl/Cmd+Enter to send. IME confirmation does not submit.
 - Tool activity can be expanded while a task runs. Stop controls cancel the current local task.
 - Replies render Markdown, tables, and code blocks. Code copying preserves whitespace. Use **Export Markdown (匯出 Markdown)** in the conversation menu to download visible messages.
 - Drafts are saved per conversation in this browser. After submission, connection failures direct you to task history; prompts are never automatically resubmitted.
 - Scrolling up preserves your reading position; **Latest messages (最新訊息)** resumes following the output.
-- The workspace panel opens alongside chat on wide desktops and as a drawer on mobile.
+- The top file button opens workspace files in a side panel on desktop or a drawer on mobile.
 
 Raw HTML in replies is not executed. Unsafe link schemes are blocked, and referenced images are not loaded automatically.
 
 ## Telegram
 
 1. Create a dedicated bot with [Telegram's BotFather](https://t.me/BotFather).
-2. In **Settings → Bot settings → Telegram Bot**, enter the token, enable the bot, and save.
+2. In **Settings → Telegram**, enter the token, enable the bot, and save.
 3. Once connected, generate a pairing code and privately send the displayed `/pair …` command to your bot. Codes expire after ten minutes and can be used once.
 4. Send a task. Its conversation appears in Web history, where you can inspect progress, stop it, or continue chatting.
 
@@ -213,14 +214,14 @@ The model saves knowledge only with the corresponding permission. Same-scope fac
 | Location                 | Contents                                                                      |
 | ------------------------ | ----------------------------------------------------------------------------- |
 | `.loom/state.json`       | Agent definitions, conversation snapshots, engine state, memories, and skills |
-| `.loom/settings.json`    | Model configuration and API credentials                                       |
+| `.loom/settings.json`    | Legacy configuration retained for compatibility                               |
 | `.loom/connections.json` | Named providers, model IDs, defaults, and their credentials                   |
 | `.loom/telegram.json`    | Bot token, owner pairing, conversation bindings, and update offset            |
 | `workspace/`             | Files accessible to the agent's file tools                                    |
 
 Local data is created on demand and ignored by Git. Settings and tokens are stored as local plaintext; configuration APIs do not expose the secrets. Files use mode 0600 where supported. Conversation writes are serialized and use atomic JSON replacement within one server process.
 
-Storage schema version 1 is validated on load and save. Migration preserves `state.pre-v1.json`; later writes retain the previous `state.json.bak`. Invalid data stops loading without replacing the original. Runs are stored separately in `.loom/runs/<id>.json`; named credentials live in `.loom/connections.json`. Bot settings downloads a conversation/agent/knowledge snapshot, excluding connection keys and run files. For a full backup, stop the server and copy `.loom/` and `workspace/`. Restore while stopped, keeping a copy of the current data; there is no automatic restore UI.
+Storage schema version 1 is validated on load and save. Migration preserves `state.pre-v1.json`; later writes retain the previous `state.json.bak`. Invalid data stops loading without replacing the original. Runs are stored separately in `.loom/runs/<id>.json`; named credentials live in `.loom/connections.json`. The Telegram settings page offers a conversation/agent/knowledge snapshot, excluding connection keys and run files. For a full backup, stop the server and copy `.loom/` and `workspace/`. Restore while stopped, keeping a copy of the current data; there is no automatic restore UI.
 
 Single-process JSON storage remains to preserve simple startup. Run journals are separate and streamed tokens do not rewrite conversation state. Large histories and multiple writers are reasons to migrate to SQLite later; SQLite is not implemented now. See [architecture notes](docs/architecture.md).
 

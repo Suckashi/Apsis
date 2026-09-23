@@ -163,18 +163,6 @@
             <use href="#i-search"></use></svg
           ><span>搜尋</span><kbd>⌘ K</kbd>
         </button>
-        <button class="bot-card nav active" data-view="chat">
-          <span class="bot-avatar" aria-hidden="true"
-            ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <use href="#i-bot"></use></svg
-            ><i class="presence-dot"></i></span
-          ><span class="bot-card-copy"
-            ><span class="bot-card-title"
-              ><strong>Apsis</strong><time id="bot-time"></time></span
-            ><small id="bot-preview">準備好，隨時聊聊。</small></span
-          >
-        </button>
-
         <div
           id="agent-roster"
           class="agent-roster"
@@ -291,13 +279,14 @@
             <button
               id="toggle-workspace"
               class="quiet-button"
-              aria-label="工作區"
+              aria-label="工作區檔案"
+              title="工作區檔案"
               aria-expanded="false"
               aria-controls="workspace-panel"
             >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <use href="#i-monitor"></use></svg
-              ><span class="sr-only">工作區</span>
+                <use href="#i-folder"></use></svg
+              ><span class="sr-only">工作區檔案</span>
             </button>
             <details id="chat-actions" class="action-menu">
               <summary
@@ -345,41 +334,20 @@
               aria-label="與 Apsis 的訊息"
               aria-live="polite"
             >
-              <template id="welcome-template"
-                ><div class="welcome">
-                  <div class="conversation-start">新話題</div>
-                  <div class="bot-intro">
-                    <span class="bot-avatar" aria-hidden="true"
-                      ><svg class="icon" viewBox="0 0 24 24">
-                        <use href="#i-bot"></use></svg
-                    ></span>
-                    <div>
-                      <h1>Apsis</h1>
-                      <span>你的個人 Bot</span>
-                    </div>
-                  </div>
-                  <p class="intro-bubble">
-                    把你要處理的事情傳給我。<br />我們的對話、任務進度和完成的成果，都會留在這裡。
-                  </p>
+              <template id="welcome-template">
+                <div class="welcome">
+                  <h1 data-welcome-title>今天想完成什麼？</h1>
                   <div class="onboarding">
                     <div>
-                      <strong data-setup-title
-                        >連接模型，開始第一段對話。</strong
-                      ><small data-setup-description
-                        >使用本機 Ollama，或連接你的 API。</small
-                      >
+                      <strong>先連接一個模型</strong
+                      ><small>選擇本機 Ollama 或你的 API 服務。</small>
                     </div>
                     <button class="quiet-button" data-view="connections">
-                      開始設定<svg
-                        class="icon"
-                        viewBox="0 0 24 24"
-                        aria-hidden="true"
-                      >
-                        <use href="#i-external"></use>
-                      </svg>
+                      加入模型服務 →
                     </button>
-                  </div></div
-              ></template>
+                  </div>
+                </div>
+              </template>
             </div>
             <button id="jump-latest" class="jump-latest" hidden>
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -388,14 +356,7 @@
             </button>
             <div class="composer-area">
               <div class="run-strip">
-                <span id="run-status" role="status">準備好，隨時開始。</span
-                ><button
-                  id="background-stop"
-                  type="button"
-                  class="text-button"
-                  hidden
-                >
-                  停止任務</button
+                <span id="run-status" role="status"></span
                 ><span id="draft-status"></span>
               </div>
               <form id="chat-form" class="composer">
@@ -417,30 +378,8 @@
                       </svg>
                     </summary>
                     <div class="options-popover">
-                      <div class="popover-label">
-                        任務選項
-                        <span id="composer-model" class="composer-model"
-                          >正在連接…</span
-                        >
-                      </div>
-                      <label class="mode-select"
-                        ><span>回覆模式</span
-                        ><select id="mode" aria-label="回覆模式" disabled>
-                          <option value="demo">示範模式</option>
-                          <option value="pi">Apsis</option>
-                        </select></label
-                      ><label class="mode-select"
-                        ><span>Agent</span
-                        ><select id="agent-select" aria-label="選擇 Agent">
-                          <option value="">Apsis · 預設</option>
-                        </select></label
-                      ><button
-                        class="text-button"
-                        type="button"
-                        data-view="agents"
-                      >
-                        建立與管理 Agent →</button
-                      ><label class="write-option"
+                      <div class="popover-label">本次任務權限</div>
+                      <label class="write-option"
                         ><input type="checkbox" id="allow-writes" /><span
                           >允許修改檔案<small
                             >僅限已選的工作區寫入工具。</small
@@ -458,18 +397,6 @@
                             >允許保存技能</span
                           ></label
                         >
-                        <div id="mode-banner" class="mode-banner">
-                          示範模式，不會呼叫 AI。
-                        </div>
-                        <button
-                          id="mode-setup"
-                          type="button"
-                          class="text-button"
-                          data-view="connections"
-                          hidden
-                        >
-                          前往設定 →
-                        </button>
                       </div>
                     </div>
                   </details>
@@ -481,13 +408,6 @@
                     hidden
                   >
                     <span class="stop-square"></span>停止</button
-                  ><button
-                    id="background-run"
-                    class="quiet-button"
-                    type="button"
-                    hidden
-                  >
-                    背景執行</button
                   ><button
                     id="send"
                     class="send-button"
@@ -507,6 +427,11 @@
                   ><span class="sr-only">聊天模型</span
                   ><select id="chat-model" aria-label="選擇聊天模型"></select
                 ></label>
+                <span
+                  id="agent-model-label"
+                  class="composer-model"
+                  hidden
+                ></span>
                 <span id="composer-hint">Enter 傳送 · Shift + Enter 換行</span>
               </div>
             </div>
@@ -525,7 +450,7 @@
           >
             <div class="panel-heading">
               <div>
-                <h2>Apsis 的工作區</h2>
+                <h2>工作區檔案</h2>
               </div>
               <button
                 id="close-workspace"
@@ -537,44 +462,9 @@
                 </svg>
               </button>
             </div>
-            <p class="panel-description">查看 Bot 使用的模型、檔案與記憶。</p>
-            <div class="workspace-section">
-              <h3>正在使用的模型</h3>
-              <div class="model-card">
-                <span class="bot-avatar small" aria-hidden="true"
-                  ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <use href="#i-bot"></use></svg
-                ></span>
-                <div>
-                  <strong id="workspace-model">Apsis</strong
-                  ><small id="pi-state">正在連接…</small>
-                </div>
-              </div>
-              <button class="text-button" data-view="settings">
-                管理模型與 Telegram
-                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                  <use href="#i-external"></use>
-                </svg>
-              </button>
-            </div>
-            <div class="workspace-section">
-              <h3>累積的知識</h3>
-              <p id="context-state" class="muted">正在讀取…</p>
-              <div class="workspace-links">
-                <button class="quiet-button" data-view="memories">
-                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <use href="#i-memory"></use></svg
-                  >記憶</button
-                ><button class="quiet-button" data-view="skills">
-                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <use href="#i-skill"></use></svg
-                  >技能
-                </button>
-              </div>
-            </div>
             <div class="workspace-section">
               <div class="panel-heading">
-                <h3>工作區檔案</h3>
+                <h3>檔案清單</h3>
                 <button
                   id="refresh-files"
                   class="icon-button"
@@ -940,14 +830,6 @@
             <span id="connection-count" class="field-help"></span>
           </div>
           <div id="connection-cards" class="provider-list"></div>
-          <details id="connection-legacy" class="provider-legacy">
-            <summary>原有 Bot 設定</summary>
-            <p class="field-help">
-              舊版設定仍可用於既有對話；選為 Apsis 預設時，也會用於 Web 與
-              Telegram 新對話。
-            </p>
-            <div id="connection-legacy-cards" class="provider-list"></div>
-          </details>
         </section>
         <section id="runs-view" class="view library-view" hidden>
           <div class="settings-heading">
@@ -968,125 +850,16 @@
           <div class="settings-heading">
             <div>
               <span class="eyebrow">YOUR APSIS</span>
-              <h1>Bot 設定</h1>
+              <h1>Telegram</h1>
             </div>
             <span class="settings-label">本機儲存</span>
           </div>
-          <p class="view-description">
-            模型請到「模型連線」新增並選擇預設。這裡保留原有模型設定與 Telegram
-            管理；若預設選的是原有連線，下方模型修改會影響之後的新對話。
-          </p>
           <p>
             <a href="/api/storage/backup" download
               >下載對話、Agent 與知識備份</a
             >
           </p>
           <div class="settings-grid">
-            <form id="pi-settings-form" class="settings-card connection-form">
-              <div class="connection-title">
-                <span class="engine-icon"
-                  ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <use href="#i-logo"></use></svg
-                ></span>
-                <div>
-                  <h2>原有模型設定</h2>
-                  <p>供既有連線、舊對話與環境變數使用</p>
-                </div>
-                <span class="setting-number">01</span>
-              </div>
-              <fieldset id="pi-settings-fields" disabled>
-                <label for="pi-provider">模型服務</label>
-                <select id="pi-provider" name="provider">
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="ollama">Ollama（本機）</option>
-                  <option value="openai-compatible">
-                    OpenAI 相容 API（自訂）
-                  </option>
-                </select>
-                <div id="compatible-fields" class="local-model-fields" hidden>
-                  <label for="compatible-url">Base URL</label>
-                  <input
-                    id="compatible-url"
-                    type="url"
-                    maxlength="2048"
-                    placeholder="https://api.example.com/v1"
-                    autocomplete="off"
-                    spellcheck="false"
-                    aria-describedby="compatible-url-help"
-                  />
-                  <small id="compatible-url-help" class="field-help"
-                    >填入服務提供的完整 API 基底網址（包含 /v1 等路徑）。使用
-                    Chat Completions
-                    格式。更換網址時，請重新填入該服務的金鑰。</small
-                  >
-                </div>
-                <div id="ollama-fields" class="local-model-fields" hidden>
-                  <label for="ollama-url">Ollama 網址</label>
-                  <input
-                    id="ollama-url"
-                    type="url"
-                    value="http://127.0.0.1:11434"
-                    maxlength="2048"
-                  />
-                  <button
-                    id="discover-ollama"
-                    class="quiet-button"
-                    type="button"
-                  >
-                    讀取已安裝模型 ↻
-                  </button>
-                  <small id="ollama-discovery" class="field-help" role="status"
-                    >使用已安裝的本機模型，不需要 API key。</small
-                  >
-                </div>
-                <label for="pi-model">模型</label>
-                <input
-                  id="pi-model"
-                  name="model"
-                  list="pi-model-options"
-                  required
-                  maxlength="256"
-                  placeholder="選擇或輸入模型 ID"
-                  autocomplete="off"
-                  aria-describedby="pi-model-help"
-                />
-                <datalist id="pi-model-options"></datalist
-                ><small id="pi-model-help" class="field-help"
-                  >可從建議清單選擇目前支援的模型。</small
-                >
-                <div id="pi-key-fields" class="local-model-fields">
-                  <label for="pi-api-key">API key</label>
-                  <input
-                    id="pi-api-key"
-                    name="apiKey"
-                    type="password"
-                    maxlength="4096"
-                    autocomplete="new-password"
-                    spellcheck="false"
-                    placeholder="貼上你的 API key"
-                    aria-describedby="pi-key-help"
-                  />
-                  <small id="pi-key-help" class="field-help"></small>
-                  <label class="remove-key"
-                    ><input
-                      id="pi-clear-key"
-                      type="checkbox"
-                    />移除此服務的金鑰</label
-                  >
-                </div>
-                <button type="submit" class="primary settings-save">
-                  儲存模型設定 <span>→</span>
-                </button>
-              </fieldset>
-              <p
-                id="pi-save-status"
-                class="save-status"
-                role="status"
-                aria-live="polite"
-              ></p>
-              <div id="pi-config" class="config-status"></div>
-            </form>
             <form id="telegram-form" class="settings-card connection-form">
               <div class="connection-title">
                 <span class="engine-icon telegram-icon"
@@ -1209,16 +982,6 @@
               </div>
             </form>
           </div>
-          <div class="setup-note">
-            <strong>設定一次模型，Web 和 Telegram 都能使用。</strong>
-            <p>
-              金鑰儲存在本機伺服器，不會回填至介面。Telegram
-              對話會出現在左側歷史，也能從 Web 接續與停止任務。
-            </p>
-            <button id="refresh-status" class="text-button" type="button">
-              重新載入已儲存設定 ↻
-            </button>
-          </div>
         </section>
       </main>
     </div>
@@ -1294,7 +1057,7 @@
             >
               <svg class="icon" aria-hidden="true">
                 <use href="#i-settings"></use></svg
-              ><span>Bot 設定</span>
+              ><span>Telegram</span>
             </button>
           </nav>
         </aside>

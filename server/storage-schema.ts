@@ -39,7 +39,15 @@ export const runSchema = z
 export const connectionsSchema = z.array(
   z
     .object({
-      id: z.string().uuid(),
+      id: z.union([
+        z.string().uuid(),
+        z.enum([
+          "legacy-openai",
+          "legacy-anthropic",
+          "legacy-ollama",
+          "legacy-openai-compatible",
+        ]),
+      ]),
       name: z.string(),
       provider: z.enum(["openai", "anthropic", "ollama", "openai-compatible"]),
       model: z.string(),

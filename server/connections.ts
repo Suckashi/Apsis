@@ -68,44 +68,59 @@ export class Connections {
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }
+    await this.importSettings();
     return this;
   }
-  view() {
+  async importSettings(updatedProvider?: string) {
+    // Keep existing IDs so saved conversations and agent snapshots remain valid.
+    // Persist credentials once; subsequent edits go through the unified manager.
     const settings = this.settings.view();
-    const legacy: ModelConnection[] = (Object.keys(keys) as Provider[]).map(
-      (provider) => ({
-        id: "legacy-" + provider,
-        name: "原有設定 · " + provider,
-        provider,
-        model:
-          settings.pi.provider === provider
-            ? settings.pi.model
-            : settings.defaults[provider],
-        models: [
-          settings.pi.provider === provider
-            ? settings.pi.model
-            : settings.defaults[provider],
-        ],
-        credentialConfigured:
-          provider === "ollama" || settings.pi.credentials[provider].configured,
-        url:
+    const env = this.settings.environment();
+    await this.mutate((rows) => {
+      for (const provider of Object.keys(keys) as Provider[]) {
+        if (updatedProvider && updatedProvider !== provider) continue;
+        const id = "legacy-" + provider;
+        const index = rows.findIndex((row) => row.id === id);
+        if (index >= 0 && !updatedProvider) continue;
+        const configured =
           provider === "ollama"
-            ? settings.pi.ollamaUrl
+            ? env.PI_PROVIDER === "ollama" || !!env.OLLAMA_URL
             : provider === "openai-compatible"
-              ? settings.pi.compatibleUrl
-              : undefined,
-      }),
-    );
-    return [
-      ...legacy,
-      ...this.rows
-        .filter((r) => !r.archived)
-        .map(({ apiKey, ...row }) => ({
-          ...row,
-          models: row.models?.length ? [...row.models] : [row.model],
-          credentialConfigured: !!apiKey || row.provider === "ollama",
-        })),
-    ];
+              ? !!env.COMPATIBLE_BASE_URL
+              : !!env[keys[provider]];
+        if (!configured && !updatedProvider) continue;
+        const model =
+          settings.pi.provider === provider
+            ? settings.pi.model
+            : settings.defaults[provider];
+        if (!model) continue;
+        const imported: SavedConnection = {
+          id,
+          name: provider === "ollama" ? "Ollama" : provider,
+          provider,
+          model,
+          models: [model],
+          apiKey: keys[provider] ? env[keys[provider]] : undefined,
+          url:
+            provider === "ollama"
+              ? settings.pi.ollamaUrl
+              : provider === "openai-compatible"
+                ? settings.pi.compatibleUrl
+                : undefined,
+        };
+        if (index >= 0) rows[index] = { ...imported, name: rows[index]!.name };
+        else rows.push(imported);
+      }
+    });
+  }
+  view() {
+    return this.rows
+      .filter((row) => !row.archived)
+      .map(({ apiKey, ...row }) => ({
+        ...row,
+        models: row.models?.length ? [...row.models] : [row.model],
+        credentialConfigured: !!apiKey || row.provider === "ollama",
+      }));
   }
   selection(connectionId: unknown, model?: unknown): ConnectionSelection {
     if (typeof connectionId !== "string") error("請選擇模型連線。");
@@ -143,8 +158,7 @@ export class Connections {
     const preferred =
       legacy && ready(legacy)
         ? legacy
-        : visible.find((row) => !row.id.startsWith("legacy-") && ready(row)) ||
-          legacy;
+        : visible.find((row) => ready(row)) || legacy;
     return preferred
       ? { connectionId: preferred.id, model: preferred.model }
       : null;
@@ -166,14 +180,20 @@ export class Connections {
     return operation;
   }
   environment(id: string, model?: string): Environment {
-    const publicRow = this.view().find((r) => r.id === id);
-    if (!publicRow) error("找不到可用的模型連線。");
-    if (id.startsWith("legacy-"))
+    // Compatibility for older snapshots without a migrated usable connection.
+    if (
+      !this.rows.some((row) => row.id === id) &&
+      (Object.keys(keys) as Provider[]).some(
+        (provider) => id === "legacy-" + provider,
+      )
+    )
       return {
         ...this.settings.environment(),
-        PI_PROVIDER: publicRow.provider,
-        PI_MODEL: model || publicRow.model,
+        PI_PROVIDER: id.slice(7),
+        ...(model ? { PI_MODEL: model } : {}),
       };
+    const publicRow = this.view().find((r) => r.id === id);
+    if (!publicRow) error("找不到可用的模型連線。");
     const row = this.rows.find((r) => r.id === id)!;
     return {
       PI_PROVIDER: row.provider,
@@ -204,7 +224,7 @@ export class Connections {
     const previous = id
       ? this.rows.find((r) => r.id === id && !r.archived)
       : undefined;
-    if (id && !previous) error("找不到連線，原有設定請至舊版模型設定修改。");
+    if (id && !previous) error("找不到可用的模型連線。");
     const text = (key: string, max: number) => {
       const value = input[key];
       if (
@@ -299,8 +319,7 @@ export class Connections {
     return this.view().find((r) => r.id === row.id)!;
   }
   async archive(id: string) {
-    if (!this.rows.some((r) => r.id === id))
-      error("原有連線請至舊版設定管理。");
+    if (!this.rows.some((r) => r.id === id)) error("找不到模型連線。");
     await this.mutate((rows) => {
       if (this.savedDefault?.connectionId === id)
         throw Object.assign(new Error("此連線是預設模型，請先切換預設模型。"), {
@@ -317,16 +336,15 @@ export class Connections {
     verification: NonNullable<ModelConnection["verification"]>,
     fingerprint?: string,
   ) {
-    if (!id.startsWith("legacy-"))
-      await this.mutate((rows) => {
-        const row = rows.find((r) => r.id === id);
-        if (
-          row &&
-          !row.archived &&
-          (!fingerprint || this.fingerprint(id) === fingerprint)
-        )
-          row.verification = verification;
-      });
+    await this.mutate((rows) => {
+      const row = rows.find((r) => r.id === id);
+      if (
+        row &&
+        !row.archived &&
+        (!fingerprint || this.fingerprint(id) === fingerprint)
+      )
+        row.verification = verification;
+    });
     return verification;
   }
 }

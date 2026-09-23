@@ -104,10 +104,7 @@ test("automatic default keeps a ready legacy model, otherwise accepts a keyless 
   const directory = await mkdtemp(join(tmpdir(), "apsis-auto-model-"));
   const settings = await new Settings(directory, {}).init();
   const connections = await new Connections(directory, settings).init();
-  assert.deepEqual(connections.defaultSelection(), {
-    connectionId: "legacy-openai",
-    model: "gpt-4.1-mini",
-  });
+  assert.equal(connections.defaultSelection(), null);
   const local = await connections.save({
     name: "Local compatible",
     provider: "openai-compatible",

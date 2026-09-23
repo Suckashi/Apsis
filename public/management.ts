@@ -296,38 +296,10 @@ export function createManagement(
     defaultChoice = selected;
     catalog = settings.models;
     const root = document.querySelector("#connection-cards")!;
-    const legacyRoot = document.querySelector("#connection-legacy-cards")!;
     root.replaceChildren();
-    legacyRoot.replaceChildren();
-    const named = connections.filter((row) => !row.id.startsWith("legacy-"));
+    const named = connections;
     byId<HTMLElement>("connection-count").textContent =
       `${named.length} 個服務 · ${named.reduce((count, row) => count + connectionModels(row).length, 0)} 個模型`;
-    if (defaultChoice?.connectionId.startsWith("legacy-")) {
-      const inherited = connections.find(
-        (row) => row.id === defaultChoice?.connectionId,
-      );
-      if (inherited) {
-        const bridge = el("div", "", "provider-bridge");
-        bridge.append(
-          el(
-            "span",
-            `目前使用原有 Bot 設定 · ${providerName(inherited)} / ${defaultChoice.model}`,
-          ),
-        );
-        bridge.append(
-          button(
-            "檢視原有設定",
-            () => {
-              const details = byId<HTMLDetailsElement>("connection-legacy");
-              details.open = true;
-              details.scrollIntoView({ behavior: "smooth", block: "nearest" });
-            },
-            notify,
-          ),
-        );
-        root.append(bridge);
-      }
-    }
     if (!named.length)
       root.append(
         el(
@@ -337,13 +309,12 @@ export function createManagement(
         ),
       );
     for (const row of connections) {
-      const legacy = row.id.startsWith("legacy-");
       const card = el("article", "", "provider-card");
       const heading = el("div", "", "provider-card-heading");
       const identity = el("div");
       identity.append(
         el("span", providerName(row), "provider-card-kind"),
-        el("h3", legacy ? providerName(row) : row.name),
+        el("h3", row.name),
       );
       const ready =
         row.credentialConfigured ||
@@ -398,26 +369,23 @@ export function createManagement(
       }
       card.append(list);
       const actions = el("div", "", "provider-card-actions");
-      if (legacy) {
-        const link = button("管理原有設定", () => {}, notify);
-        link.dataset.view = "settings";
-        actions.append(link);
-      } else {
-        actions.append(button("編輯服務", () => edit(row), notify));
-        actions.append(
-          button(
-            "封存",
-            async () => {
-              if (!confirm("封存此服務？使用它的既有對話仍需要此連線。"))
-                return;
-              await api("connections/" + row.id, { method: "DELETE" });
-              await loadConnections();
-              await changed();
-            },
-            notify,
-          ),
-        );
-      }
+      actions.append(button("編輯服務", () => edit(row), notify));
+      actions.append(
+        button(
+          "封存",
+          async () => {
+            if (!confirm("封存此服務？使用它的既有對話仍需要此連線。")) return;
+            await api("connections/" + row.id, { method: "DELETE" });
+            await loadConnections();
+            await changed();
+          },
+          notify,
+        ),
+      );
+      card.append(actions);
+      const diagnostic = el("details", "", "settings-advanced");
+      diagnostic.append(el("summary", "進階：測試模型"));
+      const tests = el("div", "", "provider-card-actions");
       const engine = el("select");
       engine.setAttribute("aria-label", row.name + " 測試引擎");
       for (const [id, name] of [
@@ -438,7 +406,7 @@ export function createManagement(
         "field-help",
       );
       result.setAttribute("role", "status");
-      actions.append(
+      tests.append(
         engine,
         testModel,
         button(
@@ -464,8 +432,9 @@ export function createManagement(
           notify,
         ),
       );
-      card.append(actions, result);
-      (legacy ? legacyRoot : root).append(card);
+      diagnostic.append(tests, result);
+      card.append(diagnostic);
+      root.append(card);
     }
   }
   let next: number | null = null;
@@ -567,7 +536,12 @@ export function knowledgeActions(
   notify: (s: string) => void,
   open: (id: string) => Promise<void>,
 ) {
+  const menu = el("details", "", "knowledge-menu");
+  menu.append(el("summary", "管理"));
   const actions = el("div", "", "agent-card-actions");
+  const deletion = article.querySelector(".delete-button");
+  if (deletion) actions.append(deletion);
+  article.append(menu);
   const save = async (data: unknown) => {
     await api(path + "/" + row.id, {
       method: "PUT",
@@ -657,7 +631,7 @@ export function knowledgeActions(
     actions.append(
       button("來源對話", () => open(row.source!.sessionId!), notify),
     );
-  article.append(
+  menu.append(
     el(
       "small",
       `${row.enabled === false ? "已停用 · " : ""}${row.mergedInto ? "已合併 · " : ""}來源：${row.source?.kind === "agent" ? "Agent 保存" : row.source?.kind === "manual" ? "手動新增" : "早期資料"}`,
@@ -677,6 +651,6 @@ export function knowledgeActions(
             revision.content,
         ),
       );
-    article.append(revisions);
+    menu.append(revisions);
   }
 }

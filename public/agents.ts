@@ -27,7 +27,7 @@ export function createAgentsUI(
       "#agent-" + id,
     );
   const form = $<HTMLFormElement>("#agent-form");
-  const select = $<HTMLSelectElement>("#agent-select");
+  let selectedId = "";
   const checkList = (
     id: string,
     entries: [string, string][],
@@ -97,19 +97,12 @@ export function createAgentsUI(
     const connectionSelect = field("connection") as HTMLSelectElement;
     connectionSelect.replaceChildren();
     for (const provider of [
-      ...new Set(
-        connections.map((item) =>
-          item.id.startsWith("legacy-") ? "原有 Bot 設定" : providerName(item),
-        ),
-      ),
+      ...new Set(connections.map((item) => providerName(item))),
     ]) {
       const group = document.createElement("optgroup");
       group.label = provider;
       for (const connection of connections.filter(
-        (item) =>
-          (item.id.startsWith("legacy-")
-            ? "原有 Bot 設定"
-            : providerName(item)) === provider,
+        (item) => providerName(item) === provider,
       ))
         group.append(new Option(connection.name, connection.id));
       connectionSelect.append(group);
@@ -168,16 +161,8 @@ export function createAgentsUI(
   function render(snapshot?: AgentDefinition) {
     if (snapshot) conversationSnapshot = snapshot;
     snapshot ||= conversationSnapshot;
-    const value = select.value;
-    select.replaceChildren(new Option("Apsis · 預設", ""));
-    for (const agent of agents)
-      select.append(
-        new Option(agent.name + " · " + engineLabels[agent.engine], agent.id),
-      );
-    if (snapshot && !agents.some((a) => a.id === snapshot.id))
-      select.append(new Option(snapshot.name + " · 對話快照", snapshot.id));
-    select.value = value;
     const roster = $("#agent-roster");
+    roster.hidden = agents.length === 0;
     const rosterKey = JSON.stringify(agents.map((a) => [a.id, a.name]));
     if (roster.dataset.key !== rosterKey) {
       roster.dataset.key = rosterKey;
@@ -254,19 +239,6 @@ export function createAgentsUI(
           "connections/default",
         ),
       ]);
-    connections = connections.filter(
-      (item) =>
-        !item.id.startsWith("legacy-") ||
-        item.provider === "ollama" ||
-        item.credentialConfigured ||
-        (item.provider === "openai-compatible" && !!item.url) ||
-        agents.some((agent) => agent.connectionId === item.id) ||
-        snapshot?.connectionId === item.id,
-    );
-    connections.sort(
-      (a, b) =>
-        Number(a.id.startsWith("legacy-")) - Number(b.id.startsWith("legacy-")),
-    );
     render(snapshot);
   }
   $("#agent-new").onclick = () => edit();
@@ -391,11 +363,11 @@ export function createAgentsUI(
     selectById(id: string) {
       this.select(agents.find((a) => a.id === id));
     },
-    selected: () => agents.find((a) => a.id === select.value),
+    selected: () => agents.find((a) => a.id === selectedId),
     select(agent?: AgentDefinition) {
       conversationSnapshot = agent;
       render(agent);
-      select.value = agent?.id || "";
+      selectedId = agent?.id || "";
     },
     requirement(agent: AgentDefinition) {
       if (agent.connectionId) {
@@ -413,10 +385,10 @@ export function createAgentsUI(
       if (agent.provider === "openai-compatible")
         return settings?.pi.compatibleUrl
           ? ""
-          : "請先在 Bot 設定填入 OpenAI 相容端點。";
+          : "請在模型連線設定端點，再編輯此 Agent 選用連線。";
       return settings?.pi.credentials[agent.provider].configured
         ? ""
-        : "請先在 Bot 設定儲存 " + agent.provider + " API key。";
+        : "請在模型連線設定 " + agent.provider + " API key。";
     },
   };
 }

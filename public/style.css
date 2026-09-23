@@ -395,22 +395,8 @@ kbd {
   border: 0;
   white-space: nowrap;
 }
-.bot-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 8px;
-  min-height: 54px;
-  text-align: left;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
 .bot-card.active {
   background: var(--sidebar-active);
-}
-.bot-card:hover {
-  background: var(--surface-hover);
 }
 .bot-avatar {
   display: grid;
@@ -470,25 +456,11 @@ body[data-bot-state="offline"] .presence-dot {
   justify-content: space-between;
   gap: 8px;
 }
-.bot-card strong {
-  font-size: 14px;
-  font-weight: 550;
-}
 .bot-card time {
   color: var(--sidebar-muted);
   font-size: 11px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-}
-.bot-card small {
-  display: block;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--sidebar-muted);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  margin-top: 2px;
 }
 .history-toggle {
   display: flex;
@@ -862,35 +834,30 @@ body[data-bot-state="idle"] #bot-status {
   max-width: 760px;
   animation: arrive 0.2s ease-out;
 }
-.conversation-start {
-  text-align: center;
-  color: var(--muted);
-  font-size: 11px;
-  padding: 4px 0 28px;
+.welcome h1 {
+  margin: clamp(32px, 12vh, 100px) 0 28px;
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 500;
+  letter-spacing: -0.04em;
 }
-.bot-intro {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
+.knowledge-menu {
+  margin-top: 12px;
 }
-.bot-intro h1 {
-  font-size: 14px;
-  margin: 0 0 3px;
-  font-weight: 600;
-}
-.bot-intro > div > span {
-  font-size: 11px;
-  color: var(--muted);
-}
-.intro-bubble {
+.knowledge-menu summary {
   width: fit-content;
-  max-width: 85%;
-  background: var(--bot-bubble);
-  border-radius: 16px 16px 16px 6px;
-  padding: 10px 13px;
-  font-size: 14px;
-  line-height: 1.7;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.knowledge-menu[open] > small {
+  display: block;
+  margin: 12px 0;
+}
+.knowledge-menu .delete-button {
+  position: static;
+}
+.settings-dialog #settings-view .settings-grid {
+  grid-template-columns: minmax(0, 1fr);
 }
 .eyebrow {
   display: block;
@@ -1026,13 +993,6 @@ body[data-bot-state="idle"] #bot-status {
   padding-right: 0;
   margin-bottom: 7px;
 }
-.mode-select {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  white-space: nowrap;
-  font-size: 12px;
-}
 .mode-select select {
   min-width: 0;
   flex: 1;
@@ -1067,9 +1027,6 @@ body[data-bot-state="idle"] #bot-status {
   border-top: 1px solid var(--line);
   padding-top: 13px;
   margin-top: 16px;
-}
-.needs-setup {
-  color: var(--danger);
 }
 .composer-model {
   display: block;
@@ -1537,12 +1494,6 @@ body[data-bot-state="offline"] #run-status {
 .context-panel > .panel-heading {
   min-height: 44px;
 }
-.panel-description {
-  font-size: 11px;
-  line-height: 1.8;
-  color: var(--muted);
-  margin: 8px 0 22px;
-}
 .workspace-section {
   padding: 18px 0;
   border-top: 1px solid var(--line);
@@ -1556,34 +1507,15 @@ body[data-bot-state="offline"] #run-status {
 .workspace-section .panel-heading h3 {
   margin: 0;
 }
-.model-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  padding: 14px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
-}
 .model-card strong {
   display: block;
   font-size: 13px;
   font-weight: 500;
   overflow-wrap: anywhere;
 }
-.model-card small {
-  display: block;
-  font-size: 11px;
-  color: var(--muted);
-  margin-top: 4px;
-}
 .workspace-links {
   display: flex;
   gap: 8px;
-}
-.workspace-links .quiet-button {
-  flex: 1;
 }
 .file-list {
   font:
@@ -2245,9 +2177,6 @@ body[data-bot-state="offline"] #run-status {
   .command-trigger {
     min-height: 44px;
   }
-  .bot-card {
-    min-height: 62px;
-  }
   .history-toggle,
   .sidebar-nav .nav {
     min-height: 44px;
@@ -2313,12 +2242,6 @@ body[data-bot-state="offline"] #run-status {
   .messages {
     padding: 14px 12px 8px;
   }
-  .conversation-start {
-    padding: 5px 0 24px;
-  }
-  .intro-bubble {
-    max-width: 90%;
-  }
   .composer-area {
     padding: 0 10px calc(8px + env(safe-area-inset-bottom));
   }
@@ -2366,9 +2289,6 @@ body[data-bot-state="offline"] #run-status {
     left: 0;
     max-height: 65dvh;
     overflow-y: auto;
-  }
-  .mode-select select {
-    font-size: 16px;
   }
   .write-option {
     font-size: 14px;
@@ -2567,8 +2487,11 @@ body[data-bot-state="offline"] #run-status {
   max-height: 170px;
   overflow-y: auto;
   padding: 8px 0;
+  flex-shrink: 0;
 }
 .agent-roster .quiet-button {
+  justify-content: flex-start;
+  flex-shrink: 0;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2809,19 +2732,6 @@ label[for="connection-provider"] {
   display: grid;
   gap: 12px;
 }
-.provider-bridge {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 9px;
-  padding: 13px 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  color: var(--muted);
-  background: var(--surface);
-  font-size: 12px;
-}
 .provider-bridge .quiet-button {
   min-height: 30px;
   padding: 5px 9px;
@@ -2920,17 +2830,9 @@ label[for="connection-provider"] {
 .provider-card > .field-help {
   margin: 10px 0 0;
 }
-.provider-legacy {
-  margin-top: 25px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
 .provider-legacy > summary {
   font-size: 13px;
   color: var(--muted);
-}
-.provider-legacy > .field-help {
-  margin: 10px 0 16px;
 }
 @media (max-width: 640px) {
   #connections-view .settings-heading {
@@ -2998,7 +2900,10 @@ label[for="connection-provider"] {
 }
 @media (max-width: 640px) {
   .agent-roster {
-    max-height: 105px;
+    max-height: min(30dvh, 240px);
+  }
+  .agent-roster .quiet-button {
+    min-height: 44px;
   }
   .agent-card-actions {
     flex-wrap: wrap;

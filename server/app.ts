@@ -102,6 +102,32 @@ export async function createApp({
     }
   }
   const connections = await new Connections(dataDir, settings).init();
+  // Bind pre-connection agents and conversations to the imported service. This
+  // lets credentials rotate in one place without losing their saved model.
+  const inherited = settings.view().pi;
+  const bindConnection = (target: {
+    connectionId?: string;
+    provider?: string;
+    model?: string;
+  }) => {
+    if (target.connectionId) return;
+    const provider = target.provider || inherited.provider;
+    const connection = connections
+      .view()
+      .find((row) => row.id === "legacy-" + provider);
+    if (!connection) return;
+    target.connectionId = connection.id;
+    target.provider = provider;
+    target.model ||=
+      inherited.provider === provider ? inherited.model : connection.model;
+  };
+  await store.mutate((data) => {
+    for (const agent of data.agents || []) bindConnection(agent);
+    for (const session of data.sessions) {
+      if (session.mode !== "pi") continue;
+      bindConnection(session.agent || session);
+    }
+  });
   tasks.connections = connections;
   const running = tasks.running;
   const telegram = await new TelegramChannel(
@@ -273,11 +299,14 @@ export async function createApp({
         }
       }
       const settingsMatch = path.match(/^\/api\/settings\/(pi)$/);
-      if (req.method === "POST" && settingsMatch)
-        return json(
-          res,
-          await settings.update(settingsMatch[1], await body(req)),
+      if (req.method === "POST" && settingsMatch) {
+        const updated = await settings.update(
+          settingsMatch[1],
+          await body(req),
         );
+        await connections.importSettings(updated.pi.provider);
+        return json(res, updated);
+      }
       if (path === "/api/agents") {
         if (req.method === "GET")
           return json(
