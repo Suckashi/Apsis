@@ -376,7 +376,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       type: "activity",
       text: "示範流程：讀取本機記憶與技能（未呼叫 AI）",
     });
-    const text = `這是本機示範回覆，不是真實 AI 生成。\n\n你提出的任務：${prompt}\n\n工作台已準備好：\n• Pi：模型對話、工具執行與工作區檔案操作。\n• 記憶與技能：會儲存在本機，重新啟動後保留。\n• Pi × Hermes：Pi 可透過工具委派任務給已連接的 Hermes gateway。\n\n前往「連線設定」查看 API key 設定方式，再切換 Pi 或協作模式開始。`;
+    const text = `這是本機示範回覆，不是真實 AI 生成。\n\n你提出的任務：${prompt}\n\n## 我們可以一起做的事\n\n- 閱讀工作區檔案，理解你的專案。\n- 保存重要偏好與可重用的技能，讓下次對話接得上。\n- 在 Web 或已配對的 Telegram Bot 交辦任務。\n\n到「Bot 設定」連接模型，再從「任務選項」選擇 Talaria，就能開始真實對話。需要修改檔案或保存記憶時，請先開啟「允許修改與保存」。`;
     for (const chunk of text.match(/.{1,14}|\n/gu) || []) {
       signal.throwIfAborted();
       emit({ type: "delta", text: chunk });
@@ -387,7 +387,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   if (mode === "hermes") {
     if (!options.allowWrites)
       throw new Error(
-        "Hermes 可在遠端執行工具；請先開啟「允許修改 / 遠端工具」。",
+        "Hermes 可在遠端執行工具；請先在任務選項開啟「允許修改與保存」。",
       );
     emit({
       type: "activity",

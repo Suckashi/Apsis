@@ -34,6 +34,107 @@ const labels: Record<string, string> = {
   hermes: "外部 Hermes",
 };
 let navigating = false;
+let activeReply: HTMLElement | undefined;
+const traceOpen = new Set<string>();
+let currentAction = "";
+let connected = false;
+function updatePresence() {
+  const working =
+    state.busy || state.sessions.some((session) => session.running);
+  document.body.dataset.botState = !connected
+    ? "offline"
+    : working
+      ? "working"
+      : "idle";
+  $("#bot-status").textContent = !connected
+    ? "正在連接…"
+    : working
+      ? currentAction || "正在處理任務"
+      : state.status.piReady
+        ? "待命中 · 隨時可以傳訊息"
+        : "連接模型，開始一起工作";
+  $("#bot-preview").textContent = working
+    ? currentAction || "正在處理任務…"
+    : state.sessions.find((session) => session.count > 0)?.title ||
+      "準備好，隨時聊聊。";
+}
+function setSidebar(open: boolean) {
+  document.body.classList.toggle("sidebar-open", open);
+  $("#sidebar-backdrop").hidden = !open;
+  $("#open-sidebar").setAttribute("aria-expanded", String(open));
+  const mobile = matchMedia("(max-width: 680px)").matches;
+  $("#sidebar").inert = mobile && !open;
+  $("main").inert = mobile && open;
+  if (open) $("#close-sidebar").focus();
+}
+$("#open-sidebar").addEventListener("click", () => setSidebar(true));
+$("#close-sidebar").addEventListener("click", () => {
+  setSidebar(false);
+  $("#open-sidebar").focus();
+});
+$("#sidebar-backdrop").addEventListener("click", () => {
+  setSidebar(false);
+  $("#open-sidebar").focus();
+});
+matchMedia("(max-width: 680px)").addEventListener("change", () =>
+  setSidebar(false),
+);
+setSidebar(false);
+function setWorkspace(open: boolean) {
+  $("#workspace-panel").hidden = !open;
+  $("#toggle-workspace").setAttribute("aria-expanded", String(open));
+  if (open) $("#close-workspace").focus();
+}
+$("#toggle-workspace").addEventListener("click", () =>
+  setWorkspace(Boolean($("#workspace-panel").hidden)),
+);
+$("#close-workspace").addEventListener("click", () => {
+  setWorkspace(false);
+  $("#toggle-workspace").focus();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (document.body.classList.contains("sidebar-open")) {
+      setSidebar(false);
+      $("#open-sidebar").focus();
+    } else if (!$("#workspace-panel").hidden) {
+      setWorkspace(false);
+      $("#toggle-workspace").focus();
+    }
+    for (const detail of document.querySelectorAll<HTMLDetailsElement>(
+      ".action-menu, .task-options",
+    ))
+      detail.open = false;
+  }
+  if (event.key === "Tab" && document.body.classList.contains("sidebar-open")) {
+    const items = [
+      ...$("#sidebar").querySelectorAll<HTMLElement>(
+        "button:not(:disabled), a[href], input",
+      ),
+    ].filter((el) => el.getClientRects().length);
+    const first = items[0],
+      last = items.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
+});
+document.addEventListener("click", (event) => {
+  for (const detail of document.querySelectorAll<HTMLDetailsElement>(
+    ".action-menu, .task-options",
+  ))
+    if (!detail.contains(event.target as Node)) detail.open = false;
+});
+$("#allow-writes").addEventListener("change", updatePermissions);
+function updatePermissions() {
+  $("#permission-hint").textContent = $("#allow-writes").checked
+    ? "已允許修改與保存"
+    : "僅讀取工作區";
+}
 let followOutput = true;
 let runTimer: ReturnType<typeof setInterval> | undefined;
 const welcomeTemplate = $<HTMLTemplateElement>("#welcome-template");
@@ -56,11 +157,7 @@ function restoreDraft() {
 }
 function renderWelcome() {
   $("#messages").replaceChildren(welcomeTemplate.content.cloneNode(true));
-  if (state.status.piReady) {
-    $("[data-setup-title]").textContent = "模型已設定，開始你的第一個任務";
-    $("[data-setup-description]").textContent =
-      "直接交辦任務，或到連線設定接上你的 Telegram Bot。";
-  }
+  $(".onboarding").hidden = !!state.status.piReady;
 }
 function scrollLatest(force = false) {
   if (followOutput || force)
@@ -110,8 +207,10 @@ function showView(view: string) {
   }
   if (!["chat", "memories", "skills", "settings"].includes(view)) return;
   state.view = view;
-  $("#history-panel").classList.remove("open");
-  $("#toggle-history").setAttribute("aria-expanded", "false");
+  setSidebar(false);
+  setWorkspace(false);
+  $("#toggle-workspace").hidden = view !== "chat";
+  $("#chat-actions").hidden = view !== "chat";
   history.replaceState(null, "", "#" + view);
   document.querySelectorAll<HTMLElement>(".view").forEach((el) => {
     el.hidden = el.id !== view + "-view";
@@ -129,10 +228,10 @@ function showView(view: string) {
     );
   $("#page-name").textContent =
     {
-      chat: "工作台",
+      chat: "Talaria",
       memories: "長期記憶",
       skills: "技能庫",
-      settings: "連線設定",
+      settings: "Bot 設定",
     }[view as "chat" | "memories" | "skills" | "settings"] ?? "";
 }
 document.addEventListener("click", (event) => {
@@ -148,14 +247,21 @@ $("#toggle-history").addEventListener("click", () => {
   $("#history-panel").classList.toggle("open", open);
 });
 $("#session-search").addEventListener("input", renderSessions);
+let sessionRenderKey = "";
 function renderSessions() {
-  $("#sessions").replaceChildren();
   const query = $<HTMLInputElement>("#session-search")
     .value.trim()
     .toLocaleLowerCase();
-  const sessions = state.sessions.filter((session) =>
-    session.title.toLocaleLowerCase().includes(query),
+  updatePresence();
+  const sessions = state.sessions.filter(
+    (session) =>
+      (session.count > 0 || session.running) &&
+      session.title.toLocaleLowerCase().includes(query),
   );
+  const key = JSON.stringify([query, state.busy, state.session?.id, sessions]);
+  if (key === sessionRenderKey) return;
+  sessionRenderKey = key;
+  $("#sessions").replaceChildren();
   if (!sessions.length) {
     const p = document.createElement("p");
     p.className = "muted";
@@ -173,9 +279,7 @@ function renderSessions() {
     const meta = document.createElement("small");
     meta.textContent =
       (item.source === "telegram" ? "Telegram · " : "Web · ") +
-      labels[item.mode] +
-      " · " +
-      (item.running ? "執行中" : item.count + " 則訊息");
+      (item.running ? "正在處理…" : item.count + " 則訊息");
     button.append(title, meta);
     button.setAttribute(
       "aria-current",
@@ -203,7 +307,7 @@ function addMessage(role: "user" | "assistant", text: string, error = false) {
   item.className = "message " + role + (error ? " error" : "");
   const avatar = document.createElement("div");
   avatar.className = "avatar";
-  avatar.textContent = role === "user" ? "你" : "⌘";
+  avatar.textContent = role === "user" ? "你" : "✳";
   const body = document.createElement("div");
   body.className = "message-body";
   const label = document.createElement("div");
@@ -219,7 +323,7 @@ function addMessage(role: "user" | "assistant", text: string, error = false) {
   copy.textContent = "複製";
   copy.setAttribute(
     "aria-label",
-    "複製" + (role === "user" ? "你的訊息" : "Agent 回覆"),
+    "複製" + (role === "user" ? "你的訊息" : "Talaria 回覆"),
   );
   copy.addEventListener("click", async () => {
     try {
@@ -233,24 +337,44 @@ function addMessage(role: "user" | "assistant", text: string, error = false) {
   body.append(label, content);
   item.append(avatar, body);
   $("#messages").append(item);
+  if (role === "assistant") activeReply = content;
   return content;
 }
 function renderConversation() {
-  if (!state.session) return;
+  activeReply = undefined;
+  if (!state.session) {
+    renderWelcome();
+    $("#session-title").textContent = "與 Talaria 的新話題";
+    $("#background-stop").hidden = true;
+    $("#resume-bot").hidden = true;
+    updateMode();
+    updateExport();
+    updatePresence();
+    syncComposer();
+    return;
+  }
   $("#messages").replaceChildren();
-  $("#activity").replaceChildren();
   if (!state.session.messages.length) renderWelcome();
   for (const m of state.session.messages) {
-    addMessage(
+    const content = addMessage(
       m.role,
       m.content,
       m.status === "error" || m.status === "failed",
     );
-    for (const text of m.activity || []) addActivity(text);
+    if (m.role === "assistant") {
+      content.dataset.traceKey = m.id;
+      for (const text of m.activity || []) addActivity(text, content, false);
+      finishTrace(content, m.status === "error" || m.status === "failed");
+    }
   }
   if (state.session.running && state.session.live) {
-    addMessage("assistant", state.session.live.text || "正在處理任務…");
-    for (const text of state.session.live.activity) addActivity(text);
+    const content = addMessage(
+      "assistant",
+      state.session.live.text || "正在處理任務…",
+    );
+    content.dataset.traceKey = state.session.id + ":live";
+    for (const text of state.session.live.activity)
+      addActivity(text, content, true);
   }
   $("#background-stop").hidden = !state.session.running || state.busy;
   $("#resume-bot").hidden = state.session.mode !== "pi";
@@ -262,6 +386,8 @@ function renderConversation() {
   else $("#messages").scrollTop = 0;
   $("#jump-latest").hidden = true;
   updateExport();
+  updatePresence();
+  syncComposer();
 }
 function updateMode() {
   const mode = $("#mode").value as Mode;
@@ -269,6 +395,8 @@ function updateMode() {
     if (option.value === "hybrid" || option.value === "hermes")
       option.hidden = !state.status.hermesReady && option.value !== mode;
   }
+  $("#composer-model").textContent =
+    mode === "pi" ? state.status.model || "尚未連接模型" : labels[mode];
   const requirement = modeRequirement(mode, state.status, true);
   $("#mode-setup").hidden = !requirement;
   $("#mode-banner").classList.toggle("needs-setup", Boolean(requirement));
@@ -294,6 +422,8 @@ async function loadSession(id: string) {
   restoreDraft();
   $("#run-status").textContent = "已載入對話";
   $("#allow-writes").checked = false;
+  updatePermissions();
+  currentAction = "";
   preferences.set("loom-session", id);
   renderConversation();
   renderSessions();
@@ -301,25 +431,20 @@ async function loadSession(id: string) {
   if (state.session.running) toast("任務正在執行，此頁會自動更新進度。");
 }
 async function newSession() {
-  if (state.busy || navigating) return;
+  if (state.busy || navigating || document.body.dataset.ready !== "true")
+    return;
   saveDraft();
-  navigating = true;
-  try {
-    state.session = await post<SessionView>("sessions", {
-      mode: $("#mode").value,
-    });
-    restoreDraft();
-    $("#run-status").textContent = "準備就緒";
-    preferences.set("loom-session", state.session.id);
-    $("#allow-writes").checked = false;
-    renderConversation();
-    showView("chat");
-    state.sessions = await api<SessionSummary[]>("sessions");
-    renderSessions();
-    $("#prompt").focus({ preventScroll: true });
-  } finally {
-    navigating = false;
-  }
+  state.session = null;
+  preferences.remove("loom-session");
+  restoreDraft();
+  $("#run-status").textContent = "新話題，一樣記得你。";
+  $("#allow-writes").checked = false;
+  updatePermissions();
+  currentAction = "";
+  renderConversation();
+  renderSessions();
+  showView("chat");
+  $("#prompt").focus({ preventScroll: true });
 }
 $("#new-session").addEventListener("click", () =>
   newSession().catch((e: unknown) => toast(asError(e).message)),
@@ -329,7 +454,7 @@ $("#mode").addEventListener("change", async () => {
   if (state.session && state.session.mode !== $("#mode").value) {
     try {
       await newSession();
-      toast("已使用選擇的引擎建立新工作階段。");
+      toast("已切換回覆模式，準備好新的話題。");
     } catch (cause) {
       const e = asError(cause);
       toast(e.message);
@@ -340,7 +465,7 @@ document.addEventListener("click", (event) => {
   const button = (event.target as Element).closest<HTMLElement>(
     "[data-prompt]",
   );
-  if (!button || state.busy) return;
+  if (!button || state.busy || document.body.dataset.ready !== "true") return;
   $("#prompt").value = button.dataset.prompt || "";
   saveDraft();
   $("#prompt").focus();
@@ -355,32 +480,92 @@ $("#jump-latest").addEventListener("click", () => {
   followOutput = true;
   scrollLatest(true);
 });
-function addActivity(text: string) {
-  if (document.querySelector("#activity .muted"))
-    $("#activity").replaceChildren();
+function activityLabel(text: string) {
+  const tools: Record<string, string> = {
+    list_files: "查看工作區檔案",
+    read_file: "讀取檔案",
+    write_file: "修改檔案",
+    remember: "保存記憶",
+    update_memory: "更新記憶",
+    save_skill: "保存技能",
+    list_skills: "查看技能",
+    read_skill: "讀取技能指引",
+    search_history: "搜尋過去的對話",
+    delegate_to_hermes: "交給外部 Hermes 協作",
+  };
+  const started = /^執行 (\w+)$/.exec(text);
+  if (started && tools[started[1]!]) return "正在" + tools[started[1]!] + "…";
+  const finished = /^(\w+) (完成|失敗)$/.exec(text);
+  if (finished && tools[finished[1]!])
+    return tools[finished[1]!] + " · " + finished[2];
+  return text;
+}
+function addActivity(text: string, content = activeReply, running = true) {
+  if (!content) return;
+  text = activityLabel(text);
+  const body = content.closest(".message-body")!;
+  let trace = body.querySelector<HTMLDetailsElement>(".task-trace");
+  if (!trace) {
+    trace = document.createElement("details");
+    trace.className = "task-trace";
+    const summary = document.createElement("summary");
+    const list = document.createElement("div");
+    list.className = "activity-list";
+    trace.append(summary, list);
+    trace.open = traceOpen.has(content.dataset.traceKey || "");
+    trace.addEventListener("toggle", () => {
+      const key = content.dataset.traceKey;
+      if (key) trace!.open ? traceOpen.add(key) : traceOpen.delete(key);
+    });
+    body.insertBefore(trace, content);
+  }
+  trace.dataset.running = String(running);
   const p = document.createElement("div");
   p.className = "activity-item";
   p.textContent = text;
-  $("#activity").append(p);
-  $("#activity").scrollTop = $("#activity").scrollHeight;
+  trace.querySelector(".activity-list")!.append(p);
+  trace.querySelector("summary")!.textContent = running ? text : "查看工作紀錄";
+  if (running) {
+    currentAction = text;
+    updatePresence();
+  }
+}
+function finishTrace(content: HTMLElement | undefined, failed = false) {
+  const trace = content
+    ?.closest(".message-body")
+    ?.querySelector<HTMLDetailsElement>(".task-trace");
+  if (!trace) return;
+  trace.dataset.running = "false";
+  trace.querySelector("summary")!.textContent =
+    (failed ? "任務未完成" : "已完成") +
+    " · " +
+    trace.querySelectorAll(".activity-item").length +
+    " 項紀錄";
+}
+function syncComposer() {
+  const running = state.busy || !!state.session?.running;
+  $("#send").disabled = running || !$("#prompt").value.trim();
+  $("#messages").setAttribute("aria-busy", String(running));
+  $("#send").hidden = running;
+  $("#prompt").disabled = running;
+  $("#stop").hidden = !state.busy;
+  $("#background-stop").hidden = !state.session?.running || state.busy;
+  $("#mode").disabled = running;
+  $("#new-session").disabled = state.busy;
+  $("#allow-writes").disabled = running;
 }
 function busy(value: boolean) {
   state.busy = value;
-  $("#send").disabled = value || !$("#prompt").value.trim();
-  $("#messages").setAttribute("aria-busy", String(value));
-  $("#send").innerHTML = value ? "執行中…" : "開始執行 <span>↑</span>";
+  syncComposer();
   updateExport();
-  $("#prompt").disabled = value;
-  $("#stop").hidden = !value;
-  $("#mode").disabled = value;
-  $("#new-session").disabled = value;
-  $("#allow-writes").disabled = value;
-  $("#activity-state").textContent = value ? "執行中" : "待命";
+  if (!value) currentAction = "";
+  updatePresence();
   renderSessions();
 }
 $("#chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (state.busy || navigating) return;
+  if (state.busy || navigating || document.body.dataset.ready !== "true")
+    return;
   if (state.session?.running) {
     toast("此對話仍在執行，請等待完成或先停止。");
     return;
@@ -396,7 +581,10 @@ $("#chat-form").addEventListener("submit", async (event) => {
     toast(requirement);
     if (modeRequirement($("#mode").value as Mode, state.status, true))
       showView("settings");
-    else $("#allow-writes").focus();
+    else {
+      $<HTMLDetailsElement>("#task-options").open = true;
+      $("#allow-writes").focus();
+    }
     return;
   }
   const originalDraft = draftKey();
@@ -428,7 +616,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
     $("#prompt").value = "";
     preferences.remove(originalDraft);
     saveDraft();
-    $("#activity").replaceChildren();
+    $("#task-options").removeAttribute("open");
     const response = await fetch(
       "/api/sessions/" + state.session.id + "/chat",
       {
@@ -473,8 +661,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
       }
       buffer += decoder.decode();
       if (buffer.trim()) consume(buffer);
-      if (!completed)
-        throw new Error("連線中斷，請重新開啟此工作階段確認結果。");
+      if (!completed) throw new Error("連線中斷，請重新開啟此對話確認結果。");
     } finally {
       reader.releaseLock();
     }
@@ -494,6 +681,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
   } finally {
     clearInterval(runTimer);
     content?.classList.remove("waiting");
+    finishTrace(content, failed);
     $("#run-status").textContent =
       (failed ? "任務未完成 · 草稿已保留" : "任務完成") +
       " · " +
@@ -524,7 +712,7 @@ $("#stop").addEventListener("click", async () => {
   if (!state.session) return;
   try {
     await post("sessions/" + state.session.id + "/stop", {});
-    addActivity("已送出停止要求。Hermes 遠端任務可能需要在 gateway 另行確認。");
+    toast("已送出停止要求。");
   } catch (cause) {
     const e = asError(cause);
     toast(e.message);
@@ -596,7 +784,7 @@ $("#memory-form").addEventListener("submit", async (event) => {
     await post("memories", { content: $("#memory-content").value });
     $("#memory-form").reset();
     await refresh();
-    toast("記憶已儲存，下一次 Pi 執行時生效。");
+    toast("記憶已儲存，Talaria 下次執行時生效。");
   } catch (cause) {
     const e = asError(cause);
     toast(e.message);
@@ -624,7 +812,6 @@ async function refreshFiles() {
         .map((f) => (f.type === "directory" ? "▱ " : "▧ ") + f.name)
         .join("\n")
     : "workspace/ 尚無檔案";
-  $("#files").style.whiteSpace = "pre-wrap";
 }
 async function refresh() {
   const [status, sessions, memories, skills] = await Promise.all([
@@ -633,7 +820,9 @@ async function refresh() {
     api<Memory[]>("memories"),
     api<Skill[]>("skills"),
   ]);
+  connected = true;
   state.status = status;
+  $("#workspace-model").textContent = status.model || "尚未設定模型";
   state.sessions = sessions;
   renderSessions();
   renderLibrary("memories", memories);
@@ -654,8 +843,8 @@ async function refresh() {
     ? "已設定 gateway · 實際連線於執行時確認"
     : "選用功能 · 尚未連接 gateway";
   $("#connection-state").textContent = $("#remote-logout").hidden
-    ? "本機工作空間 · 已連接"
-    : "遠端工作空間 · 已登入";
+    ? "本機連線"
+    : "遠端連線 · 已登入";
   updateMode();
   if (!document.querySelector("#messages .message")) renderWelcome();
   await refreshFiles();
@@ -732,9 +921,14 @@ try {
     updateMode();
   }
   showView(initialView || "chat");
+  busy(false);
+  document.body.dataset.ready = "true";
 } catch (cause) {
   const e = asError(cause);
+  connected = false;
+  updatePresence();
+  $("#bot-status").textContent = "連線失敗，請重新整理";
   $("#connection-state").textContent = "工作空間連線失敗";
   $("#run-status").textContent = "無法載入，請確認伺服器後重新整理";
-  toast("無法載入工作台：" + e.message);
+  toast("無法載入 Talaria：" + e.message);
 }

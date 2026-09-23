@@ -5,7 +5,7 @@ import { exportConversation } from "../shared/export.ts";
 
 test("mode setup and permission gates distinguish demo, Pi, delegation, and remote execution", () => {
   assert.equal(modeRequirement("demo", {}, false), null);
-  assert.match(modeRequirement("pi", {}, false)!, /Pi/);
+  assert.match(modeRequirement("pi", {}, false)!, /模型/);
   assert.equal(modeRequirement("pi", { piReady: true }, false), null);
   assert.match(modeRequirement("hybrid", { piReady: true }, true)!, /Hermes/);
   assert.equal(

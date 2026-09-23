@@ -2,254 +2,384 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#112b2c" />
-    <title>Talaria — 開發工作台</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#f6f5f3" />
+    <title>Talaria — 你的 AI 夥伴</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
     <div class="shell">
-      <aside class="sidebar">
-        <a class="brand" href="/" aria-label="Talaria 首頁"
-          ><span class="mark">⌘</span
-          ><span>Talaria<small>YOUR AGENT WORKSPACE</small></span></a
-        >
-        <button id="new-session" class="new-button">
-          <span>＋</span> 新工作階段 <kbd>N</kbd>
-        </button>
-        <nav aria-label="主要導覽">
-          <button class="nav active" data-view="chat">
-            <span>◫</span> 工作台</button
-          ><button class="nav" data-view="memories">
-            <span>◎</span> 長期記憶 <b id="memory-count">0</b></button
-          ><button class="nav" data-view="skills">
-            <span>◇</span> 技能庫 <b id="skill-count">0</b></button
-          ><button class="nav" data-view="settings">
-            <span>⚙</span> 連線設定
+      <button
+        id="sidebar-backdrop"
+        class="sidebar-backdrop"
+        aria-label="關閉導覽"
+        hidden
+      ></button>
+      <aside id="sidebar" class="sidebar" aria-label="Bot 與對話">
+        <div class="brand-row">
+          <a class="brand" href="#chat" aria-label="Talaria 首頁"
+            ><span class="brand-mark" aria-hidden="true">↗</span>talaria<span
+              class="brand-dot"
+              >.</span
+            ></a
+          >
+          <button
+            id="close-sidebar"
+            class="icon-button mobile-only"
+            aria-label="關閉導覽"
+          >
+            ×
           </button>
-        </nav>
+        </div>
+        <div class="section-label">你的 BOT</div>
+        <button class="bot-card nav active" data-view="chat">
+          <span class="bot-avatar" aria-hidden="true"
+            >✳<i class="presence-dot"></i
+          ></span>
+          <span class="bot-card-copy"
+            ><strong>Talaria</strong
+            ><small id="bot-preview">準備好，隨時聊聊。</small></span
+          >
+          <span class="bot-card-arrow" aria-hidden="true">›</span>
+        </button>
+        <button id="new-session" class="new-button" disabled>
+          <span aria-hidden="true">＋</span> 開啟新話題 <kbd>N</kbd>
+        </button>
         <button
           id="toggle-history"
           class="history-toggle"
-          aria-expanded="false"
+          aria-expanded="true"
           aria-controls="history-panel"
         >
-          最近的對話 <span>⌄</span>
+          對話紀錄 <span aria-hidden="true">⌄</span>
         </button>
-        <div id="history-panel" class="history-panel">
-          <div class="section-label">最近的工作階段</div>
+        <div id="history-panel" class="history-panel open">
           <label class="session-search"
+            ><span aria-hidden="true">⌕</span
             ><span class="sr-only">搜尋對話</span
             ><input
               id="session-search"
               type="search"
-              placeholder="搜尋對話…"
+              placeholder="搜尋對話"
               autocomplete="off"
           /></label>
           <div id="sessions" class="sessions" aria-label="對話清單"></div>
         </div>
+        <nav class="sidebar-nav" aria-label="Bot 管理">
+          <button class="nav" data-view="memories">
+            <span aria-hidden="true">◎</span> 記憶 <b id="memory-count">0</b>
+          </button>
+          <button class="nav" data-view="skills">
+            <span aria-hidden="true">◇</span> 技能 <b id="skill-count">0</b>
+          </button>
+          <button class="nav" data-view="settings">
+            <span aria-hidden="true">⚙</span> Bot 設定
+          </button>
+        </nav>
         <div class="sidebar-bottom">
-          <span class="local-icon">⌂</span>
-          <div>本機工作空間<small>資料保存在你的電腦</small></div>
-          <span class="version">v0.1</span>
+          <span class="connection-dot" aria-hidden="true"></span
+          ><span id="connection-state" role="status">正在連接…</span>
+          <form
+            id="remote-logout"
+            method="post"
+            action="/__share/logout"
+            hidden
+          >
+            <button
+              type="submit"
+              class="icon-button"
+              title="登出遠端"
+              aria-label="登出遠端"
+            >
+              ↪
+            </button>
+          </form>
         </div>
       </aside>
       <main>
         <header class="topbar">
-          <div class="breadcrumb">
-            工作空間 <span>/</span> <strong id="page-name">工作台</strong>
+          <button
+            id="open-sidebar"
+            class="icon-button mobile-only"
+            aria-label="開啟導覽"
+            aria-expanded="false"
+            aria-controls="sidebar"
+          >
+            ☰
+          </button>
+          <div class="header-identity">
+            <span class="bot-avatar small" aria-hidden="true"
+              >✳<i class="presence-dot"></i
+            ></span>
+            <div>
+              <strong id="page-name">Talaria</strong
+              ><span id="bot-status" role="status">你的 AI 夥伴</span>
+            </div>
           </div>
           <div class="topbar-actions">
-            <form
-              id="remote-logout"
-              method="post"
-              action="/__share/logout"
-              hidden
+            <button
+              id="toggle-workspace"
+              class="quiet-button"
+              aria-expanded="false"
+              aria-controls="workspace-panel"
             >
-              <button type="submit" class="quiet-button">登出遠端</button>
-            </form>
-            <span id="connection-state" class="local-badge" role="status"
-              >正在連接工作空間</span
-            >
-          </div>
-        </header>
-        <section id="chat-view" class="view chat-layout">
-          <div class="conversation">
-            <div class="conversation-heading">
-              <div>
-                <span class="eyebrow">BUILD WITH YOUR AGENTS</span>
-                <h1 id="session-title">把想法，交給你的工作台。</h1>
-              </div>
-              <div class="conversation-actions">
+              <span aria-hidden="true">▱</span> 工作區
+            </button>
+            <details id="chat-actions" class="action-menu">
+              <summary
+                class="icon-button"
+                aria-label="對話選項"
+                title="對話選項"
+              >
+                •••
+              </summary>
+              <div class="action-popover">
                 <button
-                  id="background-stop"
-                  type="button"
-                  class="quiet-button"
-                  hidden
-                >
-                  停止背景任務</button
-                ><button
                   id="resume-bot"
                   type="button"
                   class="quiet-button"
                   hidden
                 >
-                  複製 Telegram 續聊指令</button
-                ><a
+                  複製 Telegram 續聊指令
+                </button>
+                <a
                   id="export-session"
                   class="quiet-button"
                   aria-disabled="true"
                   download
-                  title="下載目前對話為 Markdown"
-                  >匯出對話 ↗</a
+                  >匯出對話 Markdown</a
                 >
               </div>
+            </details>
+          </div>
+        </header>
+        <section id="chat-view" class="view chat-layout">
+          <div class="conversation">
+            <div class="conversation-heading">
+              <span id="session-title">與 Talaria 的對話</span
+              ><span class="conversation-scope">訊息、記憶，還有下一步。</span>
             </div>
-            <div class="mode-strip">
-              <div id="mode-banner" class="mode-banner">
-                示範模式 · 不會呼叫 AI，也不會消耗 API 額度
-              </div>
-              <button
-                id="mode-setup"
-                class="text-button"
-                data-view="settings"
-                hidden
-              >
-                前往設定 →
-              </button>
-            </div>
-            <div id="messages" class="messages" role="log" aria-live="polite">
+            <div
+              id="messages"
+              class="messages"
+              role="log"
+              aria-label="與 Talaria 的訊息"
+              aria-live="polite"
+            >
               <template id="welcome-template"
                 ><div class="welcome">
-                  <div class="weave-symbol">⌘</div>
-                  <h2>從一個想法開始。</h2>
+                  <div class="welcome-avatar bot-avatar" aria-hidden="true">
+                    ✳
+                  </div>
+                  <span class="eyebrow">MEET YOUR EVERYDAY PARTNER</span>
+                  <h1>嗨，我是 Talaria<span>。</span></h1>
                   <p>
-                    在網頁或 Telegram 交辦，讓 Talaria 完成。<br />把任務、記憶與技能放在同一個工作空間。
+                    有想法，就傳訊息給我。<br />我會記住重要的事，和你一起把事情做完。
                   </p>
                   <div class="onboarding">
-                    <span class="step-index">01</span>
                     <div>
-                      <strong data-setup-title>準備好你的第一個任務</strong
+                      <strong data-setup-title
+                        >先連接一個模型，我們就能開始。</strong
                       ><small data-setup-description
-                        >先免費體驗示範，或連接模型開始工作。</small
+                        >可使用你電腦裡的 Ollama，或自己的 API key。</small
                       >
                     </div>
                     <button class="quiet-button" data-view="settings">
-                      連接模型 →
+                      連接模型 ↗
                     </button>
                   </div>
-                  <div class="suggestions">
+                  <div class="suggestions" aria-label="試著這樣開始">
+                    <button
+                      data-prompt="列出工作區檔案，幫我理解目前的專案結構。"
+                    >
+                      <span aria-hidden="true">▱</span> 帶我看看工作區
+                      <span aria-hidden="true">↗</span>
+                    </button>
                     <button
                       data-prompt="幫我規劃一個新的 Node.js 專案，先列出架構與實作步驟。"
                     >
-                      <span>01 / PLAN</span><strong>規劃一個新專案</strong
-                      ><small>從想法到可執行的步驟 ↗</small></button
-                    ><button
-                      data-prompt="列出工作區檔案，幫我理解目前的專案結構。"
-                    >
-                      <span>02 / EXPLORE</span><strong>探索工作區</strong
-                      ><small>讀取檔案，理解現有程式 ↗</small></button
-                    ><button
+                      <span aria-hidden="true">↗</span> 一起規劃新點子
+                      <span aria-hidden="true">↗</span>
+                    </button>
+                    <button
                       data-prompt="幫我整理一份可重複使用的程式碼審查流程，先給我草稿。"
                     >
-                      <span>03 / LEARN</span><strong>建立可重用的技能</strong
-                      ><small>把有效的方法留下來 ↗</small>
+                      <span aria-hidden="true">◇</span> 把好方法變成技能
+                      <span aria-hidden="true">↗</span>
                     </button>
+                  </div>
+                  <div class="welcome-note">
+                    一位夥伴，同一份記憶。Web 與 Telegram 都能接著聊。
                   </div>
                 </div></template
               >
             </div>
             <button id="jump-latest" class="jump-latest" hidden>
-              回到最新訊息 ↓
+              最新訊息 ↓
             </button>
-            <div class="run-strip">
-              <span id="run-status" role="status">準備就緒</span
-              ><span id="draft-status"></span>
-            </div>
-            <form id="chat-form" class="composer">
-              <label class="sr-only" for="prompt">你的任務</label
-              ><textarea
-                id="prompt"
-                aria-describedby="draft-status"
-                rows="3"
-                maxlength="16000"
-                placeholder="描述你的想法，或交給 agent 一個任務…"
-                required
-              ></textarea>
-              <div class="composer-bottom">
-                <label class="mode-select"
-                  ><span>引擎</span
-                  ><select id="mode" aria-label="Agent 模式">
-                    <option value="demo">示範模式</option>
-                    <option value="pi">Talaria</option>
-                    <option value="hybrid" hidden>
-                      外部 Hermes 協作（進階）
-                    </option>
-                    <option value="hermes" hidden>外部 Hermes（進階）</option>
-                  </select></label
-                ><button id="stop" class="stop-button" type="button" hidden>
-                  停止</button
-                ><button id="send" class="send-button" type="submit">
-                  開始執行 <span>↑</span>
-                </button>
+            <div class="composer-area">
+              <div class="run-strip">
+                <span id="run-status" role="status">隨時可以開始</span
+                ><button
+                  id="background-stop"
+                  type="button"
+                  class="text-button"
+                  hidden
+                >
+                  停止任務</button
+                ><span id="draft-status"></span>
               </div>
-            </form>
-            <div class="composer-foot">
-              <label
-                ><input type="checkbox" id="allow-writes" /> 允許修改 /
-                遠端工具</label
-              ><span>Enter 傳送 · Shift + Enter 換行</span>
+              <form id="chat-form" class="composer">
+                <label class="sr-only" for="prompt">傳訊息給 Talaria</label
+                ><textarea
+                  id="prompt"
+                  aria-describedby="draft-status"
+                  rows="2"
+                  maxlength="16000"
+                  placeholder="傳訊息給 Talaria…"
+                  disabled
+                  required
+                ></textarea>
+                <div class="composer-bottom">
+                  <details id="task-options" class="task-options">
+                    <summary>
+                      任務選項 <span aria-hidden="true">⌄</span>
+                    </summary>
+                    <div class="options-popover">
+                      <label class="mode-select"
+                        ><span>回覆模式</span
+                        ><select id="mode" aria-label="回覆模式" disabled>
+                          <option value="demo">示範模式</option>
+                          <option value="pi">Talaria</option>
+                          <option value="hybrid" hidden>
+                            外部 Hermes 協作（進階）
+                          </option>
+                          <option value="hermes" hidden>
+                            外部 Hermes（進階）
+                          </option>
+                        </select></label
+                      >
+                      <label class="write-option"
+                        ><input type="checkbox" id="allow-writes" /><span
+                          >允許修改與保存<small
+                            >修改工作區、保存記憶與技能，或使用遠端工具。</small
+                          ></span
+                        ></label
+                      >
+                      <div class="mode-strip">
+                        <div id="mode-banner" class="mode-banner">
+                          示範模式，不會呼叫 AI。
+                        </div>
+                        <button
+                          id="mode-setup"
+                          type="button"
+                          class="text-button"
+                          data-view="settings"
+                          hidden
+                        >
+                          前往設定 →
+                        </button>
+                      </div>
+                    </div>
+                  </details>
+                  <span id="composer-model" class="composer-model"
+                    >正在連接…</span
+                  >
+                  <button
+                    id="stop"
+                    class="stop-button"
+                    type="button"
+                    aria-label="停止回覆"
+                    hidden
+                  >
+                    ■ 停止
+                  </button>
+                  <button
+                    id="send"
+                    class="send-button"
+                    type="submit"
+                    aria-label="傳送訊息"
+                    title="傳送訊息"
+                  >
+                    ↑
+                  </button>
+                </div>
+              </form>
+              <div class="composer-foot">
+                <span id="permission-hint">僅讀取工作區</span
+                ><span>Enter 傳送 · Shift + Enter 換行</span>
+              </div>
             </div>
           </div>
-          <aside class="context-panel">
-            <div class="panel-heading">執行環境 <span>↗</span></div>
-            <div class="engine-card">
-              <div class="engine-icon">π</div>
-              <div><strong>Talaria</strong><small>模型與工具執行</small></div>
-              <span id="pi-state" class="state-tag">未設定</span>
-            </div>
-            <div class="connector-line"></div>
-            <div class="engine-card">
-              <div class="engine-icon hermes">⌁</div>
-              <div>
-                <strong>記憶與技能</strong><small>Web 與 bot 共用</small>
-              </div>
-              <span id="context-state" class="state-tag ready">已啟用</span>
-            </div>
-            <button class="text-button" data-view="settings">
-              管理連線設定 →
-            </button>
-            <div class="panel-divider"></div>
+          <aside
+            id="workspace-panel"
+            class="context-panel"
+            aria-label="Talaria 工作區"
+            hidden
+          >
             <div class="panel-heading">
-              本次活動 <span id="activity-state">待命</span>
-            </div>
-            <div id="activity" class="activity">
-              <p class="muted">送出任務後，這裡會顯示工具執行與協作進度。</p>
-            </div>
-            <div class="workspace-note">
-              <span>⌁</span><strong>每次工作，都能累積。</strong>
-              <p>保留偏好與專案事實，將成功流程存成下一次可用的技能。</p>
-            </div>
-            <div class="panel-heading files-heading">
-              工作區檔案
+              <div>
+                <span class="eyebrow">BOT WORKSPACE</span>
+                <h2>工作區</h2>
+              </div>
               <button
-                id="refresh-files"
-                class="text-button"
-                aria-label="重新整理檔案"
+                id="close-workspace"
+                class="icon-button"
+                aria-label="關閉工作區"
               >
-                ↻
+                ×
               </button>
             </div>
-            <div id="files" class="file-list">尚無檔案</div>
+            <p class="panel-description">Talaria 工作時使用的檔案與知識。</p>
+            <div class="workspace-section">
+              <h3>模型</h3>
+              <div class="model-card">
+                <span class="bot-avatar small" aria-hidden="true">✳</span>
+                <div>
+                  <strong id="workspace-model">Talaria</strong
+                  ><small id="pi-state">正在連接…</small>
+                </div>
+              </div>
+              <button class="text-button" data-view="settings">
+                管理模型與 Telegram ↗
+              </button>
+            </div>
+            <div class="workspace-section">
+              <h3>記得的事，學會的事</h3>
+              <p id="context-state" class="muted">正在讀取…</p>
+              <div class="workspace-links">
+                <button class="quiet-button" data-view="memories">◎ 記憶</button
+                ><button class="quiet-button" data-view="skills">◇ 技能</button>
+              </div>
+            </div>
+            <div class="workspace-section">
+              <div class="panel-heading">
+                <h3>檔案</h3>
+                <button
+                  id="refresh-files"
+                  class="icon-button"
+                  aria-label="重新整理檔案"
+                >
+                  ↻
+                </button>
+              </div>
+              <div id="files" class="file-list">正在讀取…</div>
+            </div>
+            <p class="workspace-footnote">
+              資料保存在執行 Talaria 的電腦。<br />新話題也能使用已儲存的記憶與技能。
+            </p>
           </aside>
         </section>
         <section id="memories-view" class="view library-view" hidden>
           <span class="eyebrow">CONTEXT THAT STAYS</span>
           <h1>長期記憶</h1>
           <p class="view-description">
-            保留偏好、專案背景與重要決策，Pi 會在下一次執行時讀取。
+            保留偏好、專案背景與重要決策，Talaria 會在下次對話時參考。
           </p>
           <form id="memory-form" class="entry-form">
             <label for="memory-content">新增記憶</label
@@ -268,7 +398,7 @@
           <span class="eyebrow">MAKE GOOD WORK REPEATABLE</span>
           <h1>技能庫</h1>
           <p class="view-description">
-            把有效的做法整理成指引，讓 Pi 在不同工作階段重複使用。
+            把有效的做法整理成指引，讓 Talaria 在不同對話中重複使用。
           </p>
           <form id="skill-form" class="entry-form">
             <label for="skill-name">技能名稱</label
@@ -292,8 +422,8 @@
         <section id="settings-view" class="view library-view" hidden>
           <div class="settings-heading">
             <div>
-              <span class="eyebrow">CONNECT YOUR ENGINES</span>
-              <h1>連線設定</h1>
+              <span class="eyebrow">MAKE IT YOURS</span>
+              <h1>Bot 設定</h1>
             </div>
             <span class="settings-label">本機儲存 · 即時生效</span>
           </div>

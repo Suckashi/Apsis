@@ -2,7 +2,9 @@
 
 A local-first assistant with **Web and Telegram bot entry points**, powered by Pi's Node.js runtime and a TypeScript architecture inspired by Hermes' persistent memory, on-demand skills, and messaging adapters. No separate Hermes installation is required.
 
-以 Node.js 啟動的 AI 工作台。Web 介面、API、agent 編排與資料保存都使用 TypeScript；開發本專案不用安裝 Python、Docker、Redis 或資料庫。
+以 Node.js 啟動的 AI 夥伴。Web 介面、API、agent 編排與資料保存都使用 TypeScript；開發本專案不用安裝 Python、Docker、Redis 或資料庫。
+
+The Web interface is organized around one persistent Talaria bot: conversations with inline, expandable work records; shared memories and skills; and an on-demand workspace panel. The mobile layout keeps messages and the composer in view, with history and settings behind the navigation menu. **開啟新話題** keeps saved memory and skills, and creates a conversation only when the first message is sent. Model selection and write permission live under **任務選項**; credentials and Telegram pairing live in **Bot 設定**. This is a single-bot, single-owner product; multiple bots, hosted computers and scheduled routines are not implemented.
 
 ## Quick start / 三個步驟
 
@@ -57,7 +59,7 @@ Talaria includes `list_files`, `read_file`, `write_file`, `remember`, `update_me
 
 ## Telegram Bot / Web 與 bot 一起用
 
-1. Create a dedicated bot with [Telegram's @BotFather](https://t.me/BotFather). Keep its token private; enter it in Talaria's **連線設定 → Telegram Bot**, not in a conversation.
+1. Create a dedicated bot with [Telegram's @BotFather](https://t.me/BotFather). Keep its token private; enter it in Talaria's **Bot 設定 → Telegram Bot**, not in a conversation.
 2. Save the token with **啟用 Telegram Bot** checked. Talaria uses the model from **Talaria 模型**, including your local Ollama model.
 3. Once the status is **已連線**, click **產生配對碼** and privately send the displayed `/pair …` command to your bot. It expires in ten minutes and is single use.
 4. Send a task. Its conversation appears in Web history with a **Telegram** label; open it to see progress, stop the task, or continue chatting. **複製 Telegram 續聊指令** lets you resume a Web Talaria conversation in a private bot chat.
@@ -89,7 +91,7 @@ The Web UI provides streamed Pi output, activity events, saved conversations, me
 Talaria can run real Pi conversations and tools against an existing local Ollama installation without a cloud API key. The app uses Ollama's [OpenAI-compatible Chat Completions API](https://docs.ollama.com/api/openai-compatibility); the rest of the development setup remains Node.js and TypeScript.
 
 1. Start your installed Ollama application (or run `ollama serve`).
-2. In **連線設定**, choose **Ollama（本機）** and keep `http://127.0.0.1:11434` unless you use a different local port.
+2. In **Bot 設定**, choose **Ollama（本機）** and keep `http://127.0.0.1:11434` unless you use a different local port.
 3. Click **讀取已安裝模型**, choose an installed model such as `qwen3.5:9b`, then **儲存模型設定**.
 4. Return to the workspace and select **Talaria**. Local tools keep the same per-run permissions; Telegram uses the same model with its own write-permission setting.
 
@@ -101,7 +103,7 @@ Run the optional real-model test with `npm run test:ollama`. It creates an isola
 
 ## Configure the model from the UI
 
-1. Open **連線設定** in the sidebar.
+1. Open **Bot 設定** in the sidebar.
 2. Choose **OpenAI** or **Anthropic**, select a supported model, and enter your API key.
 3. Click **儲存模型設定**. The next task uses the saved connection immediately; no restart is needed.
 4. Return to the workspace and select **Talaria**.
@@ -123,7 +125,7 @@ API_SERVER_ENABLED=true
 API_SERVER_KEY=your-gateway-secret
 ```
 
-Then run `hermes gateway` there. In Talaria, expand **連線設定 → 進階：連接既有外部 Hermes 服務**, enter the gateway URL, model name and gateway API key, then click **儲存 Hermes 設定**. Changes apply to the next task. For environment-based configuration, these fields remain supported:
+Then run `hermes gateway` there. In Talaria, expand **Bot 設定 → 進階：連接既有外部 Hermes 服務**, enter the gateway URL, model name and gateway API key, then click **儲存 Hermes 設定**. Changes apply to the next task. For environment-based configuration, these fields remain supported:
 
 ```dotenv
 HERMES_URL=http://127.0.0.1:8642
@@ -131,7 +133,7 @@ HERMES_API_KEY=your-gateway-secret
 HERMES_MODEL=hermes-agent
 ```
 
-Both a gateway root URL and a URL ending in `/v1` are accepted. Select **外部 Hermes 協作（進階）** or **外部 Hermes（進階）** and explicitly enable **允許修改 / 遠端工具**. The gateway may execute tools on its own host, using its own files, permissions, memory and skills. Its workspace is **not** automatically synchronized with Talaria's local workspace.
+Both a gateway root URL and a URL ending in `/v1` are accepted. Under **任務選項**, select **外部 Hermes 協作（進階）** or **外部 Hermes（進階）** and explicitly enable **允許修改與保存**. The gateway may execute tools on its own host, using its own files, permissions, memory and skills. Its workspace is **not** automatically synchronized with Talaria's local workspace.
 
 The connector uses the [documented Hermes Chat Completions API](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/) with Bearer authentication. Direct Hermes mode sends successful conversation turns each time; delegated Pi tasks are self-contained. Hermes results currently arrive when the remote call finishes; Pi's own text streams live.
 

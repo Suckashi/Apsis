@@ -6,11 +6,11 @@ export function modeRequirement(
   allowWrites: boolean,
 ): string | null {
   if ((mode === "pi" || mode === "hybrid") && !status.piReady)
-    return "先設定 Pi 模型（雲端 API 或本機 Ollama），就能開始真實任務。";
+    return "先設定 Talaria 的模型（雲端 API 或本機 Ollama），就能開始真實任務。";
   if ((mode === "hermes" || mode === "hybrid") && !status.hermesReady)
-    return "先連接 Hermes gateway，才能使用這個引擎。";
+    return "先連接 Hermes gateway，才能使用這個回覆模式。";
   if (mode === "hermes" && !allowWrites)
-    return "Hermes 會在遠端執行工具，請先開啟「允許修改 / 遠端工具」。";
+    return "Hermes 會在遠端執行工具，請先在任務選項開啟「允許修改與保存」。";
   return null;
 }
 
