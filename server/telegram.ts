@@ -104,6 +104,16 @@ export function splitTelegramText(text: string) {
 }
 
 export class TelegramChannel {
+  productMessage?: (text: string) => Promise<string>;
+  async notifyOwner(text: string) {
+    if (!this.state.enabled || !this.state.ownerId) return;
+    for (const chunk of splitTelegramText(text))
+      await this.call(this.state.token, "sendMessage", {
+        chat_id: this.state.ownerId,
+        text: chunk,
+        link_preview_options: { is_disabled: true },
+      });
+  }
   file: string;
   tasks: TaskService;
   call: TelegramCall;
@@ -433,6 +443,14 @@ export class TelegramChannel {
       return;
     }
     if (m.from.id !== this.state.ownerId) return;
+    if (this.productMessage && privateChat) {
+      try {
+        await this.send(m, await this.productMessage(text), signal);
+      } catch (error) {
+        await this.send(m, this.safeError(error), signal);
+      }
+      return;
+    }
     if (command?.[1] === "where" && group) {
       await this.send(
         m,

@@ -6,6 +6,7 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "strict": true,
+    "jsx": "react-jsx",
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -16,6 +17,7 @@
   "include": [
     "server/**/*.ts",
     "public/**/*.ts",
+    "public/**/*.tsx",
     "shared/**/*.ts",
     "scripts/**/*.ts",
     "test/**/*.ts"

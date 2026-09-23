@@ -1,6 +1,6 @@
 import { build } from "esbuild";
 await build({
-  entryPoints: ["public/app.ts"],
+  entryPoints: ["public/app.ts", "public/bot.tsx"],
   bundle: true,
   format: "esm",
   target: "es2022",

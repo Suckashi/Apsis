@@ -36,6 +36,10 @@ export class TaskService {
       runId: string;
     }
   >();
+  modelSwitching = new Set<string>();
+  extensions?: (session: Session, runId: string) => Partial<RunOptions>;
+  timeoutMs = 300000;
+  isWaiting?: (sessionId: string) => boolean;
   constructor(
     store: Store,
     workspace: Workspace,
@@ -97,6 +101,44 @@ export class TaskService {
         : {}),
     };
   }
+  async changeModel(id: string, input: Record<string, unknown>) {
+    const session = this.store.state.sessions.find((s) => s.id === id);
+    if (!session)
+      throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
+    if (session.mode !== "pi" || session.agent)
+      throw Object.assign(new Error("自訂模型只能用於一般真實對話。"), {
+        status: 400,
+      });
+    if (this.running.has(id) || this.modelSwitching.has(id))
+      throw Object.assign(new Error("此對話正在執行，請等待完成或停止。"), {
+        status: 409,
+      });
+    if (!this.connections) throw new Error("模型連線服務尚未初始化。");
+    const selection = this.connections.selection(
+      input.connectionId,
+      input.model,
+    );
+    const provider = this.connections
+      .view()
+      .find((row) => row.id === selection.connectionId)!.provider;
+    if (
+      session.connectionId === selection.connectionId &&
+      session.model === selection.model
+    )
+      return this.view(id);
+    this.modelSwitching.add(id);
+    try {
+      await this.store.mutate((state) => {
+        const row = state.sessions.find((s) => s.id === id)!;
+        row.connectionId = selection.connectionId;
+        row.provider = provider;
+        row.model = selection.model;
+      });
+      return this.view(id);
+    } finally {
+      this.modelSwitching.delete(id);
+    }
+  }
   stop(id: string) {
     this.running.get(id)?.controller.abort();
   }
@@ -133,6 +175,10 @@ export class TaskService {
     signal?: AbortSignal,
     permissions?: RunPermissions,
   ) {
+    if (this.modelSwitching.has(id))
+      throw Object.assign(new Error("此對話正在切換模型，請稍後再試。"), {
+        status: 409,
+      });
     const session = structuredClone(
       this.store.state.sessions.find((s) => s.id === id),
     );
@@ -157,10 +203,17 @@ export class TaskService {
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      abort();
-    }, 300000);
+    let activeMs = 0;
+    let lastTick = Date.now();
+    const timer = setInterval(() => {
+      const tick = Date.now();
+      if (!this.isWaiting?.(id)) activeMs += tick - lastTick;
+      lastTick = tick;
+      if (activeMs >= this.timeoutMs) {
+        timedOut = true;
+        abort();
+      }
+    }, 1000);
     let env = this.settings.environment();
     if (session.agent) {
       env.PI_PROVIDER = session.agent.provider;
@@ -232,13 +285,15 @@ export class TaskService {
       });
       controller.signal.throwIfAborted();
       emit({ type: "activity", text: "Apsis 正在處理任務。" });
+      const extensions = this.extensions?.(session, runId);
       const result = await this.runner({
+        ...extensions,
         mode: session.mode,
         prompt,
         session,
         store: this.store,
         workspace,
-        executionContext: `Current project: ${JSON.stringify(run.project)}. All relative file tools and shell start in ${JSON.stringify(workspace.root)}. A project directory is not an OS sandbox. Before reporting completion, distinguish actual tool results, checks performed and remaining unverified work.\n${recovery.context}`,
+        executionContext: `Current project: ${JSON.stringify(run.project)}. All relative file tools and shell start in ${JSON.stringify(workspace.root)}. A project directory is not an OS sandbox. Before reporting completion, distinguish actual tool results, checks performed and remaining unverified work.\n${recovery.context}\n${extensions?.executionContext || ""}`,
         allowWrites,
         emit,
         signal: controller.signal,
@@ -309,7 +364,7 @@ export class TaskService {
     } catch (caught) {
       let message = controller.signal.aborted
         ? timedOut
-          ? "任務超過五分鐘，已停止。"
+          ? "任務超過執行時間上限，已停止。"
           : "已停止執行。"
         : asError(caught).message;
       for (const key of [

@@ -1,5 +1,15 @@
 # Apsis
 
+## New Bot workspace
+
+`npm run dev` now opens the rebuilt Bot interface: persistent conversations, third-party LLMs, queued work, approvals, browser tools, artifacts, routines and MCP. New data lives in `.apsis/`; existing data is retained.
+
+See the [current Bot workspace guide](docs/bot-workspace.md) for operation and limitations. Run `npm run test:bots:browser` for the complete local integration check.
+
+The sections below document the legacy interface and underlying runtimes. Use `npm run dev:legacy` to open that interface.
+
+---
+
 **English** | [繁體中文](README.zh-TW.md)
 
 A local-first personal AI workspace with a Web interface and a Telegram bot. Apsis uses **TypeScript and Node.js**, selectable Pi, Deep Agents and OpenAI Agents SDK runtimes, and a local memory architecture inspired by Hermes Agent.
@@ -58,7 +68,7 @@ npm run dev
 
 Open [http://localhost:3100](http://localhost:3100).
 
-Click the **Settings** gear, open **Model connections (模型連線)** in the dialog, choose a provider, enter its credential and one or more model IDs, and save. Set a default connection and model for ordinary Apsis conversations; you can also choose a model in the chat composer before starting a conversation. Changes apply without restarting. If no model is configured, the home screen guides you to add a service. Demo mode is no longer part of everyday controls; existing demo conversations remain available.
+Click the **Settings** gear, open **Model connections (模型連線)** in the dialog, choose a provider, enter its credential and one or more model IDs, and save. Set a default connection and model for ordinary Apsis conversations; you can also switch models in the chat composer. Existing conversations keep their messages, and the next reply uses the selected model. Changes apply without restarting. If no model is configured, the home screen guides you to add a service. Demo mode is no longer part of everyday controls; existing demo conversations remain available.
 
 Development starts the server and browser build together. Browser assets are rebuilt on changes, and the backend restarts automatically. Refresh the browser after frontend changes.
 

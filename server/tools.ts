@@ -12,7 +12,10 @@ import type { ToolOptions } from "./runtime.ts";
 import { normalizeFact, revise } from "./knowledge.ts";
 import type { ToolOperation } from "../shared/types.ts";
 export interface AgentToolResult {
-  content: { type: "text"; text: string }[];
+  content: (
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+  )[];
   details: Record<string, unknown>;
 }
 export interface AgentTool {
@@ -78,6 +81,8 @@ export function createTools({
   source,
   recordOperation,
   probe,
+  extraTools = [],
+  authorize,
 }: ToolOptions) {
   if (probe)
     return [
@@ -243,9 +248,11 @@ export function createTools({
   const selected = agent
     ? tools.filter((t) => agent.tools.includes(t.name))
     : tools;
-  return selected.map((t) => ({
+  return [...selected, ...extraTools].map((t) => ({
     ...t,
     execute: async (id: string, args: unknown, signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      await authorize?.(t.name, args, signal);
       signal?.throwIfAborted();
       const values = args as Record<string, unknown> | null;
       const target =
@@ -280,7 +287,11 @@ export function createTools({
           evidence:
             (output.details.evidence as Evidence | undefined) ||
             boundedEvidence({
-              output: output.content.map((c) => c.text).join("\n"),
+              output: output.content
+                .map((c) =>
+                  c.type === "text" ? c.text : `[${c.mimeType} image]`,
+                )
+                .join("\n"),
             }),
           endedAt: new Date().toISOString(),
         });

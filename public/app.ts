@@ -1441,11 +1441,26 @@ const agentsUI = createAgentsUI(api, toast, async (agent) => {
   $("#prompt").focus();
 });
 $<HTMLSelectElement>("#chat-model").addEventListener("change", async () => {
-  const selected = $<HTMLSelectElement>("#chat-model").value;
+  const choice = currentModelChoice();
+  if (!choice) return;
   if (state.session) {
-    await newSession(true);
-    $<HTMLSelectElement>("#chat-model").value = selected;
-    toast(t("已選擇模型，新對話會使用這個模型。"));
+    const previous =
+      state.session.connectionId && state.session.model
+        ? choiceValue(state.session.connectionId, state.session.model)
+        : "";
+    busy(true);
+    try {
+      state.session = await api<SessionView>(
+        "sessions/" + state.session.id + "/model",
+        { method: "PUT", body: JSON.stringify(choice) },
+      );
+      toast(t("已切換模型，接下來的回覆會使用所選模型。"));
+    } catch (cause) {
+      if (previous) $<HTMLSelectElement>("#chat-model").value = previous;
+      toast(asError(cause).message);
+    } finally {
+      busy(false);
+    }
   }
   replyMode = "pi";
   updateMode();

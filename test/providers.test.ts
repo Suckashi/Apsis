@@ -129,7 +129,7 @@ test("automatic default keeps a ready legacy model, otherwise accepts a keyless 
   });
 });
 
-test("ordinary conversations snapshot provider and model while the default changes", async (t) => {
+test("ordinary conversations keep history when switching models", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "apsis-provider-chat-"));
   const work = join(directory, "work");
   await mkdir(work);
@@ -224,6 +224,32 @@ test("ordinary conversations snapshot provider and model while the default chang
   assert.equal(calls[0].PI_PROVIDER, "openai-compatible");
   assert.equal(calls[0].PI_MODEL, "beta");
   assert.equal(calls[0].COMPATIBLE_API_KEY, "isolated-secret");
+  const beforeSwitch = app.tasks.view(session.id).messages;
+  const switched = await request(
+    `sessions/${session.id}/model`,
+    { connectionId: local.id, model: "qwen:local" },
+    "PUT",
+  );
+  assert.equal(switched.status, 200);
+  const sameConversation: Session = await switched.json();
+  assert.equal(sameConversation.id, session.id);
+  assert.equal(sameConversation.connectionId, local.id);
+  assert.equal(sameConversation.model, "qwen:local");
+  assert.deepEqual(sameConversation.messages, beforeSwitch);
+  await app.tasks.run(session.id, "follow up", false);
+  assert.equal(calls[1].PI_PROVIDER, "ollama");
+  assert.equal(calls[1].PI_MODEL, "qwen:local");
+  assert.equal(app.tasks.view(session.id).messages.length, 4);
+  assert.equal(
+    (
+      await request(
+        `sessions/${session.id}/model`,
+        { connectionId: local.id, model: "not-listed" },
+        "PUT",
+      )
+    ).status,
+    400,
+  );
   const other: Session = await (
     await request("sessions", {
       mode: "pi",

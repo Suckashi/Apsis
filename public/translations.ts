@@ -87,8 +87,8 @@ export const english: Record<string, string> = {
   "無法存取剪貼簿。": "Clipboard unavailable.",
   "已複製續聊指令，請私訊已配對的 Telegram Bot。":
     "Resume command copied. Send it to your paired Telegram Bot.",
-  "已選擇模型，新對話會使用這個模型。":
-    "Model selected. New conversations will use this model.",
+  "已切換模型，接下來的回覆會使用所選模型。":
+    "Model switched. The next reply will use the selected model.",
   "請先停止或等待任務完成。": "Stop the task or wait for it to finish first.",
   "已準備接續訊息；請確認本次權限後送出。":
     "Continuation message prepared. Review this turn's permissions before sending.",

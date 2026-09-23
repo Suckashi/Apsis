@@ -19,6 +19,7 @@ import { Connections } from "./connections.ts";
 import { revise, normalizeFact } from "./knowledge.ts";
 import { testConnection } from "./probe.ts";
 import { TelegramChannel, type TelegramCall } from "./telegram.ts";
+import { ProductService } from "./product.ts";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
 const assets: Record<string, [string, string]> = {
@@ -62,6 +63,7 @@ function json(res: ServerResponse, value: unknown, status = 200) {
 }
 
 export interface AppOptions {
+  productMode?: boolean;
   telegramCall?: TelegramCall;
   dataDir?: string;
   workspaceDir?: string;
@@ -76,6 +78,7 @@ export async function createApp({
   env = process.env,
   runner = runAgent,
   telegramCall,
+  productMode = false,
 }: AppOptions = {}) {
   const store = await new Store(dataDir).init();
   const settings = await new Settings(dataDir, env).init();
@@ -135,6 +138,13 @@ export async function createApp({
     tasks,
     telegramCall,
   ).init();
+  const product = productMode
+    ? await new ProductService(tasks, connections).init()
+    : undefined;
+  if (product) {
+    telegram.productMessage = (text) => product.telegram(text);
+    product.notifyOwner = (text) => telegram.notifyOwner(text);
+  }
   const server = createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-store");
@@ -169,6 +179,29 @@ export async function createApp({
       if (req.method === "POST" && path === "/api/ollama/models") {
         const input = await body(req);
         return json(res, await discoverOllama(input.url));
+      }
+      if (product && path.startsWith("/api/v2/"))
+        return await product.handle(req, res, url, body);
+      if (
+        product &&
+        req.method === "GET" &&
+        ["/", "/bot.js", "/bot.js.map", "/bot.css"].includes(path)
+      ) {
+        const file =
+          path === "/"
+            ? new URL("../public/bot.html", import.meta.url)
+            : path === "/bot.css"
+              ? new URL("../public/bot.css", import.meta.url)
+              : new URL("../dist/public" + path, import.meta.url);
+        res.writeHead(200, {
+          "Content-Type":
+            (path === "/"
+              ? "text/html"
+              : path.endsWith("css")
+                ? "text/css"
+                : "text/javascript") + "; charset=utf-8",
+        });
+        return res.end(await readFile(file));
       }
       if (req.method === "GET" && assets[path]) {
         const [file, type] = assets[path];
@@ -416,7 +449,7 @@ export async function createApp({
         return json(res, session, 201);
       }
       const match = path.match(
-        /^\/api\/sessions\/([a-f0-9-]+)(?:\/(chat|stop|export|runs))?$/,
+        /^\/api\/sessions\/([a-f0-9-]+)(?:\/(chat|stop|export|runs|model))?$/,
       );
       if (match) {
         const [, id, action] = match;
@@ -425,6 +458,8 @@ export async function createApp({
         if (!action && req.method === "GET") {
           return json(res, tasks.view(id));
         }
+        if (action === "model" && req.method === "PUT")
+          return json(res, await tasks.changeModel(id, await body(req)));
         if (action === "export" && req.method === "GET") {
           if (running.has(id)) fail("請等待任務完成後再匯出。", 409);
           res.writeHead(200, {
@@ -619,9 +654,10 @@ export async function createApp({
     }
   });
   server.on("close", () => {
+    void product?.close();
     tasks.stopAll();
     void telegram.stop();
   });
   server.once("listening", () => telegram.start());
-  return { server, store, workspace, tasks, telegram };
+  return { server, store, workspace, tasks, telegram, product };
 }

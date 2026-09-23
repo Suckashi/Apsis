@@ -2,7 +2,7 @@ import { context } from "esbuild";
 import { spawn } from "node:child_process";
 
 const browser = await context({
-  entryPoints: ["public/app.ts"],
+  entryPoints: ["public/app.ts", "public/bot.tsx"],
   bundle: true,
   format: "esm",
   target: "es2022",
@@ -15,7 +15,13 @@ await browser.watch();
 const server = spawn(
   process.execPath,
   ["--watch", "--env-file-if-exists=.env", "server/index.ts"],
-  { stdio: "inherit" },
+  {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      ...(process.argv.includes("--legacy") ? { APSIS_LEGACY: "1" } : {}),
+    },
+  },
 );
 const stop = () => {
   server.kill();

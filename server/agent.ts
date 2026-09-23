@@ -52,6 +52,10 @@ export async function runPi({
   recordOperation,
   probe,
   executionContext,
+  extraTools,
+  authorize,
+  registerSteer,
+  maxTurns = 12,
 }: PiOptions): Promise<RunResult> {
   const config = configuration(env);
   const models = await ModelRuntime.create({
@@ -148,6 +152,8 @@ export async function runPi({
     source,
     recordOperation,
     probe,
+    extraTools,
+    authorize,
   });
   const { session: coding } = await createAgentSession({
     cwd: workspace.root,
@@ -165,6 +171,7 @@ export async function runPi({
     customTools,
   });
   const agent = coding.agent;
+  registerSteer?.((text) => coding.steer(text));
   if (runtime) {
     models.hasConfiguredAuth = () => true;
     agent.streamFunction = (model, context, options) =>
@@ -172,8 +179,8 @@ export async function runPi({
   }
   agent.toolExecution = "sequential";
   agent.finishTurn = () => {
-    if (++turns >= 12) {
-      emit({ type: "activity", text: "已達單次 12 回合上限。" });
+    if (++turns >= maxTurns) {
+      emit({ type: "activity", text: `已達單次 ${maxTurns} 回合上限。` });
       return { action: "end" };
     }
   };
