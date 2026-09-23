@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 import type { Mode, Status } from "../shared/types.ts";
 
 export function modeRequirement(
@@ -5,7 +6,9 @@ export function modeRequirement(
   status: Partial<Status>,
 ): string | null {
   if (mode === "pi" && !status.piReady)
-    return "先設定 Apsis 的模型（雲端 API 或本機 Ollama），就能開始真實任務。";
+    return t(
+      "先設定 Apsis 的模型（雲端 API 或本機 Ollama），就能開始真實任務。",
+    );
   return null;
 }
 

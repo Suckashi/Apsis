@@ -19,7 +19,7 @@ Enable file writes for precise `edit_file` replacements. **Allow commands (允�
 - Keep several model providers and models configured at once, then choose one for a conversation or agent.
 - Use a compact messenger interface with dark, light, and system themes, mobile navigation, searchable history, Markdown, and code copying.
 
-The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/designing-grok-bot), while retaining Apsis's identity and capabilities. The application UI currently uses Traditional Chinese; this repository provides documentation in both languages.
+The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/designing-grok-bot), while retaining Apsis's identity and capabilities. The Web interface supports Traditional Chinese and English. In **Settings → General → Interface language**, choose your language. Switching reloads the page and remembers your preference in this browser; chat drafts are retained. Saved conversations, project names, code and tool output keep their original text. Task permissions reset after reload as usual. This repository also provides documentation in both languages.
 
 ## Architecture and responsibilities
 

@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 let initialized = false;
 
 /** One delegated listener also handles code blocks replaced during streaming. */
@@ -27,23 +28,23 @@ export function initCodeBlocks(notify: (message: string) => void): void {
 
     try {
       await navigator.clipboard.writeText(text);
-      button.textContent = "已複製";
-      button.setAttribute("aria-label", "程式碼已複製");
+      button.textContent = t("已複製");
+      button.setAttribute("aria-label", t("程式碼已複製"));
       button.dataset.copied = "true";
-      notify("程式碼已複製");
+      notify(t("程式碼已複製"));
     } catch {
-      button.textContent = "複製失敗";
-      button.setAttribute("aria-label", "複製失敗，重新複製程式碼");
+      button.textContent = t("複製失敗");
+      button.setAttribute("aria-label", t("複製失敗，重新複製程式碼"));
       delete button.dataset.copied;
-      notify("無法存取剪貼簿，請選取程式碼後手動複製。");
+      notify(t("無法存取剪貼簿，請選取程式碼後手動複製。"));
     } finally {
       copying.delete(button);
       button.removeAttribute("aria-busy");
       resets.set(
         button,
         setTimeout(() => {
-          button.textContent = "複製";
-          button.setAttribute("aria-label", "複製程式碼");
+          button.textContent = t("複製");
+          button.setAttribute("aria-label", t("複製程式碼"));
           delete button.dataset.copied;
           resets.delete(button);
         }, 2000),

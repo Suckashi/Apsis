@@ -1,3 +1,10 @@
+import {
+  t,
+  locale,
+  translateServerText,
+  initI18n,
+  saveLocale,
+} from "./i18n.ts";
 import { createManagement, knowledgeActions } from "./management.ts";
 import { createProjectsUI } from "./projects.ts";
 import { renderRunEvidence } from "./results.ts";
@@ -21,6 +28,7 @@ import { initCommandPalette, initComposer, initTheme } from "./interaction.ts";
 import { initCodeBlocks } from "./code-blocks.ts";
 import { createAgentsUI } from "./agents.ts";
 import { connectionModels, providerName } from "./provider-catalog.ts";
+initI18n();
 const state: {
   session: SessionView | null;
   sessions: SessionSummary[];
@@ -35,7 +43,7 @@ const state: {
   status: {},
 };
 const labels: Record<string, string> = {
-  demo: "示範模式",
+  demo: t("示範模式"),
   pi: "Apsis",
 };
 let replyMode: Mode = "pi";
@@ -92,7 +100,10 @@ async function loadModelChoices(preferDefault = false) {
     group.label = row.name + " · " + providerName(row);
     for (const model of connectionModels(row)) {
       const option = new Option(
-        row.name + " · " + model + (connectionReady(row) ? "" : "（待設定）"),
+        row.name +
+          " · " +
+          model +
+          (connectionReady(row) ? "" : t("（待設定）")),
         choiceValue(row.id, model),
       );
       option.disabled = !connectionReady(row);
@@ -100,7 +111,8 @@ async function loadModelChoices(preferDefault = false) {
     }
     select.append(group);
   }
-  if (!select.options.length) select.append(new Option("先加入模型服務", ""));
+  if (!select.options.length)
+    select.append(new Option(t("先加入模型服務"), ""));
   const sessionChoice =
     state.session?.connectionId && state.session.model
       ? choiceValue(state.session.connectionId, state.session.model)
@@ -140,13 +152,13 @@ function updatePresence() {
       : "idle";
   $("#bot-status").textContent = !connected
     ? loginExpired
-      ? "登入已過期，請重新登入"
+      ? t("登入已過期，請重新登入")
       : wasConnected
-        ? "連線中斷，正在重新連接…"
-        : "正在連接工作區…"
+        ? t("連線中斷，正在重新連接…")
+        : t("正在連接工作區…")
     : working
       ? (state.busy || state.session?.running ? currentAction : "") ||
-        "正在處理任務"
+        t("正在處理任務")
       : "";
   $("#bot-status").hidden = !$("#bot-status").textContent;
 }
@@ -161,15 +173,15 @@ function setConnection(value: boolean, expired = false) {
       : "offline";
   $("#connection-state").textContent = value
     ? $("#remote-logout").hidden
-      ? "本機連線"
-      : "遠端連線 · 已登入"
+      ? t("本機連線")
+      : t("遠端連線 · 已登入")
     : expired
-      ? "登入已過期"
-      : "連線中斷 · 自動重試中";
+      ? t("登入已過期")
+      : t("連線中斷 · 自動重試中");
   const retry = document.querySelector<HTMLButtonElement>("#connection-retry");
   if (retry) {
     retry.hidden = value;
-    retry.textContent = expired ? "重新登入" : "重新連線";
+    retry.textContent = expired ? t("重新登入") : t("重新連線");
   }
   updatePresence();
   syncComposer();
@@ -290,16 +302,16 @@ $("#allow-memory").addEventListener("change", updatePermissions);
 $("#allow-skills").addEventListener("change", updatePermissions);
 function updatePermissions() {
   const allowed = [
-    [$("#allow-writes").checked, "檔案"],
-    [$("#allow-memory").checked, "記憶"],
-    [$("#allow-skills").checked, "技能"],
-    [$("#allow-shell").checked, "主機命令"],
+    [$("#allow-writes").checked, t("檔案")],
+    [$("#allow-memory").checked, t("記憶")],
+    [$("#allow-skills").checked, t("技能")],
+    [$("#allow-shell").checked, t("主機命令")],
   ]
     .filter(([checked]) => checked)
     .map(([, name]) => name);
   $("#permission-hint").textContent = allowed.length
-    ? "允許寫入：" + allowed.join("、")
-    : "僅讀取 · 寫入權限皆關閉";
+    ? t("允許寫入：") + allowed.join(locale === "en" ? ", " : "、")
+    : t("僅讀取 · 寫入權限皆關閉");
 }
 let followOutput = true;
 const welcomeTemplate = $<HTMLTemplateElement>("#welcome-template");
@@ -315,8 +327,8 @@ function saveDraft() {
   const saved = preferences.set(draftKey(), text);
   $("#draft-status").textContent = text
     ? saved
-      ? "草稿已保存在此瀏覽器"
-      : "草稿暫存不可用，請先複製內容"
+      ? t("草稿已保存在此瀏覽器")
+      : t("草稿暫存不可用，請先複製內容")
     : "";
   composer.resize();
   syncComposer();
@@ -325,13 +337,48 @@ function restoreDraft() {
   $("#prompt").value = preferences.get(draftKey()) || "";
   saveDraft();
 }
+const languageSelect = $<HTMLSelectElement>("#interface-language");
+languageSelect.value = locale;
+languageSelect.addEventListener("change", () => {
+  // Reload initializes module-level labels too. Keep the current chat selection
+  // and draft without persisting credentials or task permission grants.
+  if (!preferences.set(draftKey(), $("#prompt").value)) {
+    languageSelect.value = locale;
+    $("#language-status").textContent = t(
+      "無法保存草稿，請先複製內容再切換語言。",
+    );
+    return;
+  }
+  try {
+    sessionStorage.setItem(
+      "apsis-language-chat",
+      JSON.stringify({
+        project: projectsUI.selected(),
+        model: $<HTMLSelectElement>("#chat-model").value,
+        agent: agentsUI.selected()?.id,
+      }),
+    );
+  } catch {
+    /* Draft is already saved; chat choices can use their defaults. */
+  }
+  const next = languageSelect.value === "en" ? "en" : "zh-TW";
+  if (!saveLocale(next)) {
+    languageSelect.value = locale;
+    $("#language-status").textContent = t(
+      "無法保存語言偏好，請允許瀏覽器儲存後再試。",
+    );
+    return;
+  }
+  location.reload();
+});
 function renderWelcome() {
   $("#messages").replaceChildren(welcomeTemplate.content.cloneNode(true));
   const agent = state.session?.agent || agentsUI.selected();
   $(".onboarding").hidden = agent
     ? !agentsUI.requirement(agent)
     : connectionReady(selectedConnection());
-  if (agent) $("[data-welcome-title]").textContent = "交辦任務給 " + agent.name;
+  if (agent)
+    $("[data-welcome-title]").textContent = t("交辦任務給 ") + agent.name;
 }
 function scrollLatest(force = false) {
   if (followOutput || force)
@@ -382,14 +429,18 @@ async function api<T = unknown>(
   );
   const data = (await response.json()) as T & { error?: string };
   if (!response.ok)
-    throw Object.assign(new Error(data.error || "請求失敗。"), {
-      status: response.status,
-    });
+    throw Object.assign(
+      new Error(translateServerText(data.error || "請求失敗。")),
+      {
+        status: response.status,
+      },
+    );
   return data;
 }
 const post = <T = unknown>(path: string, data: unknown) =>
   api<T>(path, { method: "POST", body: JSON.stringify(data) });
 const settingsViews = [
+  "general",
   "connections",
   "agents",
   "memories",
@@ -409,10 +460,11 @@ function syncSettingsOrientation() {
 compactSettings.addEventListener("change", syncSettingsOrientation);
 syncSettingsOrientation();
 const settingsTitles: Record<string, string> = {
-  connections: "模型連線",
-  agents: "我的 Agents",
-  memories: "記憶",
-  skills: "技能",
+  general: t("一般"),
+  connections: t("模型連線"),
+  agents: t("我的 Agents"),
+  memories: t("記憶"),
+  skills: t("技能"),
   settings: "Telegram",
 };
 let mainView: "chat" | "runs" = "chat";
@@ -427,6 +479,7 @@ function showView(view: string) {
   if (
     ![
       "chat",
+      "general",
       "memories",
       "skills",
       "settings",
@@ -485,7 +538,7 @@ function showView(view: string) {
     );
   $("#page-name").textContent = {
     chat: "Apsis",
-    runs: "任務紀錄",
+    runs: t("任務紀錄"),
   }[mainView];
   if (isSettings) {
     $("#settings-title").textContent = settingsTitles[view];
@@ -641,8 +694,8 @@ function renderSessions() {
     const p = document.createElement("p");
     p.className = "muted";
     p.textContent = query
-      ? "沒有符合的對話，試試其他關鍵字。"
-      : "你的下一個想法，從這裡開始。";
+      ? t("沒有符合的對話，試試其他關鍵字。")
+      : t("你的下一個想法，從這裡開始。");
     $("#sessions").append(p);
   }
   for (const item of sessions) {
@@ -658,16 +711,16 @@ function renderSessions() {
     yesterday.setDate(today.getDate() - 1);
     const day =
       date.toDateString() === today.toDateString()
-        ? "今天"
+        ? t("今天")
         : date.toDateString() === yesterday.toDateString()
-          ? "昨天"
-          : date.toLocaleDateString("zh-TW", {
+          ? t("昨天")
+          : date.toLocaleDateString(locale, {
               month: "numeric",
               day: "numeric",
             });
     meta.textContent =
       (item.source === "telegram" ? "Telegram · " : "Web · ") +
-      (item.running ? "正在處理…" : `${day} · ${item.count} 則訊息`);
+      (item.running ? t("正在處理…") : t("{0} · {1} 則訊息", day, item.count));
     button.append(title, meta);
     button.setAttribute(
       "aria-current",
@@ -704,12 +757,12 @@ function setMessageTime(content: HTMLElement, timestamp: string) {
   }
   const date = new Date(valid);
   time.dateTime = valid;
-  time.textContent = date.toLocaleTimeString("zh-TW", {
+  time.textContent = date.toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   });
-  time.title = date.toLocaleString("zh-TW");
+  time.title = date.toLocaleString(locale);
 }
 function addMessage(
   role: "user" | "assistant",
@@ -721,14 +774,14 @@ function addMessage(
   item.className = "message " + role + (error ? " error" : "");
   const avatar = document.createElement("div");
   avatar.className = "avatar";
-  avatar.textContent = role === "user" ? "你" : "✳";
+  avatar.textContent = role === "user" ? t("你") : "✳";
   const body = document.createElement("div");
   body.className = "message-body";
   const label = document.createElement("div");
   label.className = "message-label";
   label.textContent =
     role === "user"
-      ? "你"
+      ? t("你")
       : state.session?.agent?.name ||
         agentsUI.selected()?.name ||
         labels[state.session?.mode || replyMode];
@@ -738,17 +791,20 @@ function addMessage(
   setMessageContent(content, text);
   const copy = document.createElement("button");
   copy.className = "copy-message quiet-button";
-  copy.textContent = "複製";
+  copy.textContent = t("複製");
   copy.setAttribute(
     "aria-label",
-    "複製" + (role === "user" ? "你的訊息" : label.textContent + " 回覆"),
+    t(
+      "複製{0}",
+      role === "user" ? t("你的訊息") : label.textContent + t(" 回覆"),
+    ),
   );
   copy.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(messageSources.get(content) || "");
-      toast("已複製訊息。");
+      toast(t("已複製訊息。"));
     } catch {
-      toast("無法存取剪貼簿，請選取訊息文字複製。");
+      toast(t("無法存取剪貼簿，請選取訊息文字複製。"));
     }
   });
   const actions = document.createElement("div");
@@ -765,7 +821,7 @@ function renderConversation() {
   activeReply = undefined;
   if (!state.session) {
     renderWelcome();
-    $("#session-title").textContent = "與 Apsis 的新話題";
+    $("#session-title").textContent = t("與 Apsis 的新話題");
     $("#resume-bot").hidden = true;
     updateMode();
     updateExport();
@@ -791,7 +847,7 @@ function renderConversation() {
         const results = document.createElement("details");
         results.className = "message-results";
         const summary = document.createElement("summary");
-        summary.textContent = "查看操作結果";
+        summary.textContent = t("查看操作結果");
         results.append(summary);
         let loaded = false;
         results.addEventListener("toggle", async () => {
@@ -811,7 +867,7 @@ function renderConversation() {
       if (m.status === "error" && m === state.session.messages.at(-1)) {
         const resume = document.createElement("button");
         resume.className = "quiet-button";
-        resume.textContent = "檢查並接續";
+        resume.textContent = t("檢查並接續");
         resume.onclick = prepareResume;
         content.closest(".message-body")!.append(resume);
       }
@@ -820,7 +876,7 @@ function renderConversation() {
   if (state.session.running && state.session.live) {
     const content = addMessage(
       "assistant",
-      state.session.live.text || "正在處理任務…",
+      state.session.live.text || t("正在處理任務…"),
     );
     content.dataset.traceKey = state.session.id + ":live";
     content.dataset.live = "true";
@@ -849,9 +905,9 @@ function updateMode() {
       : currentModelChoice();
   const name = agent?.name || "Apsis";
   if (state.view === "chat") $("#page-name").textContent = name;
-  $("#prompt").setAttribute("aria-label", "傳訊息給 " + name);
-  $("#prompt").placeholder = "傳訊息給 " + name;
-  $("#messages").setAttribute("aria-label", "與 " + name + " 的訊息");
+  $("#prompt").setAttribute("aria-label", t("傳訊息給 ") + name);
+  $("#prompt").placeholder = t("傳訊息給 ") + name;
+  $("#messages").setAttribute("aria-label", t("與 {0} 的訊息", name));
   $("#chat-model-field").hidden = !!agent || mode !== "pi";
   $("#agent-model-label").hidden = !agent;
   $("#agent-model-label").textContent = agent?.model || "";
@@ -863,7 +919,7 @@ function updateMode() {
             modelConnections.find((row) => row.id === choice.connectionId),
           )
           ? null
-          : "這個模型服務還缺少 API key，請先完成連線設定。"
+          : t("這個模型服務還缺少 API key，請先完成連線設定。")
         : modeRequirement(mode, state.status);
   $("#permission-hint").title = requirement || "";
 }
@@ -879,7 +935,7 @@ async function loadSession(id: string) {
   await loadModelChoices(true);
   await projectsUI.load();
   restoreDraft();
-  $("#run-status").textContent = state.session?.running ? "任務執行中" : "";
+  $("#run-status").textContent = state.session?.running ? t("任務執行中") : "";
   $("#allow-writes").checked = false;
   $("#allow-memory").checked = false;
   $("#allow-skills").checked = false;
@@ -891,7 +947,7 @@ async function loadSession(id: string) {
   renderSessions();
   await refreshFiles();
   showView("chat");
-  if (state.session.running) toast("任務正在執行，此頁會自動更新進度。");
+  if (state.session.running) toast(t("任務正在執行，此頁會自動更新進度。"));
 }
 async function newSession(preserveMode = false) {
   if (state.busy || navigating || document.body.dataset.ready !== "true")
@@ -943,24 +999,25 @@ $("#jump-latest").addEventListener("click", () => {
 });
 function activityLabel(text: string) {
   const tools: Record<string, string> = {
-    list_files: "查看工作區檔案",
-    read_file: "讀取檔案",
-    write_file: "修改檔案",
-    edit_file: "精準修改檔案",
-    shell: "執行命令",
-    remember: "保存記憶",
-    update_memory: "更新記憶",
-    save_skill: "保存技能",
-    list_skills: "查看技能",
-    read_skill: "讀取技能指引",
-    search_history: "搜尋過去的對話",
+    list_files: t("查看工作區檔案"),
+    read_file: t("讀取檔案"),
+    write_file: t("修改檔案"),
+    edit_file: t("精準修改檔案"),
+    shell: t("執行命令"),
+    remember: t("保存記憶"),
+    update_memory: t("更新記憶"),
+    save_skill: t("保存技能"),
+    list_skills: t("查看技能"),
+    read_skill: t("讀取技能指引"),
+    search_history: t("搜尋過去的對話"),
   };
   const started = /^執行 (\w+)$/.exec(text);
-  if (started && tools[started[1]!]) return "正在" + tools[started[1]!] + "…";
+  if (started && tools[started[1]!])
+    return t("正在") + tools[started[1]!] + "…";
   const finished = /^(\w+) (完成|失敗)$/.exec(text);
   if (finished && tools[finished[1]!])
-    return tools[finished[1]!] + " · " + finished[2];
-  return text;
+    return tools[finished[1]!] + " · " + t(finished[2]!);
+  return translateServerText(text);
 }
 function addActivity(text: string, content = activeReply, running = true) {
   if (!content) return;
@@ -987,7 +1044,9 @@ function addActivity(text: string, content = activeReply, running = true) {
   p.className = "activity-item";
   p.textContent = text;
   trace.querySelector(".activity-list")!.append(p);
-  trace.querySelector("summary")!.textContent = running ? text : "查看工作紀錄";
+  trace.querySelector("summary")!.textContent = running
+    ? text
+    : t("查看工作紀錄");
   if (running) {
     currentAction = text;
     updatePresence();
@@ -1002,20 +1061,21 @@ function finishTrace(content: HTMLElement | undefined, failed = false) {
   const records = [...trace.querySelectorAll(".activity-item")];
   const lastAction = records
     .findLast(
-      (item) => item.textContent && item.textContent !== "Apsis 正在處理任務。",
+      (item) =>
+        item.textContent && item.textContent !== t("Apsis 正在處理任務。"),
     )
-    ?.textContent?.replace(/^正在/, "")
+    ?.textContent?.replace(/^(正在|Running: )/, "")
     .replace(/…$/, "")
-    .replace(/ · 完成$/, "");
+    .replace(/ · (完成|Completed)$/, "");
   trace.querySelector("summary")!.textContent =
     (failed
-      ? "任務未完成"
+      ? t("任務未完成")
       : lastAction
-        ? "回合結束 · " + lastAction
-        : "回合結束") +
+        ? t("回合結束 · ") + lastAction
+        : t("回合結束")) +
     " · " +
     records.length +
-    " 項紀錄";
+    t(" 項紀錄");
 }
 function syncComposer() {
   projectsUI.sync();
@@ -1025,7 +1085,7 @@ function syncComposer() {
     document.body.dataset.ready !== "true" ||
     running ||
     !$("#prompt").value.trim();
-  $("#send").title = !connected ? "重新連線後即可傳送" : "傳送訊息";
+  $("#send").title = !connected ? t("重新連線後即可傳送") : t("傳送訊息");
   $("#messages").setAttribute("aria-busy", String(running));
   $("#send").hidden = running;
   $("#prompt").disabled = running;
@@ -1056,7 +1116,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
   )
     return;
   if (state.session?.running) {
-    toast("此對話仍在執行，請等待完成或先停止。");
+    toast(t("此對話仍在執行，請等待完成或先停止。"));
     return;
   }
   const prompt = $("#prompt").value.trim();
@@ -1074,7 +1134,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
             modelConnections.find((row) => row.id === modelChoice.connectionId),
           )
           ? null
-          : "這個模型服務還缺少 API key，請先完成連線設定。"
+          : t("這個模型服務還缺少 API key，請先完成連線設定。")
         : modeRequirement(replyMode as Mode, state.status);
   if (requirement) {
     toast(requirement);
@@ -1085,7 +1145,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
   let submitted = false;
   let accepted = false;
   busy(true);
-  $("#run-status").textContent = "正在送出…";
+  $("#run-status").textContent = t("正在送出…");
   try {
     const permissions = {
       files: $("#allow-writes").checked,
@@ -1124,7 +1184,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
     );
     if (sentMessage) observedMessageTimes.set(sentMessage.id, run.createdAt);
     renderConversation();
-    $("#run-status").textContent = state.session.running ? "任務執行中" : "";
+    $("#run-status").textContent = state.session.running ? t("任務執行中") : "";
     state.sessions = await api<SessionSummary[]>("sessions");
   } catch (caught) {
     const error = asError(caught);
@@ -1134,11 +1194,11 @@ $("#chat-form").addEventListener("submit", async (event) => {
       saveDraft();
     }
     $("#run-status").textContent = submitted
-      ? "請至任務紀錄確認結果"
-      : "送出失敗 · 草稿已保留";
+      ? t("請至任務紀錄確認結果")
+      : t("送出失敗 · 草稿已保留");
     toast(
       error.message +
-        (submitted ? " 請先到任務紀錄確認結果，避免重複送出。" : ""),
+        (submitted ? t(" 請先到任務紀錄確認結果，避免重複送出。") : ""),
     );
   } finally {
     busy(false);
@@ -1149,7 +1209,7 @@ $("#stop").addEventListener("click", async () => {
   if (!state.session) return;
   try {
     await post("sessions/" + state.session.id + "/stop", {});
-    toast("已送出停止要求。");
+    toast(t("已送出停止要求。"));
   } catch (cause) {
     const e = asError(cause);
     toast(e.message);
@@ -1180,8 +1240,8 @@ function renderLibrary(
     p.className = "muted";
     p.textContent =
       name === "memories"
-        ? "還沒有記憶。先留下你的第一個偏好或專案背景。"
-        : "還沒有技能。將一個有效的方法寫成可重用指引。";
+        ? t("還沒有記憶。先留下你的第一個偏好或專案背景。")
+        : t("還沒有技能。將一個有效的方法寫成可重用指引。");
     list.append(p);
   }
   for (const row of rows) {
@@ -1196,16 +1256,24 @@ function renderLibrary(
     p.textContent = row.content;
     const small = document.createElement("small");
     small.textContent =
-      new Date(row.createdAt || Date.now()).toLocaleDateString("zh-TW") +
+      new Date(row.createdAt || Date.now()).toLocaleDateString(locale) +
       " · " +
-      (row.agentId ? "Agent 專屬 · " + row.agentId.slice(0, 8) : "共用") +
-      (row.mergedInto ? " · 已合併" : row.enabled === false ? " · 已停用" : "");
+      (row.agentId ? t("Agent 專屬 · ") + row.agentId.slice(0, 8) : t("共用")) +
+      (row.mergedInto
+        ? t(" · 已合併")
+        : row.enabled === false
+          ? t(" · 已停用")
+          : "");
     const del = document.createElement("button");
     del.className = "delete-button";
-    del.textContent = "刪除";
-    del.setAttribute("aria-label", "刪除" + (row.name || "記憶"));
+    del.textContent = t("刪除");
+    del.setAttribute("aria-label", t("刪除 {0}", row.name || t("記憶")));
     del.addEventListener("click", async () => {
-      if (!confirm("確定刪除此" + (name === "skills" ? "技能" : "記憶") + "？"))
+      if (
+        !confirm(
+          t("確定刪除此{0}？", name === "skills" ? t("技能") : t("記憶")),
+        )
+      )
         return;
       try {
         await api(name + "/" + row.id, { method: "DELETE" });
@@ -1235,7 +1303,7 @@ $("#memory-form").addEventListener("submit", async (event) => {
     await post("memories", { content: $("#memory-content").value });
     $("#memory-form").reset();
     await refresh();
-    toast("記憶已儲存，Apsis 下次執行時生效。");
+    toast(t("記憶已儲存，Apsis 下次執行時生效。"));
   } catch (cause) {
     const e = asError(cause);
     toast(e.message);
@@ -1250,7 +1318,7 @@ $("#skill-form").addEventListener("submit", async (event) => {
     });
     $("#skill-form").reset();
     await refresh();
-    toast("技能已加入。");
+    toast(t("技能已加入。"));
   } catch (cause) {
     const e = asError(cause);
     toast(e.message);
@@ -1271,7 +1339,7 @@ async function refreshFiles() {
     ? files
         .map((f) => (f.type === "directory" ? "▱ " : "▧ ") + f.name)
         .join("\n")
-    : "此專案尚無可顯示的檔案";
+    : t("此專案尚無可顯示的檔案");
 }
 async function refreshKnowledge() {
   const [memories, skills] = await Promise.all([
@@ -1331,20 +1399,21 @@ const projectsUI = createProjectsUI(
 function prepareResume() {
   if (state.session?.running || state.busy) return;
   if (state.session?.messages.at(-1)?.status !== "error") {
-    toast("這段對話後來已有新回覆，請直接描述接下來要做的事。");
+    toast(t("這段對話後來已有新回覆，請直接描述接下來要做的事。"));
     return;
   }
   if ($("#prompt").value.trim()) {
-    toast("輸入框已有草稿，請先送出或清除；接續時會自動帶入中斷紀錄。");
+    toast(t("輸入框已有草稿，請先送出或清除；接續時會自動帶入中斷紀錄。"));
     return;
   }
-  $("#prompt").value =
-    "請先核對上次未完成任務的檔案與命令結果，再接續尚未完成的工作；不要重複已完成的操作。";
+  $("#prompt").value = t(
+    "請先核對上次未完成任務的檔案與命令結果，再接續尚未完成的工作；不要重複已完成的操作。",
+  );
   saveDraft();
   composer.resize();
   $("#prompt").dispatchEvent(new Event("input", { bubbles: true }));
   $("#prompt").focus();
-  toast("已準備接續訊息；請確認本次權限後送出。");
+  toast(t("已準備接續訊息；請確認本次權限後送出。"));
 }
 const management = createManagement(
   api,
@@ -1360,7 +1429,7 @@ const management = createManagement(
 );
 const agentsUI = createAgentsUI(api, toast, async (agent) => {
   if (state.busy) {
-    toast("請先停止或等待任務完成。");
+    toast(t("請先停止或等待任務完成。"));
     return;
   }
   await newSession(true);
@@ -1376,7 +1445,7 @@ $<HTMLSelectElement>("#chat-model").addEventListener("change", async () => {
   if (state.session) {
     await newSession(true);
     $<HTMLSelectElement>("#chat-model").value = selected;
-    toast("已選擇模型，新對話會使用這個模型。");
+    toast(t("已選擇模型，新對話會使用這個模型。"));
   }
   replyMode = "pi";
   updateMode();
@@ -1386,9 +1455,9 @@ $("#resume-bot").addEventListener("click", async () => {
   if (!state.session) return;
   try {
     await navigator.clipboard.writeText("/resume " + state.session.id);
-    toast("已複製續聊指令，請私訊已配對的 Telegram Bot。");
+    toast(t("已複製續聊指令，請私訊已配對的 Telegram Bot。"));
   } catch {
-    toast("無法存取剪貼簿。");
+    toast(t("無法存取剪貼簿。"));
   }
 });
 let polling = false;
@@ -1444,7 +1513,10 @@ async function poll() {
         current.live.activity.length >= (previous.live?.activity.length || 0)
       ) {
         if (previous.live?.text !== current.live.text)
-          setMessageContent(liveContent, current.live.text || "正在處理任務…");
+          setMessageContent(
+            liveContent,
+            current.live.text || t("正在處理任務…"),
+          );
         for (const text of current.live.activity.slice(
           previous.live?.activity.length || 0,
         ))
@@ -1466,7 +1538,7 @@ async function poll() {
       if (!follow) $("#messages").scrollTop = position;
       $("#jump-latest").hidden = follow;
       $("#run-status").textContent = current.running
-        ? "任務執行中 · 自動更新"
+        ? t("任務執行中 · 自動更新")
         : "";
     }
   } catch {
@@ -1493,18 +1565,18 @@ initCommandPalette(
     return [
       {
         id: "new",
-        label: "開啟新話題",
-        hint: "相同的 Apsis，新的開始",
-        group: "快速前往",
+        label: t("開啟新話題"),
+        hint: t("相同的 Apsis，新的開始"),
+        group: t("快速前往"),
         keywords: "new chat topic",
         disabled: locked,
         run: () => newSession(),
       },
       {
         id: "chat",
-        label: "回到對話",
-        hint: "與 Apsis 繼續聊聊",
-        group: "快速前往",
+        label: t("回到對話"),
+        hint: t("與 Apsis 繼續聊聊"),
+        group: t("快速前往"),
         keywords: "chat home",
         run: () => {
           showView("chat");
@@ -1513,9 +1585,9 @@ initCommandPalette(
       },
       {
         id: "workspace",
-        label: "查看檔案",
-        hint: "工作區檔案",
-        group: "快速前往",
+        label: t("查看檔案"),
+        hint: t("工作區檔案"),
+        group: t("快速前往"),
         keywords: "workspace files",
         run: () => {
           showView("chat");
@@ -1523,15 +1595,20 @@ initCommandPalette(
         },
       },
       ...[
-        ["agents", "我的 Agents", "角色、工具與記憶範圍", "agents"],
-        ["connections", "模型連線", "管理端點與測試模型", "connections models"],
-        ["runs", "任務紀錄", "背景工作與操作結果", "runs tasks"],
-        ["memories", "長期記憶", "管理 Apsis 記得的事", "memory"],
-        ["skills", "技能庫", "保存與整理可重用的方法", "skills"],
+        ["agents", t("我的 Agents"), t("角色、工具與記憶範圍"), "agents"],
+        [
+          "connections",
+          t("模型連線"),
+          t("管理端點與測試模型"),
+          "connections models",
+        ],
+        ["runs", t("任務紀錄"), t("背景工作與操作結果"), "runs tasks"],
+        ["memories", t("長期記憶"), t("管理 Apsis 記得的事"), "memory"],
+        ["skills", t("技能庫"), t("保存與整理可重用的方法"), "skills"],
         [
           "settings",
           "Telegram",
-          "連接 Bot 與配對帳號",
+          t("連接 Bot 與配對帳號"),
           "settings model telegram",
         ],
       ].map(([id, label, hint, keywords]) => ({
@@ -1539,7 +1616,7 @@ initCommandPalette(
         label: label!,
         hint: hint!,
         keywords,
-        group: "快速前往",
+        group: t("快速前往"),
         disabled: locked,
         run: () => showView(id!),
       })),
@@ -1548,9 +1625,9 @@ initCommandPalette(
         .map((session) => ({
           id: session.id,
           label: session.title,
-          hint: `${session.source === "telegram" ? "Telegram" : "Web"} · ${session.running ? "執行中" : session.count + " 則訊息"}`,
-          group: "最近的對話",
-          keywords: "history 對話 歷史",
+          hint: `${session.source === "telegram" ? "Telegram" : "Web"} · ${session.running ? t("執行中") : session.count + t(" 則訊息")}`,
+          group: t("最近的對話"),
+          keywords: t("history 對話 歷史"),
           disabled: locked,
           run: () => loadSession(session.id),
         })),
@@ -1573,6 +1650,26 @@ async function initialize() {
         replyMode = "pi";
         updateMode();
       }
+      try {
+        const saved = sessionStorage.getItem("apsis-language-chat");
+        sessionStorage.removeItem("apsis-language-chat");
+        if (saved && !state.session) {
+          const choice = JSON.parse(saved);
+          await projectsUI.load(choice.project);
+          if (choice.agent) agentsUI.selectById(choice.agent);
+          if (
+            choice.model &&
+            [...$<HTMLSelectElement>("#chat-model").options].some(
+              (o) => o.value === choice.model,
+            )
+          )
+            $<HTMLSelectElement>("#chat-model").value = choice.model;
+          updateMode();
+          renderWelcome();
+        }
+      } catch {
+        /* Optional browser preferences. */
+      }
       showView(initialView || "chat");
       restoredInitialView = true;
     }
@@ -1581,7 +1678,7 @@ async function initialize() {
   } catch (cause) {
     const e = asError(cause);
     setConnection(false, loginExpired);
-    $("#run-status").textContent = "正在重新連接工作區，草稿會保留";
+    $("#run-status").textContent = t("正在重新連接工作區，草稿會保留");
     if (!wasConnected) $("#connection-state").title = e.message;
   } finally {
     initializing = false;

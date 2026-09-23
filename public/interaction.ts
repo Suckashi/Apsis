@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 import { preferences } from "./workflow.ts";
 
 export interface Command {
@@ -19,9 +20,9 @@ export function initTheme() {
       ? saved
       : "dark";
   const labels: Record<string, string> = {
-    system: "跟隨系統",
-    light: "淺色模式",
-    dark: "深色模式",
+    system: t("跟隨系統"),
+    light: t("淺色模式"),
+    dark: t("深色模式"),
   };
   const apply = () => {
     const dark = mode === "dark" || (mode === "system" && system.matches);
@@ -33,7 +34,7 @@ export function initTheme() {
     if (!button) return;
     const next =
       mode === "system" ? "light" : mode === "light" ? "dark" : "system";
-    button.title = `${labels[mode]}；切換至${labels[next]}`;
+    button.title = t("{0}；切換至{1}", labels[mode], labels[next]);
     button.setAttribute("aria-label", button.title);
     const label = button.querySelector("[data-theme-label]");
     if (label) label.textContent = labels[mode]!;
@@ -81,8 +82,8 @@ export function initComposer(prompt: HTMLTextAreaElement, submit: () => void) {
     const label = document.querySelector("#composer-hint");
     if (label)
       label.textContent = mobile.matches
-        ? "Enter 換行"
-        : "Enter 傳送 · Shift + Enter 換行";
+        ? t("Enter 換行")
+        : t("Enter 傳送 · Shift + Enter 換行");
   };
   prompt.addEventListener("compositionstart", () => {
     composing = true;
@@ -189,7 +190,9 @@ export function initCommandPalette(
       label.className = "command-result-label";
       label.textContent = command.label;
       const hint = document.createElement("small");
-      hint.textContent = command.disabled ? "目前任務完成後可用" : command.hint;
+      hint.textContent = command.disabled
+        ? t("目前任務完成後可用")
+        : command.hint;
       row.append(label, hint);
       row.addEventListener("click", () => execute(index));
       row.addEventListener("pointermove", () => select(index));
@@ -198,10 +201,10 @@ export function initCommandPalette(
     if (!matches.length) {
       const empty = document.createElement("p");
       empty.className = "command-empty";
-      empty.textContent = "找不到符合的對話或功能，試試其他關鍵字。";
+      empty.textContent = t("找不到符合的對話或功能，試試其他關鍵字。");
       results.append(empty);
     }
-    if (count) count.textContent = `${matches.length} 個結果`;
+    if (count) count.textContent = t("{0} 個結果", matches.length);
     select(
       Math.max(
         0,

@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 import type { Api, Project, SessionView } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 export function createProjectsUI(
@@ -26,9 +27,9 @@ export function createProjectsUI(
     newChat.disabled = busy();
     const project =
       current?.project || projects.find((p) => p.id === select.value);
-    select.title = project?.path || "專案資料夾";
+    select.title = project?.path || t("專案資料夾");
     document.querySelector<HTMLElement>("#project-path")!.textContent =
-      project?.path || "預設工作區";
+      project?.path || t("預設工作區");
   }
   async function load(preferred?: string) {
     const previous = preferred || select.value || "workspace";
@@ -36,7 +37,12 @@ export function createProjectsUI(
     const snapshot = session()?.project;
     if (snapshot && !projects.some((p) => p.id === snapshot.id))
       projects.push(snapshot);
-    select.replaceChildren(...projects.map((p) => new Option(p.name, p.id)));
+    select.replaceChildren(
+      ...projects.map(
+        (p) =>
+          new Option(p.id === "workspace" ? t("預設工作區") : p.name, p.id),
+      ),
+    );
     select.value = projects.some((p) => p.id === previous)
       ? previous
       : "workspace";
@@ -70,7 +76,7 @@ export function createProjectsUI(
       await load(project.id);
       dialog.close();
       await changed();
-      notify("專案已加入，新對話會使用這個資料夾。");
+      notify(t("專案已加入，新對話會使用這個資料夾。"));
     } catch (e) {
       message.textContent = asError(e).message;
     } finally {

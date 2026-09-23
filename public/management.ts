@@ -1,3 +1,4 @@
+import { t, locale, translateServerText } from "./i18n.ts";
 import type {
   Api,
   ModelConnection,
@@ -74,14 +75,14 @@ export function createManagement(
       const row = el("div", "", "provider-model-row");
       row.append(el("span", model));
       const remove = button(
-        "移除",
+        t("移除"),
         () => {
           models = models.filter((item) => item !== model);
           renderModels();
         },
         notify,
       );
-      remove.setAttribute("aria-label", "移除模型 " + model);
+      remove.setAttribute("aria-label", t("移除模型 ") + model);
       row.append(remove);
       root.append(row);
     }
@@ -89,7 +90,7 @@ export function createManagement(
       root.append(
         el(
           "p",
-          "還沒有模型。可以先讀取本機模型，或輸入服務提供的模型 ID。",
+          t("還沒有模型。可以先讀取本機模型，或輸入服務提供的模型 ID。"),
           "field-help",
         ),
       );
@@ -98,7 +99,7 @@ export function createManagement(
     const model = value.trim();
     if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model)) {
       byId<HTMLElement>("connection-status").textContent =
-        "請輸入有效的模型 ID。";
+        t("請輸入有效的模型 ID。");
       return false;
     }
     if (!models.includes(model)) models.push(model);
@@ -150,7 +151,7 @@ export function createManagement(
     }
     if (!root.childElementCount)
       root.append(
-        el("p", "沒有符合的服務；可選「自訂服務」填入端點。", "field-help"),
+        el("p", t("沒有符合的服務；可選「自訂服務」填入端點。"), "field-help"),
       );
   }
   function showPicker() {
@@ -178,8 +179,8 @@ export function createManagement(
         ? "OPENAI COMPATIBLE"
         : "NATIVE PROVIDER";
     byId<HTMLElement>("connection-form-title").textContent = row
-      ? "編輯 " + row.name
-      : "連接 " + preset.name;
+      ? t("編輯 ") + row.name
+      : t("連接 ") + preset.name;
     byId<HTMLElement>("connection-form-description").textContent =
       preset.description;
     byId<HTMLButtonElement>("connection-change-provider").hidden = !!row;
@@ -193,14 +194,16 @@ export function createManagement(
       preset.provider !== "ollama";
     byId<HTMLElement>("connection-url-help").textContent =
       preset.id === "qwen"
-        ? "預填的是新加坡區域；如果你的 key 屬於其他區域，請改成對應的 Base URL。"
-        : "此服務的 API 端點；更換網址時需重新填入金鑰。";
+        ? t(
+            "預填的是新加坡區域；如果你的 key 屬於其他區域，請改成對應的 Base URL。",
+          )
+        : t("此服務的 API 端點；更換網址時需重新填入金鑰。");
     field("clearKey").checked = false;
     byId<HTMLElement>("connection-clear-key").hidden =
       !row?.credentialConfigured;
     field("apiKey").placeholder = row?.credentialConfigured
-      ? "已設定；留空保留"
-      : "貼上此服務的 API key";
+      ? t("已設定；留空保留")
+      : t("貼上此服務的 API key");
     models = row ? connectionModels(row) : [];
     renderModels(row?.model);
     renderSuggestions();
@@ -231,7 +234,7 @@ export function createManagement(
     const node = byId<HTMLButtonElement>("connection-discover");
     const status = byId<HTMLElement>("connection-status");
     node.disabled = true;
-    status.textContent = "正在讀取 Ollama 模型…";
+    status.textContent = t("正在讀取 Ollama 模型…");
     try {
       const discovered = await api<{ id: string }[]>("ollama/models", {
         method: "POST",
@@ -239,8 +242,8 @@ export function createManagement(
       });
       renderSuggestions(discovered.map((item) => item.id));
       status.textContent = discovered.length
-        ? `找到 ${discovered.length} 個模型，點選即可加入。`
-        : "沒有找到模型；請先在 Ollama 下載模型。";
+        ? t("找到 {0} 個模型，點選即可加入。", discovered.length)
+        : t("沒有找到模型；請先在 Ollama 下載模型。");
     } catch (cause) {
       status.textContent = asError(cause).message;
     } finally {
@@ -256,13 +259,13 @@ export function createManagement(
     const submit = form.querySelector<HTMLButtonElement>("[type=submit]")!;
     submit.disabled = true;
     const status = document.querySelector("#connection-status")!;
-    status.textContent = "正在儲存…";
+    status.textContent = t("正在儲存…");
     try {
       const pending = byId<HTMLInputElement>(
         "connection-model-add",
       ).value.trim();
       if (pending && !addModel(pending)) return;
-      if (!models.length) throw new Error("請至少加入一個模型。");
+      if (!models.length) throw new Error(t("請至少加入一個模型。"));
       await api("connections" + (editing ? "/" + editing : ""), {
         method: editing ? "PUT" : "POST",
         body: JSON.stringify({
@@ -279,7 +282,7 @@ export function createManagement(
       form.hidden = true;
       await loadConnections();
       await changed();
-      notify("模型服務已儲存，可以在聊天或 Agent 中選用。");
+      notify(t("模型服務已儲存，可以在聊天或 Agent 中選用。"));
     } catch (e) {
       status.textContent = asError(e).message;
     } finally {
@@ -300,13 +303,16 @@ export function createManagement(
     const root = document.querySelector("#connection-cards")!;
     root.replaceChildren();
     const named = connections;
-    byId<HTMLElement>("connection-count").textContent =
-      `${named.length} 個服務 · ${named.reduce((count, row) => count + connectionModels(row).length, 0)} 個模型`;
+    byId<HTMLElement>("connection-count").textContent = t(
+      "{0} 個服務 · {1} 個模型",
+      named.length,
+      named.reduce((count, row) => count + connectionModels(row).length, 0),
+    );
     if (!named.length)
       root.append(
         el(
           "p",
-          "還沒有加入服務。按「加入服務」選擇 Ollama、OpenAI 或相容平台。",
+          t("還沒有加入服務。按「加入服務」選擇 Ollama、OpenAI 或相容平台。"),
           "provider-empty",
         ),
       );
@@ -324,10 +330,10 @@ export function createManagement(
         (row.provider === "openai-compatible" && !!row.url);
       const statusLabel =
         row.credentialConfigured || row.provider === "ollama"
-          ? "已設定"
+          ? t("已設定")
           : row.provider === "openai-compatible" && row.url
-            ? "待驗證"
-            : "需 API key";
+            ? t("待驗證")
+            : t("需 API key");
       heading.append(
         identity,
         el(
@@ -338,7 +344,7 @@ export function createManagement(
       );
       card.append(
         heading,
-        el("p", row.url || "官方 API 端點", "provider-card-url"),
+        el("p", row.url || t("官方 API 端點"), "provider-card-url"),
       );
       const list = el("div", "", "provider-card-models");
       for (const model of connectionModels(row)) {
@@ -348,11 +354,11 @@ export function createManagement(
           defaultChoice?.connectionId === row.id &&
           defaultChoice.model === model
         )
-          line.append(el("strong", "Apsis 預設", "provider-default-badge"));
+          line.append(el("strong", t("Apsis 預設"), "provider-default-badge"));
         else if (ready)
           line.append(
             button(
-              "設為預設",
+              t("設為預設"),
               async () => {
                 await api("connections/default", {
                   method: "PUT",
@@ -361,7 +367,7 @@ export function createManagement(
                 await loadConnections();
                 await changed();
                 notify(
-                  "Apsis 預設模型已更新，Web 與 Telegram 新對話會使用它。",
+                  t("Apsis 預設模型已更新，Web 與 Telegram 新對話會使用它。"),
                 );
               },
               notify,
@@ -371,12 +377,13 @@ export function createManagement(
       }
       card.append(list);
       const actions = el("div", "", "provider-card-actions");
-      actions.append(button("編輯服務", () => edit(row), notify));
+      actions.append(button(t("編輯服務"), () => edit(row), notify));
       actions.append(
         button(
-          "封存",
+          t("封存"),
           async () => {
-            if (!confirm("封存此服務？使用它的既有對話仍需要此連線。")) return;
+            if (!confirm(t("封存此服務？使用它的既有對話仍需要此連線。")))
+              return;
             await api("connections/" + row.id, { method: "DELETE" });
             await loadConnections();
             await changed();
@@ -386,10 +393,10 @@ export function createManagement(
       );
       card.append(actions);
       const diagnostic = el("details", "", "settings-advanced");
-      diagnostic.append(el("summary", "進階：測試模型"));
+      diagnostic.append(el("summary", t("進階：測試模型")));
       const tests = el("div", "", "provider-card-actions");
       const engine = el("select");
-      engine.setAttribute("aria-label", row.name + " 測試引擎");
+      engine.setAttribute("aria-label", row.name + t(" 測試引擎"));
       for (const [id, name] of [
         ["pi", "Pi"],
         ["deepagents", "Deep Agents"],
@@ -397,14 +404,14 @@ export function createManagement(
       ])
         engine.append(new Option(name, id));
       const testModel = el("select");
-      testModel.setAttribute("aria-label", row.name + " 測試模型");
+      testModel.setAttribute("aria-label", row.name + t(" 測試模型"));
       for (const model of connectionModels(row))
         testModel.append(new Option(model, model));
       const result = el(
         "p",
         row.verification
-          ? `${row.verification.model} · ${row.verification.engine} · ${row.verification.message}`
-          : "尚未測試連線。",
+          ? `${row.verification.model} · ${row.verification.engine} · ${translateServerText(row.verification.message)}`
+          : t("尚未測試連線。"),
         "field-help",
       );
       result.setAttribute("role", "status");
@@ -412,9 +419,11 @@ export function createManagement(
         engine,
         testModel,
         button(
-          "測試模型",
+          t("測試模型"),
           async () => {
-            result.textContent = "正在連線並檢查串流與工具呼叫，最多約 45 秒…";
+            result.textContent = t(
+              "正在連線並檢查串流與工具呼叫，最多約 45 秒…",
+            );
             try {
               const verification = await api<
                 NonNullable<ModelConnection["verification"]>
@@ -425,7 +434,14 @@ export function createManagement(
                   model: testModel.value,
                 }),
               });
-              result.textContent = `${verification.model} · ${verification.engine} · ${verification.message}（串流：${verification.streaming ? "通過" : "未通過"}；工具：${verification.tools ? "通過" : "未通過"}）`;
+              result.textContent = t(
+                "{0} · {1} · {2}（串流：{3}；工具：{4}）",
+                verification.model,
+                verification.engine,
+                translateServerText(verification.message),
+                verification.streaming ? t("通過") : t("未通過"),
+                verification.tools ? t("通過") : t("未通過"),
+              );
             } catch (cause) {
               result.textContent = asError(cause).message;
               throw cause;
@@ -453,42 +469,52 @@ export function createManagement(
       const root = document.querySelector("#run-cards")!;
       if (!append) root.replaceChildren();
       if (!append && !data.items.length)
-        root.append(el("p", "還沒有任務。從對話送出第一個工作即可。", "muted"));
+        root.append(
+          el("p", t("還沒有任務。從對話送出第一個工作即可。"), "muted"),
+        );
       for (const run of data.items) {
         const card = el("article", "", "agent-card");
         card.append(
           el("h2", `${run.agentName} · ${statuses[run.status]}`),
           el(
             "small",
-            `${new Date(run.createdAt).toLocaleString("zh-TW")} · ${run.engine} · ${run.model}`,
+            `${new Date(run.createdAt).toLocaleString(locale)} · ${run.engine} · ${run.model}`,
           ),
         );
         const preview = el("div", "", "run-preview");
         preview.innerHTML = renderMarkdown(
-          run.error || run.text.slice(0, 800) || "正在準備回覆…",
+          run.error || run.text.slice(0, 800) || t("正在準備回覆…"),
         );
         card.append(preview);
         const details = el("details");
-        details.append(el("summary", `操作紀錄 · ${run.operations.length} 項`));
+        details.append(
+          el("summary", t("操作紀錄 · {0} 項", run.operations.length)),
+        );
         details.append(renderRunEvidence(run));
         card.append(details);
         if (run.usage)
           card.append(
             el(
               "small",
-              `模型回報用量：輸入 ${run.usage.inputTokens} / 輸出 ${run.usage.outputTokens} tokens`,
+              t(
+                "模型回報用量：輸入 {0} / 輸出 {1} tokens",
+                run.usage.inputTokens,
+                run.usage.outputTokens,
+              ),
             ),
           );
         const actions = el("div", "", "agent-card-actions");
-        actions.append(button("開啟對話", () => open(run.sessionId), notify));
+        actions.append(
+          button(t("開啟對話"), () => open(run.sessionId), notify),
+        );
         if (["failed", "cancelled", "interrupted"].includes(run.status))
           actions.append(
-            button("檢查並接續", () => resume(run.sessionId), notify),
+            button(t("檢查並接續"), () => resume(run.sessionId), notify),
           );
         if (run.status === "running")
           actions.append(
             button(
-              "停止",
+              t("停止"),
               async () => {
                 await api("runs/" + run.id + "/stop", {
                   method: "POST",
@@ -526,7 +552,7 @@ export function knowledgeActions(
   open: (id: string) => Promise<void>,
 ) {
   const menu = el("details", "", "knowledge-menu");
-  menu.append(el("summary", "管理"));
+  menu.append(el("summary", t("管理")));
   const actions = el("div", "", "agent-card-actions");
   const deletion = article.querySelector(".delete-button");
   if (deletion) actions.append(deletion);
@@ -544,14 +570,14 @@ export function knowledgeActions(
   area.value = row.content;
   area.required = true;
   area.rows = 5;
-  area.setAttribute("aria-label", "編輯內容");
-  const submit = el("button", "儲存變更", "primary");
+  area.setAttribute("aria-label", t("編輯內容"));
+  const submit = el("button", t("儲存變更"), "primary");
   submit.type = "submit";
   editor.append(
     area,
     submit,
     button(
-      "取消",
+      t("取消"),
       () => {
         editor.hidden = true;
       },
@@ -571,7 +597,7 @@ export function knowledgeActions(
   };
   actions.append(
     button(
-      "編輯",
+      t("編輯"),
       () => {
         editor.hidden = !editor.hidden;
         if (!editor.hidden) area.focus();
@@ -582,7 +608,7 @@ export function knowledgeActions(
   if (!row.mergedInto)
     actions.append(
       button(
-        row.enabled === false ? "啟用" : "停用",
+        row.enabled === false ? t("啟用") : t("停用"),
         () => save({ enabled: row.enabled === false }),
         notify,
       ),
@@ -596,20 +622,20 @@ export function knowledgeActions(
   );
   if (candidates.length && !row.mergedInto) {
     const choose = el("select");
-    choose.setAttribute("aria-label", "合併來源");
-    choose.append(new Option("選擇要併入的內容", ""));
+    choose.setAttribute("aria-label", t("合併來源"));
+    choose.append(new Option(t("選擇要併入的內容"), ""));
     for (const other of candidates)
       choose.append(new Option(other.content.slice(0, 50), other.id));
     actions.append(
       choose,
       button(
-        "合併",
+        t("合併"),
         async () => {
           if (!choose.value) {
-            notify("請先選擇合併來源。");
+            notify(t("請先選擇合併來源。"));
             return;
           }
-          if (confirm("將選取的內容併入此筆，並停用來源？"))
+          if (confirm(t("將選取的內容併入此筆，並停用來源？")))
             await save({ mergeId: choose.value });
         },
         notify,
@@ -618,24 +644,33 @@ export function knowledgeActions(
   }
   if (row.source?.sessionId)
     actions.append(
-      button("來源對話", () => open(row.source!.sessionId!), notify),
+      button(t("來源對話"), () => open(row.source!.sessionId!), notify),
     );
   menu.append(
     el(
       "small",
-      `${row.enabled === false ? "已停用 · " : ""}${row.mergedInto ? "已合併 · " : ""}來源：${row.source?.kind === "agent" ? "Agent 保存" : row.source?.kind === "manual" ? "手動新增" : "早期資料"}`,
+      t(
+        "{0}{1}來源：{2}",
+        row.enabled === false ? t("已停用 · ") : "",
+        row.mergedInto ? t("已合併 · ") : "",
+        row.source?.kind === "agent"
+          ? t("Agent 保存")
+          : row.source?.kind === "manual"
+            ? t("手動新增")
+            : t("早期資料"),
+      ),
     ),
     actions,
     editor,
   );
   if (row.revisions?.length) {
     const revisions = el("details");
-    revisions.append(el("summary", `修改紀錄 · ${row.revisions.length}`));
+    revisions.append(el("summary", t("修改紀錄 · {0}", row.revisions.length)));
     for (const revision of [...row.revisions].reverse())
       revisions.append(
         el(
           "p",
-          new Date(revision.at).toLocaleString("zh-TW") +
+          new Date(revision.at).toLocaleString(locale) +
             " · " +
             revision.content,
         ),

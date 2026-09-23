@@ -265,7 +265,7 @@
               id="open-settings"
               class="icon-button"
               type="button"
-              data-view="connections"
+              data-view="general"
               aria-label="開啟設定"
               aria-haspopup="dialog"
               aria-expanded="false"
@@ -691,8 +691,8 @@
                 <h3>工具權限</h3>
                 <div id="agent-tools" class="agent-checks"></div>
                 <p class="field-help">
-                  勾選寫入工具後，每次對話仍需開啟對應的檔案／記憶／技能權限。Deep
-                  Agents 另有虛擬筆記、規劃與子任務工具，不提供主機 shell。
+                  寫入工具需開啟本次任務的檔案／記憶／技能權限；主機命令需另行開啟命令權限。Deep
+                  Agents 另有虛擬筆記、規劃與子任務工具。
                 </p>
                 <h3>可用技能</h3>
                 <div id="agent-skills" class="agent-checks"></div>
@@ -872,6 +872,25 @@
           <div id="run-cards" class="agent-cards"></div>
           <button id="runs-more" class="quiet-button" hidden>載入更多</button>
         </section>
+        <section id="general-view" class="view library-view" hidden>
+          <div class="settings-heading">
+            <div>
+              <h1>一般</h1>
+              <p>調整 Apsis 的介面偏好。</p>
+            </div>
+          </div>
+          <div class="settings-card connection-form">
+            <label for="interface-language">介面語言</label>
+            <select id="interface-language" aria-describedby="language-help">
+              <option value="zh-TW" lang="zh-Hant">繁體中文</option>
+              <option value="en" lang="en">English</option>
+            </select>
+            <p id="language-help" class="field-help">
+              只影響介面文字，對話與資料保留原文。切換後會重新載入，偏好儲存在此瀏覽器。
+            </p>
+            <p id="language-status" role="status"></p>
+          </div>
+        </section>
         <section id="settings-view" class="view library-view" hidden>
           <div class="settings-heading">
             <div>
@@ -1020,6 +1039,19 @@
         <aside class="settings-rail">
           <div class="settings-rail-brand">Apsis / 設定</div>
           <nav class="settings-tabs" role="tablist" aria-label="設定分類">
+            <button
+              id="settings-tab-general"
+              class="settings-tab"
+              type="button"
+              role="tab"
+              data-view="general"
+              data-settings-tab="general"
+              aria-controls="general-view"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-settings"></use></svg
+              ><span>一般</span>
+            </button>
             <button
               id="settings-tab-connections"
               class="settings-tab"

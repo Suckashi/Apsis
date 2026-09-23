@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 import type {
   AgentDefinition,
   Api,
@@ -46,7 +47,8 @@ export function createAgentsUI(
       label.append(input, span);
       root.append(label);
     }
-    if (!entries.length) root.textContent = "尚無可選技能，可先到技能庫新增。";
+    if (!entries.length)
+      root.textContent = t("尚無可選技能，可先到技能庫新增。");
   };
   function hints(changeModel = false) {
     const engine = field("engine").value;
@@ -58,15 +60,18 @@ export function createAgentsUI(
       'option[value="anthropic"]',
     )!.disabled = engine === "openai-agents";
     if (engine === "openai-agents" && provider.value === "anthropic") {
-      $("#agent-form-status").textContent =
-        "OpenAI Agents SDK 不支援 Anthropic 原生連線，請改用 Pi 或 Deep Agents。";
+      $("#agent-form-status").textContent = t(
+        "OpenAI Agents SDK 不支援 Anthropic 原生連線，請改用 Pi 或 Deep Agents。",
+      );
     }
     $("#agent-engine-help").textContent =
       engine === "deepagents"
-        ? "內建規劃、子任務與上下文整理；虛擬筆記獨立於真實工作區。"
+        ? t("內建規劃、子任務與上下文整理；虛擬筆記獨立於真實工作區。")
         : engine === "openai-agents"
-          ? "使用 OpenAI SDK 執行工具迴圈；此版支援 OpenAI、Ollama 與相容端點，追蹤資料不上傳。"
-          : "現有 Apsis 執行引擎，支援四種模型連線。";
+          ? t(
+              "使用 OpenAI SDK 執行工具迴圈；此版支援 OpenAI、Ollama 與相容端點，追蹤資料不上傳。",
+            )
+          : t("現有 Apsis 執行引擎，支援四種模型連線。");
     if (changeModel && settings)
       field("model").value =
         provider.value === settings.pi.provider
@@ -79,7 +84,7 @@ export function createAgentsUI(
       : (settings?.models[provider.value] || []).map((item) => item.id);
     const picker = field("model-pick") as HTMLSelectElement;
     picker.replaceChildren(
-      new Option("自訂模型 ID…", ""),
+      new Option(t("自訂模型 ID…"), ""),
       ...models.map((model) => new Option(model, model)),
     );
     picker.value = models.includes(field("model").value)
@@ -91,8 +96,8 @@ export function createAgentsUI(
     editing = agent;
     form.hidden = false;
     $("#agent-editor-title").textContent = agent
-      ? "編輯 " + agent.name
-      : "建立 Agent";
+      ? t("編輯 ") + agent.name
+      : t("建立 Agent");
     field("template").value = "custom";
     const connectionSelect = field("connection") as HTMLSelectElement;
     connectionSelect.replaceChildren();
@@ -119,7 +124,7 @@ export function createAgentsUI(
     field("description").value = agent?.description || "";
     field("instructions").value =
       agent?.instructions ||
-      "請用使用者的語言回覆，先釐清目標，使用可用工具完成工作並驗證結果。";
+      t("請用使用者的語言回覆，先釐清目標，使用可用工具完成工作並驗證結果。");
     field("engine").value = agent?.engine || "pi";
     field("provider").value =
       agent?.provider ||
@@ -137,7 +142,10 @@ export function createAgentsUI(
     field("memory").disabled = !!agent;
     checkList(
       "#agent-tools",
-      Object.entries(agentTools),
+      Object.entries(agentTools).map(([id, label]): [string, string] => [
+        id,
+        t(label),
+      ]),
       agent?.tools || [
         "list_files",
         "read_file",
@@ -168,7 +176,7 @@ export function createAgentsUI(
       roster.dataset.key = rosterKey;
       roster.replaceChildren();
       for (const [id, name] of [
-        ["all", "全部對話"],
+        ["all", t("全部對話")],
         ["", "Apsis"],
         ...agents.map((a) => [a.id, a.name]),
       ]) {
@@ -194,12 +202,20 @@ export function createAgentsUI(
       description.textContent =
         agent?.description ||
         (agent
-          ? "你的專屬工作助手"
-          : "預設助手，使用聊天選擇的模型、共用記憶與技能。");
+          ? t("你的專屬工作助手")
+          : t("預設助手，使用聊天選擇的模型、共用記憶與技能。"));
       const meta = document.createElement("small");
       meta.textContent = agent
-        ? `v${agent.version || 1} · ${connections.find((c) => c.id === agent.connectionId)?.name || agent.provider} · ${agent.model} · ${agent.memoryScope === "private" ? "獨立記憶" : "共用記憶"} · ${agent.tools.length} 個工具`
-        : "與現有對話及 Telegram 相容";
+        ? t(
+            "v{0} · {1} · {2} · {3} · {4} 個工具",
+            agent.version || 1,
+            connections.find((c) => c.id === agent.connectionId)?.name ||
+              agent.provider,
+            agent.model,
+            agent.memoryScope === "private" ? t("獨立記憶") : t("共用記憶"),
+            agent.tools.length,
+          )
+        : t("與現有對話及 Telegram 相容");
       const actions = document.createElement("div");
       actions.className = "agent-card-actions";
       const button = (text: string, fn: () => void | Promise<void>) => {
@@ -213,15 +229,16 @@ export function createAgentsUI(
             .catch((e) => notify(asError(e).message));
         actions.append(el);
       };
-      button("開始對話 →", () => start(agent));
+      button(t("開始對話 →"), () => start(agent));
       if (agent) {
-        button("編輯", () => edit(agent));
-        button("封存", async () => {
-          if (!confirm(`封存「${agent.name}」？既有對話與記憶會保留。`)) return;
+        button(t("編輯"), () => edit(agent));
+        button(t("封存"), async () => {
+          if (!confirm(t("封存「{0}」？既有對話與記憶會保留。", agent.name)))
+            return;
           await api("agents/" + agent.id, { method: "DELETE" });
           if (editing?.id === agent.id) form.hidden = true;
           await load(snapshot);
-          notify("已封存，既有對話仍可續聊。");
+          notify(t("已封存，既有對話仍可續聊。"));
         });
       }
       card.append(badge, name, description, meta, actions);
@@ -272,8 +289,10 @@ export function createAgentsUI(
   field("template").onchange = () => {
     const templates: Record<string, [string, string, string[]]> = {
       research: [
-        "研究助理",
-        "先確認研究問題，閱讀工作區與相關歷史，區分事實與推論。整理來源、比較與待釐清問題；沒有搜尋工具時不要聲稱已查閱網路。",
+        t("研究助理"),
+        t(
+          "先確認研究問題，閱讀工作區與相關歷史，區分事實與推論。整理來源、比較與待釐清問題；沒有搜尋工具時不要聲稱已查閱網路。",
+        ),
         [
           "list_files",
           "read_file",
@@ -285,8 +304,10 @@ export function createAgentsUI(
         ],
       ],
       coding: [
-        "程式碼助手",
-        "先閱讀相關檔案，解釋程式結構，提出具體改動；取得本回合檔案權限後才修改檔案，取得命令執行權限後可執行測試，依工具結果回報。",
+        t("程式碼助手"),
+        t(
+          "先閱讀相關檔案，解釋程式結構，提出具體改動；取得本回合檔案權限後才修改檔案，取得命令執行權限後可執行測試，依工具結果回報。",
+        ),
         [
           "list_files",
           "read_file",
@@ -299,8 +320,10 @@ export function createAgentsUI(
         ],
       ],
       writing: [
-        "寫作助手",
-        "確認讀者、用途與語氣，先整理大綱再撰稿，根據回饋迭代並保存經允許的偏好。",
+        t("寫作助手"),
+        t(
+          "確認讀者、用途與語氣，先整理大綱再撰稿，根據回饋迭代並保存經允許的偏好。",
+        ),
         [
           "read_file",
           "list_files",
@@ -316,7 +339,14 @@ export function createAgentsUI(
     if (template) {
       field("name").value = template[0];
       field("instructions").value = template[1];
-      checkList("#agent-tools", Object.entries(agentTools), template[2]);
+      checkList(
+        "#agent-tools",
+        Object.entries(agentTools).map(([id, label]): [string, string] => [
+          id,
+          t(label),
+        ]),
+        template[2],
+      );
     }
   };
   field("engine").onchange = () => hints();
@@ -325,7 +355,7 @@ export function createAgentsUI(
     event.preventDefault();
     const fields = $<HTMLFieldSetElement>("#agent-fields");
     fields.disabled = true;
-    $("#agent-form-status").textContent = "正在儲存…";
+    $("#agent-form-status").textContent = t("正在儲存…");
     const checked = (id: string) =>
       Array.from(
         document.querySelectorAll<HTMLInputElement>(id + " input:checked"),
@@ -351,9 +381,10 @@ export function createAgentsUI(
       );
       await load();
       edit(saved);
-      $("#agent-form-status").textContent =
-        "已儲存。按卡片上的「開始對話」即可試聊。";
-      notify("Agent 已儲存。");
+      $("#agent-form-status").textContent = t(
+        "已儲存。按卡片上的「開始對話」即可試聊。",
+      );
+      notify(t("Agent 已儲存。"));
     } catch (error) {
       $("#agent-form-status").textContent = asError(error).message;
     } finally {
@@ -374,23 +405,23 @@ export function createAgentsUI(
     requirement(agent: AgentDefinition) {
       if (agent.connectionId) {
         const c = connections.find((c) => c.id === agent.connectionId);
-        if (!c) return "此 Agent 的模型連線已不可用，請至模型連線管理。";
+        if (!c) return t("此 Agent 的模型連線已不可用，請至模型連線管理。");
         if (c.provider !== agent.provider)
-          return "模型連線供應商已變更，請更新 Agent 並開啟新對話。";
+          return t("模型連線供應商已變更，請更新 Agent 並開啟新對話。");
         return c.provider === "ollama" ||
           (c.provider === "openai-compatible" && c.url) ||
           c.credentialConfigured
           ? ""
-          : "請在模型連線填入 API key。";
+          : t("請在模型連線填入 API key。");
       }
       if (agent.provider === "ollama") return "";
       if (agent.provider === "openai-compatible")
         return settings?.pi.compatibleUrl
           ? ""
-          : "請在模型連線設定端點，再編輯此 Agent 選用連線。";
+          : t("請在模型連線設定端點，再編輯此 Agent 選用連線。");
       return settings?.pi.credentials[agent.provider].configured
         ? ""
-        : "請在模型連線設定 " + agent.provider + " API key。";
+        : t("請在模型連線設定 ") + agent.provider + " API key。";
     },
   };
 }

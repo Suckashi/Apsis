@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 import MarkdownIt from "markdown-it";
 
 // Model output is untrusted: raw HTML stays text, and unsafe link schemes are rejected.
@@ -24,8 +25,8 @@ const codeLanguages: Record<string, string> = {
   sql: "SQL",
   yaml: "YAML",
   yml: "YAML",
-  text: "純文字",
-  plaintext: "純文字",
+  text: t("純文字"),
+  plaintext: t("純文字"),
 };
 
 // Re-rendering a streamed fence creates one complete block. Code stays escaped
@@ -41,12 +42,12 @@ markdown.renderer.rules.fence = (tokens, index) => {
     ? Object.hasOwn(codeLanguages, normalizedLanguage)
       ? codeLanguages[normalizedLanguage]
       : language
-    : "純文字";
+    : t("純文字");
   const languageClass =
     language && /^[a-z0-9_+-]+$/i.test(language)
       ? ` class="language-${language}"`
       : "";
-  return `<div class="code-block"><div class="code-header"><span class="code-language">${markdown.utils.escapeHtml(label)}</span><button class="copy-code" type="button" data-copy-code aria-label="複製程式碼">複製</button></div><pre tabindex="0" aria-label="程式碼，可左右捲動"><code${languageClass}>${markdown.utils.escapeHtml(token.content)}</code></pre></div>\n`;
+  return `<div class="code-block"><div class="code-header"><span class="code-language">${markdown.utils.escapeHtml(label)}</span><button class="copy-code" type="button" data-copy-code aria-label="${t("複製程式碼")}">${t("複製")}</button></div><pre tabindex="0" aria-label="${t("程式碼，可左右捲動")}"><code${languageClass}>${markdown.utils.escapeHtml(token.content)}</code></pre></div>\n`;
 };
 markdown.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
   tokens[index].attrSet("target", "_blank");
@@ -55,9 +56,9 @@ markdown.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
 };
 // Do not automatically request model-supplied image URLs from a private workspace.
 markdown.renderer.rules.image = (tokens, index) =>
-  `<span class="markdown-image">[圖片：${markdown.utils.escapeHtml(tokens[index].content || "未提供說明")}]</span>`;
+  `<span class="markdown-image">${markdown.utils.escapeHtml(t("[圖片：{0}]", tokens[index].content || t("未提供說明")))}</span>`;
 markdown.renderer.rules.table_open = () =>
-  '<div class="markdown-table" role="region" aria-label="表格，可左右捲動" tabindex="0"><table>';
+  `<div class="markdown-table" role="region" aria-label="${t("表格，可左右捲動")}" tabindex="0"><table>`;
 markdown.renderer.rules.table_close = () => "</table></div>\n";
 // Use classes for alignment because the app's CSP disallows inline styles.
 for (const name of ["th_open", "td_open"]) {
