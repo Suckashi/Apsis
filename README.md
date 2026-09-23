@@ -1,18 +1,48 @@
 # Talaria
 
-A local-first assistant with **Web and Telegram bot entry points**, powered by Pi's Node.js runtime and a TypeScript architecture inspired by Hermes' memory handling and on-demand skills. No separate Hermes installation is required.
+**English** | [繁體中文](README.zh-TW.md)
 
-以 Node.js 啟動的 AI 夥伴。Web 介面、API、agent 編排與資料保存都使用 TypeScript；開發本專案不用安裝 Python、Docker、Redis 或資料庫。
+A local-first personal AI assistant with a Web interface and a Telegram bot. Talaria uses **TypeScript and Node.js**, with Pi as its agent runtime and a local memory architecture inspired by Hermes Agent.
 
-The Web interface follows the messenger layout in [xAI's official Grok Bot design reference](https://x.ai/news/designing-grok-bot): a compact bot roster, left/right message bubbles, a bottom input pill and a companion workspace panel. Talaria keeps its own identity and existing agent capabilities. Dark is the initial appearance; the theme control also supports light and system preferences. On wide desktop screens the workspace opens alongside the conversation; on mobile it opens as a drawer.
+Start development with `npm run dev`. Python, Docker, Redis, and a separate database server are not required. Ollama is optional for local models; cloud APIs can be used instead.
 
-One persistent Talaria bot shares memories and skills across conversations, with expandable work records inside the chat. Search opens with **Ctrl/Cmd + K**; **對話紀錄** expands saved conversations. The **＋** beside the Talaria name opens a new topic, preserves memory and skills, and creates a conversation only when the first message is sent. The **＋** inside the input opens **任務選項** for model mode and write permission; credentials and Telegram pairing live in **Bot 設定**. This is a single-bot, single-owner product; multiple bots, hosted computers and scheduled routines are not implemented.
+## What Talaria does
 
-The interface supports light, dark and system appearance, saved per browser. Use **Ctrl/Cmd + K** to find a conversation by title or jump to a feature. Desktop Enter sends; Shift+Enter adds a line. On mobile, Enter adds a line and the send button submits. Chinese IME confirmation does not submit. Code blocks have language labels and exact-text copy controls. Work records stay expanded while progress streams, and a lost connection preserves drafts and reconnects automatically. New topics use the configured model; demo mode remains available under **任務選項**.
+- Chat with one persistent assistant through the Web or a paired Telegram account.
+- Stream model replies and show expandable tool activity in Web conversations.
+- Read workspace files, and optionally modify files or save knowledge with write permission.
+- Keep durable memories, load reusable skills on demand, and search previous conversations.
+- Connect OpenAI, Anthropic, local Ollama, or a custom OpenAI-compatible API.
+- Use a compact messenger interface with dark, light, and system themes, mobile navigation, searchable history, Markdown, and code copying.
 
-## Quick start / 三個步驟
+The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/designing-grok-bot), while retaining Talaria's identity and capabilities. The application UI currently uses Traditional Chinese; this repository provides documentation in both languages.
 
-Requires **Node.js 22.19+** (Node 24 LTS recommended) and npm.
+## Architecture and responsibilities
+
+| Component                       | Responsibility                                                                               |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `@earendil-works/pi-ai`         | Model providers, model abstraction, and streamed model responses.                            |
+| `@earendil-works/pi-agent-core` | The agent loop: ask the model, execute tools, return tool results, and continue.             |
+| Talaria                         | Web and Telegram interfaces, task lifecycle, permissions, local storage, memory, and skills. |
+| Hermes Agent                    | A reference for memory handling and on-demand skills, implemented locally in TypeScript.     |
+
+Both Pi packages are pinned to `0.87.0`. Pi is the only live agent runtime. Talaria neither installs Hermes Agent nor connects to a Hermes Gateway. The current memory implementation follows selected architectural ideas; it is not a complete port of Hermes.
+
+```text
+Web browser ── HTTP / NDJSON ──┐
+Telegram ─── long polling ────┤
+                              ▼
+                      Shared task service
+                       ├─ history, progress, cancellation
+                       ├─ memories + skill index
+                       ├─ pi-agent-core → pi-ai → model
+                       ├─ permission-gated local tools
+                       └─ atomic JSON storage
+```
+
+## Quick start
+
+Requires **Node.js 22.19 or later** and npm.
 
 ```sh
 git clone https://github.com/Suckashi/Talaria.git
@@ -21,173 +51,209 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:3100**. With no API keys, select **示範模式** to try the interface. Demo responses are clearly labelled deterministic examples, not AI output.
+Open [http://localhost:3100](http://localhost:3100).
 
-- `npm run dev` — type-checks the project, builds and watches browser TypeScript with esbuild, and starts the Node server with automatic restart. Refresh the browser after frontend edits.
-- `npm start` — builds the browser assets and starts without file watching.
-- `npm test` — Node's built-in test runner; no paid API calls.
-- `npm run check` — runs strict TypeScript checks.
-- `npm run build` — checks types and compiles browser assets to `dist/public/`.
-- `npm run dev` handles frontend compilation and backend startup together. Node.js 22.19+ executes server TypeScript natively.
+In **Bot settings (Bot 設定)**, connect a model and save. The next task uses the new settings without restarting. If no model is configured, select **Demo mode (示範模式)** under the input's **Task options (任務選項)** to try scripted streaming responses without an API call.
 
-## Remote preview with a password
+Development starts the server and browser build together. Browser assets are rebuilt on changes, and the backend restarts automatically. Refresh the browser after frontend changes.
 
-Local development still uses `npm run dev`. Optional sharing uses:
+## Model connections
+
+| Service                      | Configuration                                                        | Transport                                    |
+| ---------------------------- | -------------------------------------------------------------------- | -------------------------------------------- |
+| OpenAI                       | A supported model ID and an OpenAI API key                           | Pi's OpenAI provider                         |
+| Anthropic                    | A supported model ID and an Anthropic API key                        | Pi's Anthropic provider                      |
+| Ollama                       | A loopback HTTP URL and an installed model                           | OpenAI-compatible Chat Completions           |
+| Custom OpenAI-compatible API | Base URL, model ID, and an optional key for unauthenticated services | Chat Completions with SSE and function tools |
+
+### OpenAI and Anthropic
+
+Select the service in **Bot settings**, choose a model from the supported suggestions, enter its API key, and save. Their credentials are stored independently.
+
+Configuration status means the settings are present; it does not prove successful authentication or generation. A chat task exercises the actual model connection.
+
+### Local Ollama
+
+1. Start your existing Ollama installation.
+2. Select **Ollama (local)** in Bot settings.
+3. Enter `http://127.0.0.1:11434`, or your local Ollama port.
+4. Use **Load installed models (讀取已安裝模型)**, select a model with tool support, and save.
+
+Talaria does not install Ollama or download models. This connector accepts loopback HTTP addresses only and filters cloud models from discovery. API keys are not required. `qwen3.5:9b` has been used for local integration testing.
+
+The adapter requests thinking off and up to 2,048 output tokens. Its context metadata is 8,192 tokens; the actual context configuration is controlled by Ollama.
+
+### Custom OpenAI-compatible API
+
+Choose **OpenAI-compatible API — custom (OpenAI 相容 API（自訂）)** and enter:
+
+- **Base URL:** the service's complete API base path, such as `https://api.example.com/v1`, `https://gateway.example.com/api/v1`, or `http://127.0.0.1:1234/v1`.
+- **Model:** the exact model ID supplied by the service. Custom names are accepted.
+- **API key:** the key for that endpoint. Leave it empty only when the service requires no authentication.
+
+Talaria appends `/chat/completions`. A pasted full Chat Completions URL is also normalized. The service and model must support SSE streaming and function tools. Responses-only and Azure-specific protocols are not implemented by this connector.
+
+The custom endpoint has its own credential. Leaving the key empty preserves it at the same URL. Changing the URL without supplying a replacement clears the previous key. For an unauthenticated service, the SDK sends a non-secret placeholder.
+
+The adapter supports text input and requests up to 4,096 output tokens. Its context metadata is 32,768 tokens and does not configure the server's actual context window.
+
+### Settings and environment variables
+
+Saved settings apply to the next Web or Telegram task; an already-running task keeps its settings snapshot. Keys are never returned by the settings API or repopulated into password fields. To remove one, select the explicit key-removal option and save.
+
+UI settings are stored in `.loom/settings.json` and take precedence over environment values. Removing a key also masks the environment fallback. The UI does not edit `.env`; restart the server after changing environment variables manually.
+
+See [.env.example](.env.example) for configuration examples:
+
+| Variable                                     | Purpose                                                          |
+| -------------------------------------------- | ---------------------------------------------------------------- |
+| `PI_PROVIDER`                                | `openai`, `anthropic`, `ollama`, or `openai-compatible`          |
+| `PI_MODEL`                                   | Model ID                                                         |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`       | Official provider credentials                                    |
+| `OLLAMA_URL`                                 | Local Ollama URL                                                 |
+| `COMPATIBLE_BASE_URL` / `COMPATIBLE_API_KEY` | Custom API connection                                            |
+| `PORT` / `SHARE_PORT`                        | Application port, default 3100; sharing proxy port, default 3102 |
+
+## Using the Web interface
+
+- The **＋** beside Talaria opens a new topic. It keeps saved memories and skills and creates a conversation when the first message is sent.
+- The **＋** inside the input opens task options. File writes and saving memories or skills require **Allow modifications and saving (允許修改與保存)**.
+- **Ctrl/Cmd + K** searches conversation titles and opens quick navigation. **Conversation history (對話紀錄)** expands the saved list.
+- On desktop, Enter sends and Shift+Enter adds a line. On mobile, Enter adds a line; use the send button or Ctrl/Cmd+Enter to send. IME confirmation does not submit.
+- Tool activity can be expanded while a task runs. Stop controls cancel the current local task.
+- Replies render Markdown, tables, and code blocks. Code copying preserves whitespace. Use **Export Markdown (匯出 Markdown)** in the conversation menu to download visible messages.
+- Drafts are saved per conversation in this browser. Failed tasks restore the prompt for editing without automatic resubmission.
+- Scrolling up preserves your reading position; **Latest messages (最新訊息)** resumes following the output.
+- The workspace panel opens alongside chat on wide desktops and as a drawer on mobile.
+
+Raw HTML in replies is not executed. Unsafe link schemes are blocked, and referenced images are not loaded automatically.
+
+## Telegram
+
+1. Create a dedicated bot with [Telegram's BotFather](https://t.me/BotFather).
+2. In **Bot settings → Telegram Bot**, enter the token, enable the bot, and save.
+3. Once connected, generate a pairing code and privately send the displayed `/pair …` command to your bot. Codes expire after ten minutes and can be used once.
+4. Send a task. Its conversation appears in Web history, where you can inspect progress, stop it, or continue chatting.
+
+The bot shares Talaria's configured model, workspace, memories, and skills. Web conversations can also be resumed in a private bot chat using the conversation menu's Telegram resume command.
+
+Supported commands: `/help`, `/new`, `/stop`, `/status`, and `/resume <conversation-id>` in private chats.
+
+Telegram uses outbound long polling and needs no public URL or tunnel. `npm run dev` starts an enabled bot alongside the Web server. Your computer and model must remain running. Existing webhooks or another polling process produce a visible conflict; Talaria does not remove another application's webhook.
+
+Only one paired owner is supported. Unpaired users and unrelated group traffic are ignored. Unpairing or changing the token removes account bindings without deleting conversation history. Write permission for Telegram tasks is configured separately and defaults to off.
+
+Groups are opt-in. After pairing, send `/where@YourBotUsername` in the target group and save its negative group ID. Only the owner's mentions or replies in that group trigger tasks. Replies return to the group and original topic and can include workspace information. Each chat/topic has a separate conversation, while memories and skills remain shared.
+
+Telegram currently accepts text and sends completed plain-text replies. Voice, images, and attachments are not supported. Update offsets are recorded before execution to avoid repeating writes after a crash; interrupted work and failed delivery are not automatically retried. Saved results remain available in Web history.
+
+## Remote preview
+
+Ordinary development uses `npm run dev`. For optional remote access, install [Cloudflare's cloudflared client](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) and run:
 
 ```sh
 npm run dev:share
 ```
 
-Install [Cloudflare's official cloudflared client](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/) first. On Windows, use `winget install --id Cloudflare.cloudflared --exact`, or put the official standalone executable at `.tools/cloudflared.exe`. The project detects that location without changing your system PATH. The executable is not committed to Git and is not required for ordinary development.
+On Windows, the project also detects the official executable at `.tools/cloudflared.exe`. This binary is not committed and is unnecessary for local development.
 
-The share command reuses a running Talaria on `PORT` (default 3100), or starts the development server. It launches a separate password-protected gateway on loopback `SHARE_PORT` (default 3102), then connects a Quick Tunnel to that gateway. It never tunnels directly to the unprotected app or Ollama.
+The command reuses an existing Talaria server or starts one, then creates a password-protected proxy and a temporary Cloudflare URL. It prints the URL and random password and saves them in Git-ignored `.loom/share-connection.json`. Do not commit or share that file publicly.
 
-The terminal prints the random HTTPS URL and a newly generated 144-bit password. Both are also saved locally in the Git-ignored `.loom/share-connection.json`; keep that file private. Someone with both can log in and use the full workspace, including conversations, settings, agent runs, file-tool permissions and exports. This is **full owner access**, not a read-only preview. Cloudflare carries the remote traffic. This mode uses Talaria password authentication, **not Cloudflare Access**.
+Remote login grants **full owner access**, including model settings, conversations, and task execution. All application pages and APIs require authentication. Sessions use an HttpOnly, Secure, SameSite cookie and expire after eight hours; remote logout ends the session. The proxy checks the assigned hostname and request origin and limits failed logins. Model streaming reaches the browser through fetch and NDJSON.
 
-Remote login uses an HttpOnly, Secure, SameSite cookie, expires after eight hours and can be ended using **登出遠端**. Authentication is required for all app pages and APIs. The gateway validates the exact assigned hostname, validates request origins, limits failed login attempts and forwards a restricted header set to the local app. Changing a forwarded Host header does not bypass authentication.
+This uses Talaria's password authentication. A fixed domain and Cloudflare Access are separate setup work and are not provided by this command. Cloudflare carries the remote traffic; your computer must stay awake and online.
 
-Press Ctrl+C in the sharing terminal to close the tunnel and its gateway. A pre-existing local dev server stays running; a dev server started by the share command stops with it. Restarting sharing replaces the URL, password and all login sessions. Your computer must remain awake and online; Ollama must also be running for local-model tasks.
+Ctrl+C closes sharing. An existing development server stays running; one started by the sharing command stops with it. Restarting sharing replaces the URL, password, and sessions.
 
-Quick Tunnels are intended for development, have no uptime guarantee, and do not support SSE. Talaria uses fetch with NDJSON instead. A live Quick Tunnel test verified password login/logout, anonymous and cross-origin rejection, Qwen replies, and incremental delivery (25 received chunks in a short demo run). For a permanent URL with Cloudflare Access, configure an owned domain and an Access policy separately. That deployment is not included in this temporary-sharing command.
+## Memory, skills, and local data
 
-## What works
+| Knowledge            | Current behavior                                                                                                |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Durable memory       | Inject complete entries into each task's system context, within a 16,000-character budget.                      |
+| Reusable skills      | Include up to 50 index entries with 120-character descriptions; load the full procedure with tools when needed. |
+| Conversation history | Search completed messages with case-insensitive substring matching and return up to ten bounded excerpts.       |
 
-| Mode        | What runs                                                   | Configuration                                        |
-| ----------- | ----------------------------------------------------------- | ---------------------------------------------------- |
-| Demo / 示範 | Local scripted streaming response                           | None                                                 |
-| Talaria     | Pi SDK agent loop, memory, on-demand skills and local tools | OpenAI, Anthropic, Ollama or a custom compatible API |
+Available tools: `list_files`, `read_file`, `write_file`, `remember`, `update_memory`, `save_skill`, `list_skills`, `read_skill`, and `search_history`.
 
-Talaria includes `list_files`, `read_file`, `write_file`, `remember`, `update_memory`, `save_skill`, `list_skills`, `read_skill`, and `search_history`. The shared task service handles execution, history, progress and cancellation for both Web and Telegram. Pi is the only live agent runtime. Hermes informs the memory architecture; Talaria does not connect to or run a Hermes gateway. Older gateway-mode conversations retain their IDs, messages and Pi transcripts and are migrated to `pi`; obsolete gateway settings are ignored and removed from the settings file on the next save.
+The model decides when to save knowledge, subject to write permission. There is no background learning worker, automatic memory deduplication, or relevance ranking. Memory entries that do not fit the prompt budget are skipped in stored order. Skill descriptions are text prefixes, not generated summaries.
 
-## Telegram Bot / Web 與 bot 一起用
+| Location              | Contents                                                           |
+| --------------------- | ------------------------------------------------------------------ |
+| `.loom/state.json`    | Conversations, Pi transcripts, memories, and skills                |
+| `.loom/settings.json` | Model configuration and API credentials                            |
+| `.loom/telegram.json` | Bot token, owner pairing, conversation bindings, and update offset |
+| `workspace/`          | Files accessible to the agent's file tools                         |
 
-1. Create a dedicated bot with [Telegram's @BotFather](https://t.me/BotFather). Keep its token private; enter it in Talaria's **Bot 設定 → Telegram Bot**, not in a conversation.
-2. Save the token with **啟用 Telegram Bot** checked. Talaria uses the model from **Talaria 模型**, including your local Ollama model.
-3. Once the status is **已連線**, click **產生配對碼** and privately send the displayed `/pair …` command to your bot. It expires in ten minutes and is single use.
-4. Send a task. Its conversation appears in Web history with a **Telegram** label; open it to see progress, stop the task, or continue chatting. **複製 Telegram 續聊指令** lets you resume a Web Talaria conversation in a private bot chat.
+Local data is created on demand and ignored by Git. Settings and tokens are stored as local plaintext; configuration APIs do not expose the secrets. Files use mode 0600 where supported. Conversation writes are serialized and use atomic JSON replacement within one server process.
 
-`npm run dev` starts the Web server, common task service and any enabled bot together. A bot without credentials stays disabled. Telegram uses the official [long-polling API](https://core.telegram.org/bots/api#getupdates), so it needs outbound Internet access but no public URL, webhook, or Cloudflare Tunnel. Your computer and model must stay running. Existing webhooks or a second polling process cause a visible error; Talaria never deletes another application's webhook automatically.
+Older Hermes/hybrid conversations migrate to Pi mode while preserving their IDs, messages, and Pi transcripts. Retired gateway settings are ignored and removed from the settings file on the next save.
 
-Commands: `/help`, `/new`, `/stop`, `/status`, `/resume <conversation-id>` (private chats only). The initial implementation supports text messages and returns completed replies as plain text, split into safe-sized messages. Web continues to render Markdown and shows live progress. It does not yet process voice, images, attachments, or X/Discord events.
+## Current scope and limits
 
-Only one paired Telegram account can access this **single-owner workspace**. Unpaired users, bots, anonymous group senders and unrelated group traffic are ignored. Pairing authorizes access to the owner's workspace, conversations, memories and skills; it is not a separate tenant. Unpairing stops bot tasks and removes bindings without deleting conversation history. Changing the token also removes account pairing. Write permission is off by default and can be enabled separately for bot tasks in the Web settings.
+- One local owner and one bot; no multi-user isolation, multiple bot personas, or hosted computers.
+- The server binds to `127.0.0.1`, checks Host/Origin, requires a custom header for API mutations, and sets a restrictive Content Security Policy. Use the authenticated sharing proxy for remote access.
+- File tools stay inside `workspace/`, reject hidden paths, traversal, and symlinks, and limit file content to 256,000 bytes. They provide no terminal execution and are not an OS sandbox.
+- Each task is limited to five minutes and twelve Pi model turns. Interrupted tasks are marked failed on restart rather than resumed automatically.
+- Conversation context is not automatically compacted. Long conversations may require a new topic.
+- The JSON store loads all state and rewrites it on each mutation. Use one server process per data directory.
+- Scheduling, browser/computer control, MCP management, and media input are not implemented.
 
-Groups are off by default. After pairing, add your bot to a group, send `/where@YourBotUsername`, and save the returned negative group ID in Talaria. Only your own mentions/replies in that specified group trigger tasks. Replies go to the group (and original forum topic), and may contain private workspace or remembered information. Each chat/topic gets a separate conversation; owner memory and skills are shared. Telegram's [privacy mode](https://core.telegram.org/bots/features#privacy-mode) controls which group messages the platform delivers; address commands to your bot or reply to one of its messages.
+## Suggested improvement priorities
 
-Bot credentials, pairing identity, conversation bindings and consumed-update offset are saved atomically in Git-ignored `.loom/telegram.json` (local plaintext; mode 0600 on POSIX). Configuration reads never return the token. Pairing codes exist only in memory and expire on restart. Enabling a disabled bot or changing its token skips earlier queued messages. Consumed updates are recorded before execution to avoid automatically repeating writes after a crash; a crash can therefore interrupt/lose a reply, and failed deliveries are not automatically resent. Results remain available in Web once saved. Interrupted pending tasks are marked failed on restart and need manual retry.
+These are **proposals, not implemented features**, based on the current code.
 
-The Web UI provides streamed Pi output, activity events, saved conversations, memory/skill creation and deletion, connection status, and stop control. Mode changes create a new conversation so histories from different engines do not mix.
+| Priority | Improvement                                                                         | Why it matters                                                                                                  |
+| -------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 1        | Memory deduplication, source tracking, revision history, and retrieval by relevance | Reduce repeated or outdated facts and use the prompt budget for the task at hand.                               |
+| 2        | Token-aware context budgets and conversation summarization                          | Keep longer conversations usable across models with different context limits.                                   |
+| 3        | Connection testing and model capability controls                                    | Verify authentication, streaming, and tool support before a task; allow output/context limits to be configured. |
+| 4        | Task checkpoints, clearer failure causes, and explicit resume/retry                 | Recover from interruptions while avoiding repeated file writes or other side effects.                           |
+| 5        | Paginated history, storage validation, migrations, and backups                      | Keep growing local data responsive and easier to recover without complicating Node-based startup.               |
 
-## Everyday workspace experience
+## Development and verification
 
-- New conversations include starter tasks and guidance for connecting a model. Selecting an unconfigured engine explains what is missing before a request is sent.
-- Search saved conversations by title; mobile users can expand **最近的對話** to browse the same history.
-- Unsent drafts are stored per conversation in this browser, and restored after switching conversations or refreshing. A failed task restores its prompt for editing; it is never retried automatically.
-- Follow elapsed task time, copy individual messages, and download the current conversation as Markdown with **匯出對話**. Exports contain visible messages, not internal Pi transcripts or credentials.
-- Agent replies render Markdown during streaming and when reopening conversations: headings, lists, quotes, links, code blocks, and tables. Copy preserves the original Markdown. Raw HTML is displayed as text, unsafe link schemes are rejected, and image references display their description without loading remote images.
-- Reading earlier messages during streaming keeps your scroll position. Use **回到最新訊息** to resume following the response.
-- Drafts use browser local storage; they are separate from server conversation history and are not shared between browsers. If browser storage is unavailable, the UI reports that drafts cannot be saved.
+| Command                | Purpose                                                                     |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `npm run dev`          | Type-check, watch browser assets, and run the server with restart-on-change |
+| `npm start`            | Build and start without file watching                                       |
+| `npm run check`        | Strict TypeScript checks                                                    |
+| `npm run build`        | Type-check and compile browser assets into `dist/public/`                   |
+| `npm test`             | Automated tests without paid API calls                                      |
+| `npm run test:ollama`  | Optional real-model integration test                                        |
+| `npm run format:check` | Check repository formatting                                                 |
+| `npm run dev:share`    | Start optional password-protected remote sharing                            |
 
-## Local Qwen / Ollama
+The automated suite exercises the real Pi SDK with deterministic model transports, custom API streaming and tool calls, memory injection, history, permissions, migration, cancellation, settings, sharing authentication, and Telegram pairing and delivery behavior. It uses an injected Telegram transport rather than a live account.
 
-Talaria can run real Pi conversations and tools against an existing local Ollama installation without a cloud API key. The app uses Ollama's [OpenAI-compatible Chat Completions API](https://docs.ollama.com/api/openai-compatibility); the rest of the development setup remains Node.js and TypeScript.
+`npm run test:ollama` requires a running local model. It uses an isolated temporary workspace to verify actual file-tool execution, streaming, and conversation recall. It defaults to `qwen3.5:9b`; override with `OLLAMA_MODEL` and `OLLAMA_URL`. It does not use existing Talaria data or cloud credentials.
 
-1. Start your installed Ollama application (or run `ollama serve`).
-2. In **Bot 設定**, choose **Ollama（本機）** and keep `http://127.0.0.1:11434` unless you use a different local port.
-3. Click **讀取已安裝模型**, choose an installed model such as `qwen3.5:9b`, then **儲存模型設定**.
-4. Return to the workspace and select **Talaria**. Local tools keep the same per-run permissions; Telegram uses the same model with its own write-permission setting.
+A [GitHub Actions template](docs/github-actions.yml.example) covers Windows/Linux and Node 22/24. It is a template, not an enabled workflow; copy it to `.github/workflows/ci.yml` to enable it with an appropriately authorized GitHub credential.
 
-This does not download models or install Ollama. The connector accepts loopback HTTP addresses only. Model discovery filters cloud entries; use an installed local model with tool support. The UI hides cloud key fields for Ollama, and switching providers preserves existing cloud credentials. Saved status is configuration state; reading models verifies the server, and a task verifies generation. Initial model loading may take longer than subsequent replies.
-
-The local adapter uses text input, a 2,048-token output limit, and requests thinking off. Ollama controls the actual context size; the SDK's 8,192-token metadata does not change the server configuration. Long conversations may require a new session or a larger context configured in Ollama.
-
-Run the optional real-model test with `npm run test:ollama`. It creates an isolated temporary workspace, checks file-tool execution and streamed output through the actual Talaria API, then checks conversation recall. It defaults to `qwen3.5:9b`; override with `OLLAMA_MODEL` and `OLLAMA_URL`. This test needs your running local model and is separate from the offline `npm test` suite. No cloud keys or existing Talaria settings are used.
-
-## Custom OpenAI-compatible API
-
-In **Bot 設定 → 模型服務**, select **OpenAI 相容 API（自訂）**, enter the service's **Base URL**, **model ID**, and **API key**, then save. Changes apply to the next Web or Telegram task without restarting. Model IDs are not restricted to the built-in catalog.
-
-Use the complete API base path, for example `https://api.example.com/v1`, `https://gateway.example.com/api/v1`, or `http://127.0.0.1:1234/v1`. Talaria appends `/chat/completions`; a pasted full Chat Completions URL is also normalized. This connector uses **Chat Completions with SSE streaming and function tools**, not the Responses API or Azure-specific protocols. The selected model and service must support that combination.
-
-The custom endpoint has a separate credential. Leaving the key blank preserves it at the same URL; changing the URL without supplying a replacement clears the old credential. A server that requires no authentication can use a blank key (the SDK sends a non-secret placeholder). Existing OpenAI, Anthropic and Ollama settings are preserved, and API keys are never returned to the browser.
-
-Optional environment setup: `PI_PROVIDER=openai-compatible`, `PI_MODEL=your-model-id`, `COMPATIBLE_BASE_URL=https://api.example.com/v1`, and `COMPATIBLE_API_KEY=...`. The adapter uses text input and requests up to 4,096 output tokens; its 32,768-token context metadata does not reconfigure the model server. The test suite covers a custom-path endpoint, streaming tool execution, conversation continuation and credential redaction.
-
-## Configure the model from the UI
-
-1. Open **Bot 設定** in the sidebar.
-2. Choose **OpenAI** or **Anthropic**, select a supported model, and enter your API key.
-3. Click **儲存模型設定**. The next task uses the saved connection immediately; no restart is needed.
-4. Return to the workspace and select **Talaria**.
-
-Keys are never returned by the settings API or populated into password fields. Leave a key field blank to keep its value, enter a new value to replace it, or check the explicit removal option and save to disable that provider key. OpenAI and Anthropic keys are stored independently. Configuration indicators report saved state, not successful live authentication.
-
-Settings are stored in `.loom/settings.json`, separate from conversation history and excluded from Git. This is a local plaintext configuration file; on POSIX systems it is created with mode 0600. Protect your OS user account and backups. A running task keeps its original settings snapshot.
-
-Existing `.env` settings still work as a fallback. UI-saved fields take priority. Removing a key explicitly masks the environment key; entering a new key enables it again. The UI does not modify `.env`. If you edit environment variables manually, restart the server.
-
-## Memory, skills and files
-
-- `.loom/state.json` stores conversations, Pi transcripts, memories and skills using serialized atomic file replacement.
-- `workspace/` is the only directory accessible through Pi file tools. Put the files you want the agent to work on there.
-- These local data paths are created on first start and ignored by Git.
-- Complete memory entries fit within a 16,000-character prompt budget. Skills use brief index entries (first 50 in the prompt), with `list_skills` for discovery and `read_skill` for the full procedure on demand. `update_memory` replaces outdated facts with write permission. `search_history` returns bounded excerpts of completed Web/bot messages.
-- These are **Talaria's own TypeScript implementations**, following Hermes-inspired separation of durable facts, reusable procedures and searchable conversation history. Pi receives this context and executes the tools. This is not a complete port of Hermes' memory engine.
-- Pi can save new memories and skills when the model decides it is useful and writes are enabled. There is no automatic offline learning worker.
-- File tools are UTF-8 oriented, limit content to 256 KB, reject hidden paths, traversal and symlinks, and offer no shell execution.
-
-## Scope and boundaries
-
-This first version is a **single-user local development product**. The server binds to `127.0.0.1`, validates Host/Origin headers, requires a custom header for mutations, and applies a restrictive Content Security Policy. Keep this app bound to loopback. Optional remote previews must use the authenticated sharing gateway described above; do not point a tunnel directly at port 3100.
-
-File writes and memory/skill modifications are off by default and enabled per run from the UI. This is not an OS sandbox: another local process can still modify files or race file operations. Only use trusted local workspaces. The project does not yet include multi-user login, terminal execution, schedules, MCP management, or cloud deployment.
-
-Each run is capped at five minutes and Pi at twelve model turns. Errors and cancellation are visible and stored. Single-process storage prevents concurrent lost updates; do not run multiple server processes against the same data directory. Conversation histories are not automatically compacted; start a new session when a model's context limit is reached.
-
-## Architecture
+### Source layout
 
 ```text
-Browser (TypeScript → esbuild → ES modules + CSS)
-  └─ Node HTTP API + NDJSON ──────┐
-Telegram long polling + pairing ┤
-                               ▼
-                      TaskService (shared)
-                         ├─ history, progress, cancellation
-                         ├─ context: memories + skill index
-                         ├─ Pi SDK → model + permission-gated tools
-                         └─ atomic JSON store
+public/                Browser TypeScript, HTML, and CSS
+server/agent.ts         Pi runtime integration and tools
+server/context.ts      Memory and on-demand skill context
+server/tasks.ts        Shared task lifecycle
+server/app.ts          HTTP API and streaming
+server/settings.ts     Model configuration and credentials
+server/compatible.ts   Custom Chat Completions adapter
+server/ollama.ts       Local Ollama adapter and discovery
+server/telegram.ts     Telegram transport and owner pairing
+server/share-gateway.ts Password-protected remote proxy
+server/store.ts        Local state persistence
+server/workspace.ts    Restricted file operations
+shared/                Shared types and conversation export
+scripts/               Build, development, sharing, and real-model checks
+test/                  Node test runner suites
 ```
 
-```text
-public/           Browser TypeScript interface
-server/agent.ts   Pi orchestration, demo mode and tool definitions
-server/tasks.ts   Shared Web/bot task lifecycle and session service
-server/context.ts  Memory and on-demand skill context
-server/telegram.ts  Telegram transport, pairing, polling and delivery
-server/app.ts     HTTP API, streaming and local access checks
-server/store.ts   Persistence
-server/workspace.ts  Restricted local file operations
-server/settings.ts  Local credentials and configuration
-shared/          API, session and event types
-scripts/         TypeScript build and development entry points
-test/            TypeScript tests using the built-in Node runner
-```
-
-### Add a tool
-
-Add a definition to `createTools()` in `server/agent.ts`. Give it a JSON schema and an async implementation; return tool content through the shared helper. Wrap any mutating or remote execution with the existing permission gate. Keep integrations behind server-side adapters so the browser never handles provider keys.
-
-### Testing
-
-The tests run the actual Pi SDK with a deterministic mock model transport to verify tool execution, transcript continuation and memory injection. They also cover persistence, file boundaries, permissions, legacy-data migration, streamed HTTP conversations, cancellation, credentials, Telegram owner pairing/revocation, group gating, duplicate updates, shared Web/bot history, live progress, restart recovery and on-demand skills. Telegram tests use an injected transport and never message a real account. **A live Telegram account/token, or cloud-provider credentials are not exercised by the offline suite.**
+To add a tool, define it in `createTools()` in `server/agent.ts`, provide a schema, and return structured tool content. Apply the existing write-permission gate to mutations. Keep provider credentials and integrations server-side.
 
 ## Upstream projects
 
-- [Pi Agent Harness](https://github.com/earendil-works/pi) — official agent runtime and model abstraction (MIT).
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent) — memory and skill architecture reference, implemented locally in TypeScript.
+- [Pi](https://github.com/earendil-works/pi): agent runtime and model abstraction.
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent): reference for memory and skill architecture.
 
-Talaria is an independent integration and is not affiliated with either upstream project.
-
-## Optional GitHub Actions
-
-A Windows/Linux Node 22/24 CI template is included at `docs/github-actions.yml.example`. To enable it, copy the file to `.github/workflows/ci.yml` and commit using a GitHub credential that permits workflow changes. Local validation is available through `npm run build` and `npm test`.
+Talaria is an independent project and is not affiliated with either upstream.
