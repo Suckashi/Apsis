@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#f7f7f5" />
+    <meta name="theme-color" content="#070707" />
     <meta name="color-scheme" content="light dark" />
     <title>Talaria — 你的 AI 夥伴</title>
     <link rel="icon" href="/favicon.svg" />
@@ -24,6 +24,19 @@
           d="M4 5h16l-6 5h-4L4 5Zm6 8h4v7l-4-3v-4Z"
           fill="currentColor"
           stroke="none"
+        />
+      </symbol>
+      <symbol id="i-bot" viewBox="0 0 24 24">
+        <path
+          d="M12 2C7 2 3 6 2 11c-1 5 2 10 7 11 5 1 11-2 13-7C24 9 19 2 12 2Z"
+          fill="currentColor"
+          stroke="none"
+        />
+        <path
+          d="m8 10-1 3m7-4 1 4"
+          stroke="#1a102b"
+          stroke-width="2.5"
+          stroke-linecap="round"
         />
       </symbol>
       <symbol id="i-search" viewBox="0 0 24 24">
@@ -123,7 +136,18 @@
             ><span class="brand-mark"
               ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <use href="#i-logo"></use></svg></span
-            >Talaria<span class="brand-edition">PERSONAL</span></a
+            >Talaria</a
+          >
+          <button
+            id="new-session"
+            class="new-button"
+            aria-label="開啟新話題"
+            title="開啟新話題"
+            disabled
+          >
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <use href="#i-plus"></use>
+            </svg></button
           ><button
             id="close-sidebar"
             class="icon-button mobile-only"
@@ -137,45 +161,32 @@
         <button id="command-open" class="command-trigger">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
             <use href="#i-search"></use></svg
-          ><span>搜尋與快速前往</span><kbd>⌘ K</kbd>
+          ><span>搜尋</span><kbd>⌘ K</kbd>
         </button>
-        <div class="sidebar-section-heading">
-          <span class="section-label">你的夥伴</span
-          ><span class="sidebar-count">01</span>
-        </div>
         <button class="bot-card nav active" data-view="chat">
           <span class="bot-avatar" aria-hidden="true"
             ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <use href="#i-logo"></use></svg
+              <use href="#i-bot"></use></svg
             ><i class="presence-dot"></i></span
           ><span class="bot-card-copy"
-            ><strong>Talaria</strong
+            ><span class="bot-card-title"
+              ><strong>Talaria</strong><time id="bot-time"></time></span
             ><small id="bot-preview">準備好，隨時聊聊。</small></span
-          ><svg
-            class="icon bot-card-arrow"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
           >
-            <use href="#i-chevron"></use>
-          </svg>
         </button>
-        <button id="new-session" class="new-button" disabled>
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-            <use href="#i-plus"></use></svg
-          ><span>開啟新話題</span><kbd>N</kbd>
-        </button>
+
         <button
           id="toggle-history"
           class="history-toggle"
-          aria-expanded="true"
+          aria-expanded="false"
           aria-controls="history-panel"
         >
-          <span>最近的對話</span
+          <span>對話紀錄</span
           ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
             <use href="#i-down"></use>
           </svg>
         </button>
-        <div id="history-panel" class="history-panel open">
+        <div id="history-panel" class="history-panel">
           <input id="session-search" type="hidden" />
           <div id="sessions" class="sessions" aria-label="對話清單"></div>
         </div>
@@ -256,7 +267,7 @@
           <div class="header-identity">
             <span class="bot-avatar small" aria-hidden="true"
               ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <use href="#i-logo"></use></svg
+                <use href="#i-bot"></use></svg
               ><i class="presence-dot"></i
             ></span>
             <div>
@@ -273,8 +284,8 @@
               aria-controls="workspace-panel"
             >
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                <use href="#i-folder"></use></svg
-              ><span>工作區</span>
+                <use href="#i-monitor"></use></svg
+              ><span class="sr-only">工作區</span>
             </button>
             <details id="chat-actions" class="action-menu">
               <summary
@@ -313,8 +324,7 @@
         <section id="chat-view" class="view chat-layout">
           <div class="conversation">
             <div class="conversation-heading">
-              <span id="session-title">與 Talaria 的對話</span
-              ><span class="conversation-scope">每一步，都在這裡。</span>
+              <span id="session-title">與 Talaria 的對話</span>
             </div>
             <div
               id="messages"
@@ -325,25 +335,21 @@
             >
               <template id="welcome-template"
                 ><div class="welcome">
-                  <div class="welcome-emblem">
-                    <span class="bot-avatar welcome-avatar" aria-hidden="true"
-                      ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                        <use href="#i-logo"></use></svg></span
-                    ><span class="orbit-dot"></span>
+                  <div class="conversation-start">新話題</div>
+                  <div class="bot-intro">
+                    <span class="bot-avatar" aria-hidden="true"
+                      ><svg class="icon" viewBox="0 0 24 24">
+                        <use href="#i-bot"></use></svg
+                    ></span>
+                    <div>
+                      <h1>Talaria</h1>
+                      <span>你的個人 Bot</span>
+                    </div>
                   </div>
-                  <span class="eyebrow">你的想法，我們的下一步</span>
-                  <h1>今天，一起做點什麼？</h1>
-                  <p>
-                    從一個問題，到一件完成的事。<br
-                      class="mobile-only"
-                    />Talaria 隨時接得上。
+                  <p class="intro-bubble">
+                    把你要處理的事情傳給我。<br />我們的對話、任務進度和完成的成果，都會留在這裡。
                   </p>
                   <div class="onboarding">
-                    <div class="onboarding-icon">
-                      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                        <use href="#i-chat"></use>
-                      </svg>
-                    </div>
                     <div>
                       <strong data-setup-title
                         >連接模型，開始第一段對話。</strong
@@ -352,8 +358,11 @@
                       >
                     </div>
                     <button class="quiet-button" data-view="settings">
-                      開始設定
-                      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                      開始設定<svg
+                        class="icon"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
                         <use href="#i-external"></use>
                       </svg>
                     </button>
@@ -382,24 +391,26 @@
                 ><textarea
                   id="prompt"
                   aria-describedby="draft-status"
-                  rows="2"
+                  rows="1"
                   maxlength="16000"
-                  placeholder="有什麼想法？交給 Talaria…"
+                  placeholder="傳訊息給 Talaria"
                   disabled
                   required
                 ></textarea>
                 <div class="composer-bottom">
                   <details id="task-options" class="task-options">
-                    <summary>
+                    <summary aria-label="任務選項" title="任務選項">
                       <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                        <use href="#i-settings"></use></svg
-                      ><span>任務選項</span
-                      ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                        <use href="#i-down"></use>
+                        <use href="#i-plus"></use>
                       </svg>
                     </summary>
                     <div class="options-popover">
-                      <div class="popover-label">為這次任務設定</div>
+                      <div class="popover-label">
+                        任務選項
+                        <span id="composer-model" class="composer-model"
+                          >正在連接…</span
+                        >
+                      </div>
                       <label class="mode-select"
                         ><span>回覆模式</span
                         ><select id="mode" aria-label="回覆模式" disabled>
@@ -435,9 +446,7 @@
                       </div>
                     </div>
                   </details>
-                  <span id="composer-model" class="composer-model"
-                    >正在連接…</span
-                  ><button
+                  <button
                     id="stop"
                     class="stop-button"
                     type="button"
@@ -462,62 +471,6 @@
                 <span id="permission-hint">僅讀取工作區</span
                 ><span id="composer-hint">Enter 傳送 · Shift + Enter 換行</span>
               </div>
-              <div class="starter-area">
-                <span class="starter-label">試著從這裡開始</span>
-                <div class="suggestions" aria-label="試著這樣開始">
-                  <button
-                    data-prompt="列出工作區檔案，幫我理解目前的專案結構。"
-                  >
-                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                      <use href="#i-folder"></use></svg
-                    ><span
-                      ><strong>探索工作區</strong
-                      ><small>快速理解你的專案</small></span
-                    ><svg
-                      class="icon suggestion-arrow"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <use href="#i-external"></use>
-                    </svg></button
-                  ><button
-                    data-prompt="幫我規劃一個新的 Node.js 專案，先列出架構與實作步驟。"
-                  >
-                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                      <use href="#i-chat"></use></svg
-                    ><span
-                      ><strong>梳理新想法</strong
-                      ><small>一起找到下一步</small></span
-                    ><svg
-                      class="icon suggestion-arrow"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <use href="#i-external"></use>
-                    </svg></button
-                  ><button
-                    data-prompt="幫我整理一份可重複使用的程式碼審查流程，先給我草稿。"
-                  >
-                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                      <use href="#i-skill"></use></svg
-                    ><span
-                      ><strong>留下好方法</strong
-                      ><small>建立可重用的技能</small></span
-                    ><svg
-                      class="icon suggestion-arrow"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <use href="#i-external"></use>
-                    </svg>
-                  </button>
-                </div>
-                <p class="welcome-note">
-                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <use href="#i-memory"></use></svg
-                  >記憶與技能會留下來，新的話題也接得上。
-                </p>
-              </div>
             </div>
           </div>
           <button
@@ -534,8 +487,7 @@
           >
             <div class="panel-heading">
               <div>
-                <span class="eyebrow">TALARIA WORKSPACE</span>
-                <h2>一起工作的地方</h2>
+                <h2>Talaria 的工作區</h2>
               </div>
               <button
                 id="close-workspace"
@@ -547,15 +499,13 @@
                 </svg>
               </button>
             </div>
-            <p class="panel-description">
-              檔案、記憶和技能，讓每次對話更有脈絡。
-            </p>
+            <p class="panel-description">查看 Bot 使用的模型、檔案與記憶。</p>
             <div class="workspace-section">
               <h3>正在使用的模型</h3>
               <div class="model-card">
                 <span class="bot-avatar small" aria-hidden="true"
                   ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <use href="#i-logo"></use></svg
+                    <use href="#i-bot"></use></svg
                 ></span>
                 <div>
                   <strong id="workspace-model">Talaria</strong

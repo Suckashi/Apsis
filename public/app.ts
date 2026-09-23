@@ -42,8 +42,58 @@ let currentAction = "";
 let connected = false;
 let wasConnected = false;
 let loginExpired = false;
+const observedSessionTimes = new Map<string, string>();
+const observedMessageTimes = new Map<string, string>();
+function validTimestamp(value: unknown): string | undefined {
+  return typeof value === "string" && Number.isFinite(Date.parse(value))
+    ? value
+    : undefined;
+}
+function sessionTime(session: SessionSummary) {
+  return (
+    observedSessionTimes.get(session.id) ||
+    validTimestamp("updatedAt" in session ? session.updatedAt : undefined) ||
+    validTimestamp(session.createdAt)
+  );
+}
+function rosterTime(timestamp: string) {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString())
+    return date.toLocaleTimeString("zh-TW", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  if (date.toDateString() === yesterday.toDateString()) return "昨天";
+  return date.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
+}
 initTheme();
 function updatePresence() {
+  const latestSession = state.sessions
+    .filter((session) => session.count > 0)
+    .sort((a, b) =>
+      (sessionTime(b) || "").localeCompare(sessionTime(a) || ""),
+    )[0];
+  const botTime = document.querySelector<HTMLTimeElement>("#bot-time");
+  if (botTime) {
+    const timestamp = latestSession && sessionTime(latestSession);
+    botTime.hidden = !timestamp;
+    if (timestamp && latestSession) {
+      botTime.dateTime = timestamp;
+      botTime.textContent = rosterTime(timestamp);
+      const actualActivity =
+        observedSessionTimes.has(latestSession.id) ||
+        validTimestamp(
+          "updatedAt" in latestSession ? latestSession.updatedAt : undefined,
+        );
+      botTime.title =
+        (actualActivity ? "最近活動時間：" : "最近對話建立時間：") +
+        new Date(timestamp).toLocaleString("zh-TW");
+    }
+  }
   const working =
     state.busy ||
     state.session?.running ||
@@ -72,8 +122,7 @@ function updatePresence() {
     : working
       ? (state.busy || state.session?.running ? currentAction : "") ||
         "正在處理任務…"
-      : state.sessions.find((session) => session.count > 0)?.title ||
-        "準備好，隨時聊聊。";
+      : latestSession?.title || "準備好，隨時聊聊。";
 }
 function setConnection(value: boolean, expired = false) {
   connected = value;
@@ -140,11 +189,11 @@ matchMedia("(max-width: 680px)").addEventListener("change", () =>
   setSidebar(false),
 );
 setSidebar(false);
-function setWorkspace(open: boolean) {
+function setWorkspace(open: boolean, focus = true) {
   $("#workspace-panel").hidden = !open;
   $("#toggle-workspace").setAttribute("aria-expanded", String(open));
   syncOverlays();
-  if (open) $("#close-workspace").focus();
+  if (open && focus) $("#close-workspace").focus();
 }
 $("#toggle-workspace").addEventListener("click", () =>
   setWorkspace(Boolean($("#workspace-panel").hidden)),
@@ -405,7 +454,33 @@ function setMessageContent(content: HTMLElement, text: string) {
     content.innerHTML = renderMarkdown(text);
   else content.textContent = text;
 }
-function addMessage(role: "user" | "assistant", text: string, error = false) {
+function setMessageTime(content: HTMLElement, timestamp: string) {
+  const valid = validTimestamp(timestamp);
+  const actions = content
+    .closest(".message-body")
+    ?.querySelector(".message-actions");
+  if (!valid || !actions) return;
+  let time = actions.querySelector<HTMLTimeElement>(".message-time");
+  if (!time) {
+    time = document.createElement("time");
+    time.className = "message-time";
+    actions.prepend(time);
+  }
+  const date = new Date(valid);
+  time.dateTime = valid;
+  time.textContent = date.toLocaleTimeString("zh-TW", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  time.title = date.toLocaleString("zh-TW");
+}
+function addMessage(
+  role: "user" | "assistant",
+  text: string,
+  error = false,
+  timestamp?: string,
+) {
   const item = document.createElement("article");
   item.className = "message " + role + (error ? " error" : "");
   const avatar = document.createElement("div");
@@ -442,6 +517,7 @@ function addMessage(role: "user" | "assistant", text: string, error = false) {
   body.append(label, content, actions);
   item.append(avatar, body);
   $("#messages").append(item);
+  if (timestamp) setMessageTime(content, timestamp);
   if (role === "assistant") activeReply = content;
   return content;
 }
@@ -465,6 +541,8 @@ function renderConversation() {
       m.role,
       m.content,
       m.status === "error" || m.status === "failed",
+      observedMessageTimes.get(m.id) ||
+        validTimestamp("createdAt" in m ? m.createdAt : undefined),
     );
     if (m.role === "assistant") {
       content.dataset.traceKey = m.id;
@@ -721,6 +799,11 @@ $("#chat-form").addEventListener("submit", async (event) => {
   const originalDraft = draftKey();
   let failed = false;
   const started = Date.now();
+  const sentAt = new Date(started).toISOString();
+  const knownMessageIds = new Set(
+    state.session?.messages.map((message) => message.id) || [],
+  );
+  let replyAt: string | undefined;
   $("#run-status").textContent = "正在開始任務…";
   runTimer = setInterval(() => {
     $("#run-status").textContent =
@@ -740,7 +823,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
     }
     document.querySelector("#messages .welcome")?.remove();
     followOutput = true;
-    addMessage("user", prompt);
+    addMessage("user", prompt, false, sentAt);
     content = addMessage("assistant", "正在準備回覆…");
     content.dataset.traceKey = state.session.id + ":live";
     traceOpen.delete(content.dataset.traceKey);
@@ -767,6 +850,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
     );
     if (!response.ok)
       throw new Error((await response.json()).error || "請求失敗。");
+    observedSessionTimes.set(state.session.id, sentAt);
     if (!response.body) throw new Error("伺服器沒有回傳串流。");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -775,6 +859,15 @@ $("#chat-form").addEventListener("submit", async (event) => {
     const consume = (line: string) => {
       if (!line.trim()) return;
       const data = JSON.parse(line) as RunEvent;
+      if (
+        !replyAt &&
+        (data.type === "delta" || data.type === "done" || data.type === "error")
+      ) {
+        replyAt = new Date().toISOString();
+        if (content) setMessageTime(content, replyAt);
+        if (state.session) observedSessionTimes.set(state.session.id, replyAt);
+        updatePresence();
+      }
       if (data.type === "delta") {
         output += data.text;
         if (content) {
@@ -839,6 +932,13 @@ $("#chat-form").addEventListener("submit", async (event) => {
         const savedReply = state.session.messages.findLast(
           (message) => message.role === "assistant",
         );
+        const savedPrompt = state.session.messages.findLast(
+          (message) => message.role === "user",
+        );
+        if (savedPrompt && !knownMessageIds.has(savedPrompt.id))
+          observedMessageTimes.set(savedPrompt.id, sentAt);
+        if (replyAt && savedReply && !knownMessageIds.has(savedReply.id))
+          observedMessageTimes.set(savedReply.id, replyAt);
         if (content && savedReply && !state.session.running) {
           const trace = content
             .closest(".message-body")
@@ -1205,6 +1305,8 @@ async function initialize() {
         updateMode();
       }
       showView(initialView || "chat");
+      if (state.view === "chat" && matchMedia("(min-width: 1180px)").matches)
+        setWorkspace(true, false);
       restoredInitialView = true;
     }
     document.body.dataset.ready = "true";

@@ -14,7 +14,10 @@ export function initTheme() {
   const button = document.querySelector<HTMLButtonElement>("#theme-toggle");
   const system = matchMedia("(prefers-color-scheme: dark)");
   const saved = preferences.get("talaria-theme");
-  let mode = saved === "light" || saved === "dark" ? saved : "system";
+  let mode =
+    saved === "light" || saved === "dark" || saved === "system"
+      ? saved
+      : "dark";
   const labels: Record<string, string> = {
     system: "跟隨系統",
     light: "淺色模式",
@@ -26,7 +29,7 @@ export function initTheme() {
     document.documentElement.dataset.themePreference = mode;
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", dark ? "#151719" : "#f6f6f3");
+      ?.setAttribute("content", dark ? "#070707" : "#ffffff");
     if (!button) return;
     const next =
       mode === "system" ? "light" : mode === "light" ? "dark" : "system";
