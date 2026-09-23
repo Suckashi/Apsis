@@ -2,8 +2,25 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 export type Provider = "openai" | "anthropic" | "ollama" | "openai-compatible";
 export type Mode = "demo" | "pi";
+export type AgentEngine = "pi" | "deepagents" | "openai-agents";
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  engine: AgentEngine;
+  provider: Provider;
+  model: string;
+  tools: string[];
+  skillIds: string[];
+  memoryScope: "private" | "shared";
+  createdAt: string;
+  updatedAt: string;
+  archived?: boolean;
+}
 export type Environment = Record<string, string | undefined>;
 export interface Memory {
+  agentId?: string;
   id: string;
   content: string;
   createdAt?: string;
@@ -19,6 +36,8 @@ export interface ChatMessage {
   activity?: string[];
 }
 export interface Session {
+  agent?: AgentDefinition;
+  engineState?: unknown;
   source?: "web" | "telegram";
   id: string;
   title: string;
@@ -27,15 +46,19 @@ export interface Session {
   messages: ChatMessage[];
   piMessages: AgentMessage[];
 }
-export type SessionView = Omit<Session, "piMessages"> & {
+export type SessionView = Omit<Session, "piMessages" | "engineState"> & {
   running?: boolean;
   live?: { text: string; activity: string[] };
 };
-export type SessionSummary = Omit<Session, "piMessages" | "messages"> & {
+export type SessionSummary = Omit<
+  Session,
+  "piMessages" | "engineState" | "messages"
+> & {
   count: number;
   running: boolean;
 };
 export interface StoreState {
+  agents?: AgentDefinition[];
   sessions: Session[];
   memories: Memory[];
   skills: Skill[];
@@ -44,6 +67,7 @@ export type RunEvent =
   | { type: "delta" | "activity" | "error"; text: string; tool?: string }
   | { type: "done" };
 export interface RunResult {
+  engineState?: unknown;
   text: string;
   piMessages?: AgentMessage[];
 }

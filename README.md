@@ -2,13 +2,13 @@
 
 **English** | [繁體中文](README.zh-TW.md)
 
-A local-first personal AI assistant with a Web interface and a Telegram bot. Talaria uses **TypeScript and Node.js**, with Pi as its agent runtime and a local memory architecture inspired by Hermes Agent.
+A local-first personal AI workspace with a Web interface and a Telegram bot. Talaria uses **TypeScript and Node.js**, selectable Pi, Deep Agents and OpenAI Agents SDK runtimes, and a local memory architecture inspired by Hermes Agent.
 
 Start development with `npm run dev`. Python, Docker, Redis, and a separate database server are not required. Ollama is optional for local models; cloud APIs can be used instead.
 
 ## What Talaria does
 
-- Chat with one persistent assistant through the Web or a paired Telegram account.
+- Create custom agents with separate instructions, model choices, tools, skills and private or shared memory; chat through Web or resume through paired Telegram.
 - Stream model replies and show expandable tool activity in Web conversations.
 - Read workspace files, and optionally modify files or save knowledge with write permission.
 - Keep durable memories, load reusable skills on demand, and search previous conversations.
@@ -26,7 +26,7 @@ The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/desig
 | Talaria                         | Web and Telegram interfaces, task lifecycle, permissions, local storage, memory, and skills. |
 | Hermes Agent                    | A reference for memory handling and on-demand skills, implemented locally in TypeScript.     |
 
-Both Pi packages are pinned to `0.87.0`. Pi is the only live agent runtime. Talaria neither installs Hermes Agent nor connects to a Hermes Gateway. The current memory implementation follows selected architectural ideas; it is not a complete port of Hermes.
+Both Pi packages are pinned to `0.87.0`. Pi remains the default runtime; custom agents can also use `deepagents` or `@openai/agents`. Engine adapters share Talaria's tools, permissions and long-term memory. Talaria neither installs Hermes Agent nor connects to a Hermes Gateway. The memory implementation follows selected architectural ideas; it is not a complete port of Hermes.
 
 ```text
 Web browser ── HTTP / NDJSON ──┐
@@ -35,7 +35,7 @@ Telegram ─── long polling ────┤
                       Shared task service
                        ├─ history, progress, cancellation
                        ├─ memories + skill index
-                       ├─ pi-agent-core → pi-ai → model
+                       ├─ agent snapshot → Pi / Deep Agents / OpenAI SDK → model
                        ├─ permission-gated local tools
                        └─ atomic JSON storage
 ```
@@ -56,6 +56,26 @@ Open [http://localhost:3100](http://localhost:3100).
 In **Bot settings (Bot 設定)**, connect a model and save. The next task uses the new settings without restarting. If no model is configured, select **Demo mode (示範模式)** under the input's **Task options (任務選項)** to try scripted streaming responses without an API call.
 
 Development starts the server and browser build together. Browser assets are rebuilt on changes, and the backend restarts automatically. Refresh the browser after frontend changes.
+
+## Creating agents
+
+Open **My Agents (我的 Agents) → Create Agent (建立 Agent)**. Set its name, instructions, engine, provider, model ID, tools, selected skills, and memory scope. Save, then select **Start conversation (開始對話)** to try it. An agent can also be selected in the input's task options.
+
+| Engine            | Model connections                                | Runtime behavior                                                                         |
+| ----------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Pi                | OpenAI, Anthropic, Ollama, custom compatible API | Existing Talaria loop and tools                                                          |
+| Deep Agents       | OpenAI, Anthropic, Ollama, custom compatible API | Planning, internal subagents, virtual scratch files and framework summarization          |
+| OpenAI Agents SDK | OpenAI, Ollama, custom compatible API            | SDK agent loop; OpenAI uses Responses, others use Chat Completions; SDK tracing disabled |
+
+All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a provider and model; credentials and endpoint URLs are shared through Bot settings.
+
+Private memory and history retrieval are scoped to the agent. Shared agents use Talaria's shared memories and shared-conversation search. Agents see selected shared skills and skills they create themselves. Workspace files remain shared; the owner can inspect all knowledge in the management UI. This is not multi-user isolation.
+
+Memory scope is fixed after creation. Edits affect new conversations only; existing conversations retain a configuration snapshot. Archiving preserves memory and existing conversations. Telegram `/new` uses default Talaria; `/resume` retains a custom conversation's agent.
+
+Deep Agents' built-in filesystem uses conversation-local virtual state, never the host filesystem. Real files use `workspace_list_files`, `workspace_read_file`, and `workspace_write_file`, with Talaria's permissions. Virtual notes and todos persist on successful completion. Real writes and long-term knowledge require both tool selection and per-task write permission. No shell backend is enabled.
+
+There is no visual handoff/workflow editor or cross-engine delegation yet. OpenAI SDK handoffs are not configured by the UI. Deep Agents can delegate internally with inherited tools.
 
 ## Model connections
 
@@ -81,7 +101,7 @@ Configuration status means the settings are present; it does not prove successfu
 
 Talaria does not install Ollama or download models. This connector accepts loopback HTTP addresses only and filters cloud models from discovery. API keys are not required. `qwen3.5:9b` has been used for local integration testing.
 
-The adapter requests thinking off and up to 2,048 output tokens. Its context metadata is 8,192 tokens; the actual context configuration is controlled by Ollama.
+The Pi adapter requests thinking off and up to 2,048 output tokens. Its context metadata is 8,192 tokens; the actual context configuration is controlled by Ollama. The other adapters request up to 4,096 output tokens and also disable Ollama reasoning via `reasoning_effort: none`.
 
 ### Custom OpenAI-compatible API
 
@@ -177,12 +197,12 @@ Available tools: `list_files`, `read_file`, `write_file`, `remember`, `update_me
 
 The model decides when to save knowledge, subject to write permission. There is no background learning worker, automatic memory deduplication, or relevance ranking. Memory entries that do not fit the prompt budget are skipped in stored order. Skill descriptions are text prefixes, not generated summaries.
 
-| Location              | Contents                                                           |
-| --------------------- | ------------------------------------------------------------------ |
-| `.loom/state.json`    | Conversations, Pi transcripts, memories, and skills                |
-| `.loom/settings.json` | Model configuration and API credentials                            |
-| `.loom/telegram.json` | Bot token, owner pairing, conversation bindings, and update offset |
-| `workspace/`          | Files accessible to the agent's file tools                         |
+| Location              | Contents                                                                      |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `.loom/state.json`    | Agent definitions, conversation snapshots, engine state, memories, and skills |
+| `.loom/settings.json` | Model configuration and API credentials                                       |
+| `.loom/telegram.json` | Bot token, owner pairing, conversation bindings, and update offset            |
+| `workspace/`          | Files accessible to the agent's file tools                                    |
 
 Local data is created on demand and ignored by Git. Settings and tokens are stored as local plaintext; configuration APIs do not expose the secrets. Files use mode 0600 where supported. Conversation writes are serialized and use atomic JSON replacement within one server process.
 
@@ -190,17 +210,17 @@ Older Hermes/hybrid conversations migrate to Pi mode while preserving their IDs,
 
 ## Current scope and limits
 
-- One local owner and one bot; no multi-user isolation, multiple bot personas, or hosted computers.
+- One local owner and one Telegram bot, with multiple custom agents; no multi-user isolation or hosted computers.
 - The server binds to `127.0.0.1`, checks Host/Origin, requires a custom header for API mutations, and sets a restrictive Content Security Policy. Use the authenticated sharing proxy for remote access.
 - File tools stay inside `workspace/`, reject hidden paths, traversal, and symlinks, and limit file content to 256,000 bytes. They provide no terminal execution and are not an OS sandbox.
-- Each task is limited to five minutes and twelve Pi model turns. Interrupted tasks are marked failed on restart rather than resumed automatically.
-- Conversation context is not automatically compacted. Long conversations may require a new topic.
+- Each task is limited to five minutes. Pi and OpenAI SDK allow twelve turns; Deep Agents has a 48-step graph recursion limit. Interrupted tasks are marked failed on restart rather than resumed automatically.
+- Pi and OpenAI SDK conversations are not automatically compacted. Deep Agents provides framework summarization; model-specific context tuning remains future work.
 - The JSON store loads all state and rewrites it on each mutation. Use one server process per data directory.
 - Scheduling, browser/computer control, MCP management, and media input are not implemented.
 
 ## Suggested improvement priorities
 
-These are **proposals, not implemented features**, based on the current code.
+These are **further improvements**, not complete features, based on the current code. Deep Agents now provides framework summarization; consistent token budgets across all engines remain pending.
 
 | Priority | Improvement                                                                         | Why it matters                                                                                                  |
 | -------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -211,6 +231,10 @@ These are **proposals, not implemented features**, based on the current code.
 | 5        | Paginated history, storage validation, migrations, and backups                      | Keep growing local data responsive and easier to recover without complicating Node-based startup.               |
 
 ## Development and verification
+
+`npm run test:agents:ollama` tests real workspace reads and continuation with all three engines using isolated temporary data. It accepts `OLLAMA_MODEL` and `OLLAMA_URL`. Local Qwen successfully called file tools through all engines, but live runs also produced malformed tool calls, refusals and incorrect claims about missing history. Deterministic SDK tests confirm the history is sent; model behavior is not guaranteed. The smoke test reports failures without silently retrying.
+
+Agent tests also cover CRUD validation, configuration snapshots, archive preservation, memory/skill isolation and real SDK HTTP streaming and continuation for all three engines.
 
 | Command                | Purpose                                                                     |
 | ---------------------- | --------------------------------------------------------------------------- |
@@ -234,6 +258,8 @@ A [GitHub Actions template](docs/github-actions.yml.example) covers Windows/Linu
 ```text
 public/                Browser TypeScript, HTML, and CSS
 server/agent.ts         Pi runtime integration and tools
+server/agents.ts        Agent validation and memory/skill scope
+server/engines/         Deep Agents and OpenAI SDK adapters
 server/context.ts      Memory and on-demand skill context
 server/tasks.ts        Shared task lifecycle
 server/app.ts          HTTP API and streaming
@@ -254,6 +280,8 @@ To add a tool, define it in `createTools()` in `server/agent.ts`, provide a sche
 ## Upstream projects
 
 - [Pi](https://github.com/earendil-works/pi): agent runtime and model abstraction.
+- [Deep Agents](https://docs.langchain.com/oss/javascript/deepagents/overview): planning-oriented JavaScript agent framework.
+- [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/): TypeScript agent runtime.
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent): reference for memory and skill architecture.
 
-Talaria is an independent project and is not affiliated with either upstream.
+Talaria is an independent project and is not affiliated with the upstream projects.

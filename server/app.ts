@@ -14,6 +14,7 @@ import { Settings } from "./settings.ts";
 import { Workspace } from "./workspace.ts";
 import { configuration, runAgent } from "./agent.ts";
 import { TaskService } from "./tasks.ts";
+import { parseAgent } from "./agents.ts";
 import { TelegramChannel, type TelegramCall } from "./telegram.ts";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
@@ -161,21 +162,66 @@ export async function createApp({
           res,
           await settings.update(settingsMatch[1], await body(req)),
         );
+      if (path === "/api/agents") {
+        if (req.method === "GET")
+          return json(
+            res,
+            (store.state.agents || []).filter((a) => !a.archived),
+          );
+        if (req.method === "POST") {
+          const agent = parseAgent(await body(req), store.state);
+          await store.mutate((s) => (s.agents ||= []).push(agent));
+          return json(res, agent, 201);
+        }
+      }
+      const agentMatch = path.match(/^\/api\/agents\/([a-f0-9-]+)$/);
+      if (agentMatch) {
+        const previous = store.state.agents?.find(
+          (a) => a.id === agentMatch[1] && !a.archived,
+        );
+        if (!previous) fail("找不到 agent。", 404);
+        if (req.method === "PUT") {
+          const agent = parseAgent(await body(req), store.state, previous);
+          await store.mutate((s) => {
+            s.agents![s.agents!.findIndex((a) => a.id === agent.id)] = agent;
+          });
+          return json(res, agent);
+        }
+        if (req.method === "DELETE") {
+          await store.mutate((s) => {
+            s.agents!.find((a) => a.id === previous.id)!.archived = true;
+          });
+          return json(res, { ok: true });
+        }
+      }
       if (req.method === "GET" && path === "/api/sessions")
         return json(
           res,
-          store.state.sessions.map(({ piMessages, messages, ...session }) => ({
-            ...session,
-            count: messages.length,
-            running: running.has(session.id),
-          })),
+          store.state.sessions.map(
+            ({ piMessages, engineState, messages, ...session }) => ({
+              ...session,
+              count: messages.length,
+              running: running.has(session.id),
+            }),
+          ),
         );
       if (req.method === "POST" && path === "/api/sessions") {
         const input = await body(req);
         const mode = input.mode || "demo";
         if (typeof mode !== "string" || !modes.includes(mode))
           fail("未知模式。");
-        const session = await tasks.create(mode as Session["mode"]);
+        const agent = input.agentId
+          ? store.state.agents?.find(
+              (a) => a.id === input.agentId && !a.archived,
+            )
+          : undefined;
+        if (input.agentId && !agent) fail("找不到 agent。", 404);
+        if (agent && mode !== "pi") fail("自建 agent 必須使用真實回覆模式。");
+        const session = await tasks.create(
+          mode as Session["mode"],
+          "web",
+          agent,
+        );
         return json(res, session, 201);
       }
       const match = path.match(

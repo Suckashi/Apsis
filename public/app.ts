@@ -16,6 +16,8 @@ import { modeRequirement, preferences } from "./workflow.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { initCommandPalette, initComposer, initTheme } from "./interaction.ts";
 import { initCodeBlocks } from "./code-blocks.ts";
+import { createAgentsUI } from "./agents.ts";
+import { engineLabels } from "../shared/agents.ts";
 const state: {
   session: SessionView | null;
   sessions: SessionSummary[];
@@ -281,7 +283,19 @@ function restoreDraft() {
 }
 function renderWelcome() {
   $("#messages").replaceChildren(welcomeTemplate.content.cloneNode(true));
-  $(".onboarding").hidden = !!state.status.piReady;
+  const agent = state.session?.agent || agentsUI.selected();
+  $(".onboarding").hidden = agent
+    ? !agentsUI.requirement(agent)
+    : !!state.status.piReady;
+  if (agent) {
+    $(".bot-intro h1").textContent = agent.name;
+    $(".bot-intro div > span").textContent =
+      engineLabels[agent.engine] +
+      " · " +
+      (agent.memoryScope === "private" ? "獨立記憶" : "共用記憶");
+    $(".intro-bubble").textContent =
+      agent.description || "傳送一個任務，開始和這位專屬助手一起工作。";
+  }
 }
 function scrollLatest(force = false) {
   if (followOutput || force)
@@ -341,7 +355,8 @@ function showView(view: string) {
     toast("請先停止或等待目前任務完成。");
     return;
   }
-  if (!["chat", "memories", "skills", "settings"].includes(view)) return;
+  if (!["chat", "memories", "skills", "settings", "agents"].includes(view))
+    return;
   state.view = view;
   setSidebar(false);
   setWorkspace(false);
@@ -368,7 +383,12 @@ function showView(view: string) {
       memories: "長期記憶",
       skills: "技能庫",
       settings: "Bot 設定",
-    }[view as "chat" | "memories" | "skills" | "settings"] ?? "";
+      agents: "我的 Agents",
+    }[view as "chat" | "memories" | "skills" | "settings" | "agents"] ?? "";
+  if (view === "agents")
+    void agentsUI
+      .load(state.session?.agent)
+      .catch((e) => toast(asError(e).message));
   if (view === "chat") composer.resize();
 }
 document.addEventListener("click", (event) => {
@@ -435,7 +455,7 @@ function renderSessions() {
       "aria-current",
       item.id === state.session?.id ? "true" : "false",
     );
-    button.title = item.title + " · " + labels[item.mode];
+    button.title = item.title + " · " + (item.agent?.name || labels[item.mode]);
     button.disabled = state.busy;
     button.addEventListener("click", () =>
       loadSession(item.id).catch((error: unknown) =>
@@ -489,7 +509,11 @@ function addMessage(
   const label = document.createElement("div");
   label.className = "message-label";
   label.textContent =
-    role === "user" ? "你" : labels[state.session?.mode || $("#mode").value];
+    role === "user"
+      ? "你"
+      : state.session?.agent?.name ||
+        agentsUI.selected()?.name ||
+        labels[state.session?.mode || $("#mode").value];
   const content = document.createElement("div");
   content.className =
     "message-content" + (role === "assistant" ? " markdown" : "");
@@ -499,7 +523,7 @@ function addMessage(
   copy.textContent = "複製";
   copy.setAttribute(
     "aria-label",
-    "複製" + (role === "user" ? "你的訊息" : "Talaria 回覆"),
+    "複製" + (role === "user" ? "你的訊息" : label.textContent + " 回覆"),
   );
   copy.addEventListener("click", async () => {
     try {
@@ -562,6 +586,7 @@ function renderConversation() {
   $("#resume-bot").hidden = state.session.mode !== "pi";
   $("#session-title").textContent = state.session.title;
   $("#mode").value = state.session.mode;
+  agentsUI.select(state.session.agent);
   updateMode();
   followOutput = true;
   if (state.session.messages.length) scrollLatest(true);
@@ -573,16 +598,28 @@ function renderConversation() {
 }
 function updateMode() {
   const mode = $("#mode").value as Mode;
+  const agent = state.session?.agent || agentsUI.selected();
+  const name = agent?.name || "Talaria";
+  $("#prompt").setAttribute("aria-label", "傳訊息給 " + name);
+  $("#prompt").placeholder = "傳訊息給 " + name;
+  $("#messages").setAttribute("aria-label", "與 " + name + " 的訊息");
   $("#composer-model").textContent =
-    mode === "pi" ? state.status.model || "尚未連接模型" : labels[mode];
-  const requirement = modeRequirement(mode, state.status);
+    mode === "pi"
+      ? agent?.model || state.status.model || "尚未連接模型"
+      : labels[mode];
+  const requirement =
+    agent && mode === "pi"
+      ? agentsUI.requirement(agent)
+      : modeRequirement(mode, state.status);
   $("#mode-setup").hidden = !requirement;
   $("#mode-banner").classList.toggle("needs-setup", Boolean(requirement));
   $("#mode-banner").textContent =
     requirement ||
     (mode === "demo"
       ? "示範模式 · 不會呼叫 AI，也不會消耗 API 額度"
-      : "Talaria · 自動選用工具與技能，與 bot 共用記憶；預設僅讀取工作區。");
+      : agent
+        ? `${agent.name} · ${engineLabels[agent.engine]} · ${agent.memoryScope === "private" ? "獨立記憶" : "共用記憶"}`
+        : "Talaria · 自動選用工具與技能，與 bot 共用記憶；預設僅讀取工作區。");
 }
 async function loadSession(id: string) {
   if (state.busy || navigating) return;
@@ -610,6 +647,7 @@ async function newSession(preserveMode = false) {
   saveDraft();
   state.session = null;
   if (!preserveMode) $("#mode").value = state.status.piReady ? "pi" : "demo";
+  if (!preserveMode) agentsUI.select();
   preferences.remove("loom-session");
   restoreDraft();
   $("#run-status").textContent = "新話題，一樣記得你。";
@@ -625,6 +663,7 @@ $("#new-session").addEventListener("click", () =>
   newSession().catch((e: unknown) => toast(asError(e).message)),
 );
 $("#mode").addEventListener("change", async () => {
+  if ($("#mode").value === "demo") agentsUI.select();
   updateMode();
   if (state.session && state.session.mode !== $("#mode").value) {
     try {
@@ -744,6 +783,7 @@ function syncComposer() {
   $("#stop").hidden = !state.busy;
   $("#background-stop").hidden = !state.session?.running || state.busy;
   $("#mode").disabled = running;
+  $<HTMLSelectElement>("#agent-select").disabled = running;
   $("#new-session").disabled = state.busy;
   $("#allow-writes").disabled = running;
 }
@@ -770,7 +810,11 @@ $("#chat-form").addEventListener("submit", async (event) => {
   }
   const prompt = $("#prompt").value.trim();
   if (!prompt) return;
-  const requirement = modeRequirement($("#mode").value as Mode, state.status);
+  const chosenAgent = state.session?.agent || agentsUI.selected();
+  const requirement =
+    chosenAgent && $("#mode").value === "pi"
+      ? agentsUI.requirement(chosenAgent)
+      : modeRequirement($("#mode").value as Mode, state.status);
   if (requirement) {
     toast(requirement);
     showView("settings");
@@ -797,6 +841,8 @@ $("#chat-form").addEventListener("submit", async (event) => {
     if (!state.session) {
       state.session = await post<SessionView>("sessions", {
         mode: $("#mode").value,
+        agentId:
+          $("#mode").value === "pi" ? agentsUI.selected()?.id : undefined,
       });
       preferences.set("loom-session", state.session.id);
       renderConversation();
@@ -997,6 +1043,8 @@ function renderLibrary(
     const small = document.createElement("small");
     small.textContent =
       new Date(row.createdAt || Date.now()).toLocaleDateString("zh-TW") +
+      " · " +
+      (row.agentId ? "Agent 專屬 · " + row.agentId.slice(0, 8) : "共用") +
       " · 儲存在本機";
     const del = document.createElement("button");
     del.className = "delete-button";
@@ -1053,6 +1101,7 @@ async function refreshFiles() {
     : "workspace/ 尚無檔案";
 }
 async function refresh() {
+  await agentsUI.load(state.session?.agent);
   const [status, sessions, memories, skills] = await Promise.all([
     api<Status>("status"),
     api<SessionSummary[]>("sessions"),
@@ -1086,6 +1135,28 @@ $("#refresh-files").addEventListener("click", () =>
   refreshFiles().catch((e: unknown) => toast(asError(e).message)),
 );
 const settingsUI = createSettingsUI({ api, onSaved: refresh, notify: toast });
+const agentsUI = createAgentsUI(api, toast, async (agent) => {
+  if (state.busy || state.session?.running) {
+    toast("請先停止或等待任務完成。");
+    return;
+  }
+  await newSession(true);
+  agentsUI.select(agent);
+  $("#mode").value = "pi";
+  renderWelcome();
+  updateMode();
+  $("#session-title").textContent = agent?.name || "Talaria";
+  $("#prompt").focus();
+});
+$<HTMLSelectElement>("#agent-select").addEventListener("change", async () => {
+  const selected = agentsUI.selected();
+  await newSession(true);
+  agentsUI.select(selected);
+  $("#mode").value = "pi";
+  renderWelcome();
+  $("#session-title").textContent = selected?.name || "Talaria";
+  updateMode();
+});
 const telegramUI = createTelegramUI(api, toast);
 $("#background-stop").addEventListener("click", async () => {
   if (!state.session) return;

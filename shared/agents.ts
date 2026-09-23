@@ -1,0 +1,16 @@
+export const engineLabels = {
+  pi: "Pi",
+  deepagents: "Deep Agents",
+  "openai-agents": "OpenAI Agents SDK",
+};
+export const agentTools = {
+  list_files: "列出工作區檔案",
+  read_file: "讀取工作區檔案",
+  write_file: "修改工作區檔案",
+  remember: "保存記憶",
+  update_memory: "更新記憶",
+  search_history: "搜尋對話紀錄",
+  list_skills: "尋找已選技能",
+  read_skill: "讀取已選技能",
+  save_skill: "保存專屬技能",
+};

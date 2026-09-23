@@ -3,7 +3,13 @@ import { runAgent, type RunOptions } from "./agent.ts";
 import type { Store } from "./store.ts";
 import type { Workspace } from "./workspace.ts";
 import type { Settings } from "./settings.ts";
-import type { Mode, RunEvent, Session, SessionView } from "../shared/types.ts";
+import type {
+  Mode,
+  RunEvent,
+  Session,
+  SessionView,
+  AgentDefinition,
+} from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 
 export type AgentRunner = typeof runAgent;
@@ -27,7 +33,11 @@ export class TaskService {
     this.settings = settings;
     this.runner = runner;
   }
-  async create(mode: Mode = "pi", source: Session["source"] = "web") {
+  async create(
+    mode: Mode = "pi",
+    source: Session["source"] = "web",
+    agent?: AgentDefinition,
+  ) {
     const session: Session = {
       id: randomUUID(),
       title: "新的對話",
@@ -36,6 +46,7 @@ export class TaskService {
       createdAt: new Date().toISOString(),
       messages: [],
       piMessages: [],
+      ...(agent ? { agent: structuredClone(agent) } : {}),
     };
     await this.store.mutate((s) => s.sessions.unshift(session));
     return session;
@@ -44,7 +55,7 @@ export class TaskService {
     const session = this.store.state.sessions.find((s) => s.id === id);
     if (!session)
       throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
-    const { piMessages, ...view } = session;
+    const { piMessages, engineState, ...view } = session;
     const live = this.running.get(id);
     return {
       ...view,
@@ -86,6 +97,10 @@ export class TaskService {
     if (signal?.aborted) abort();
     const timer = setTimeout(abort, 300000);
     const env = this.settings.environment();
+    if (session.agent) {
+      env.PI_PROVIDER = session.agent.provider;
+      env.PI_MODEL = session.agent.model;
+    }
     const userId = randomUUID();
     const emit = (event: RunEvent) => {
       if (event.type === "delta") live.text += event.text;
@@ -115,6 +130,7 @@ export class TaskService {
         emit,
         signal: controller.signal,
         env,
+        agent: session.agent,
       } satisfies RunOptions);
       controller.signal.throwIfAborted();
       await this.store.mutate((s) => {
@@ -128,6 +144,8 @@ export class TaskService {
           activity: live.activity,
         });
         if (result.piMessages) row.piMessages = result.piMessages;
+        if (result.engineState !== undefined)
+          row.engineState = result.engineState;
       });
       emit({ type: "done" });
       return result.text;

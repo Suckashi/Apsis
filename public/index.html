@@ -191,6 +191,11 @@
           <div id="sessions" class="sessions" aria-label="對話清單"></div>
         </div>
         <nav class="sidebar-nav" aria-label="Bot 管理">
+          <button class="nav" data-view="agents">
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-skill"></use></svg
+            ><span>我的 Agents</span>
+          </button>
           <button class="nav" data-view="memories">
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <use href="#i-memory"></use></svg
@@ -417,6 +422,17 @@
                           <option value="demo">示範模式</option>
                           <option value="pi">Talaria</option>
                         </select></label
+                      ><label class="mode-select"
+                        ><span>Agent</span
+                        ><select id="agent-select" aria-label="選擇 Agent">
+                          <option value="">Talaria · 預設</option>
+                        </select></label
+                      ><button
+                        class="text-button"
+                        type="button"
+                        data-view="agents"
+                      >
+                        建立與管理 Agent →</button
                       ><label class="write-option"
                         ><input type="checkbox" id="allow-writes" /><span
                           >允許修改與保存<small
@@ -607,6 +623,129 @@
             </form>
           </details>
           <div id="skills-list" class="library-list"></div>
+        </section>
+        <section id="agents-view" class="view library-view" hidden>
+          <div class="settings-heading">
+            <div>
+              <div class="eyebrow">YOUR TEAM</div>
+              <h1>我的 Agents</h1>
+              <p>為不同工作建立專屬助手，各自設定角色、模型與記憶。</p>
+            </div>
+            <button id="agent-new" class="primary" type="button">
+              ＋ 建立 Agent
+            </button>
+          </div>
+          <div class="agent-layout">
+            <div>
+              <div
+                id="agent-cards"
+                class="agent-cards"
+                aria-label="Agents 清單"
+              ></div>
+              <p class="field-help">
+                預設 Talaria 與 Telegram 新對話沿用 Bot 設定。自建 agent 可從
+                Web 開始，或以 /resume 在 Telegram 續聊。
+              </p>
+            </div>
+            <form
+              id="agent-form"
+              class="settings-card connection-form agent-editor"
+              hidden
+            >
+              <div class="agent-editor-heading">
+                <h2 id="agent-editor-title">建立 Agent</h2>
+                <button id="agent-cancel" type="button" class="quiet-button">
+                  取消
+                </button>
+              </div>
+              <fieldset id="agent-fields">
+                <label for="agent-name">名稱</label
+                ><input
+                  id="agent-name"
+                  required
+                  maxlength="80"
+                  placeholder="例如：研究助理"
+                />
+                <label for="agent-description">簡介</label
+                ><input
+                  id="agent-description"
+                  maxlength="300"
+                  placeholder="這位助手可以幫你做什麼？"
+                />
+                <label for="agent-instructions">角色與工作方式</label
+                ><textarea
+                  id="agent-instructions"
+                  required
+                  maxlength="12000"
+                  rows="5"
+                  placeholder="描述任務、回覆方式與完成工作的標準。"
+                ></textarea>
+                <div class="agent-field-row">
+                  <div>
+                    <label for="agent-engine">執行引擎</label
+                    ><select id="agent-engine">
+                      <option value="pi">Pi · 日常工作</option>
+                      <option value="deepagents">
+                        Deep Agents · 規劃與拆解
+                      </option>
+                      <option value="openai-agents">OpenAI Agents SDK</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label for="agent-provider">模型供應商</label
+                    ><select id="agent-provider">
+                      <option value="ollama">Ollama · 本機</option>
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="openai-compatible">OpenAI 相容端點</option>
+                    </select>
+                  </div>
+                </div>
+                <p id="agent-engine-help" class="field-help"></p>
+                <label for="agent-model">模型 ID</label
+                ><input
+                  id="agent-model"
+                  required
+                  maxlength="200"
+                  list="agent-model-options"
+                  placeholder="例如：qwen3.5:9b"
+                /><datalist id="agent-model-options"></datalist>
+                <p class="field-help">
+                  使用 Bot 設定中該供應商的 API
+                  key／網址。模型需支援工具呼叫。<button
+                    type="button"
+                    class="text-button"
+                    data-view="settings"
+                  >
+                    管理連線 →
+                  </button>
+                </p>
+                <label for="agent-memory">記憶範圍</label
+                ><select id="agent-memory">
+                  <option value="private">獨立記憶 · 僅此 Agent 使用</option>
+                  <option value="shared">共用記憶 · 與 Talaria 共用</option>
+                </select>
+                <p class="field-help">
+                  建立後固定記憶範圍，避免意外公開獨立記憶。工作區檔案仍共用。
+                </p>
+                <h3>工具權限</h3>
+                <div id="agent-tools" class="agent-checks"></div>
+                <p class="field-help">
+                  勾選寫入工具後，每次對話仍需開啟「允許修改與保存」。Deep
+                  Agents 另有虛擬筆記、規劃與子任務工具，不提供主機 shell。
+                </p>
+                <h3>可用技能</h3>
+                <div id="agent-skills" class="agent-checks"></div>
+                <button class="primary settings-save" type="submit">
+                  儲存 Agent
+                </button>
+              </fieldset>
+              <p id="agent-form-status" role="status" class="field-help"></p>
+              <p class="field-help">
+                編輯只影響之後建立的對話；既有對話保留建立時的設定。儲存後按「開始對話」即可試聊。
+              </p>
+            </form>
+          </div>
         </section>
         <section id="settings-view" class="view library-view" hidden>
           <div class="settings-heading">

@@ -2,13 +2,13 @@
 
 [English](README.md) | **繁體中文**
 
-Talaria 是優先在本機運作的個人 AI 助理，提供 Web 介面與 Telegram Bot。專案使用 **TypeScript 與 Node.js**，以 Pi 執行 Agent 任務，並參考 Hermes Agent 的記憶處理架構，在本機實作記憶與技能管理。
+Talaria 是優先在本機運作的個人 AI 工作區，提供 Web 介面與 Telegram Bot。專案使用 **TypeScript 與 Node.js**，可選擇 Pi、Deep Agents 與 OpenAI Agents SDK 執行任務，並參考 Hermes Agent 架構實作本機記憶與技能管理。
 
 執行 `npm run dev` 即可開始開發，不需要 Python、Docker、Redis 或獨立資料庫伺服器。本機模型可選用 Ollama，也可以直接連接雲端 API。
 
 ## Talaria 可以做什麼
 
-- 透過 Web 或已配對的 Telegram 帳號，與同一個持續保有記憶的助理對話。
+- 建立有各自角色、模型、工具、技能及獨立或共用記憶的 agent，透過 Web 對話或已配對的 Telegram 續聊。
 - 在 Web 串流顯示模型回覆，展開查看工具執行紀錄。
 - 讀取工作區檔案；取得寫入權限後，可修改檔案或保存知識。
 - 保存長期記憶、按需載入可重用技能，並搜尋過往對話。
@@ -26,7 +26,7 @@ Web 版面參考 [xAI 的 Grok Bot 官方設計](https://x.ai/news/designing-gro
 | Talaria                         | Web 與 Telegram 入口、任務生命週期、權限、本機資料保存、記憶與技能。          |
 | Hermes Agent                    | 作為記憶處理與技能按需載入的架構參考，由 Talaria 使用 TypeScript 在本機實作。 |
 
-兩個 Pi 套件目前固定使用 `0.87.0`。Pi 是唯一實際執行任務的 Agent 核心。Talaria 不安裝 Hermes Agent，也不連接 Hermes Gateway。目前的記憶實作採用其中部分架構概念，並非完整移植 Hermes。
+兩個 Pi 套件固定使用 `0.87.0`。Pi 仍是預設引擎，自建 agent 也可使用 `deepagents` 或 `@openai/agents`，共用 Talaria 的工具、權限與長期記憶。Talaria 不安裝 Hermes Agent，也不連接 Hermes Gateway；記憶實作採用部分架構概念，並非完整移植 Hermes。
 
 ```text
 Web 瀏覽器 ── HTTP / NDJSON ──┐
@@ -35,7 +35,7 @@ Telegram ───── 長輪詢 ────────┤
                          共用任務服務
                           ├─ 歷史、進度、取消
                           ├─ 記憶與技能索引
-                          ├─ pi-agent-core → pi-ai → 模型
+                          ├─ agent 快照 → Pi / Deep Agents / OpenAI SDK → 模型
                           ├─ 受權限控制的本機工具
                           └─ 原子寫入的 JSON 儲存
 ```
@@ -56,6 +56,26 @@ npm run dev
 在 **Bot 設定**連接模型並儲存，下一次任務就會使用新設定，不需重新啟動。尚未設定模型時，可在輸入框的 **任務選項**選擇 **示範模式**，體驗不呼叫 API 的預先編寫串流回覆。
 
 開發指令會一起啟動伺服器與前端建置。修改檔案後，瀏覽器資源會重新編譯，後端則自動重啟；前端更新後請重新整理瀏覽器。
+
+## 建立 Agent
+
+開啟 **我的 Agents → 建立 Agent**，設定名稱、角色指令、執行引擎、供應商、模型 ID、工具、技能與記憶範圍。儲存後按 **開始對話** 即可試聊，也可從輸入框的任務選項選擇 agent。
+
+| 引擎              | 模型連線                                | 執行方式                                                                          |
+| ----------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
+| Pi                | OpenAI、Anthropic、Ollama、自訂相容 API | 既有 Talaria 執行迴圈與工具                                                       |
+| Deep Agents       | OpenAI、Anthropic、Ollama、自訂相容 API | 規劃、內部子任務、虛擬筆記與框架摘要                                              |
+| OpenAI Agents SDK | OpenAI、Ollama、自訂相容 API            | SDK 執行迴圈；OpenAI 使用 Responses，其餘使用 Chat Completions；停用 SDK 追蹤上傳 |
+
+所有引擎都在 Node.js 執行，不需要 Python 服務、LangSmith 部署或資料庫伺服器。npm 依賴會增加，引擎模組則按需載入。模型需支援工具與串流。每個 agent 保存自己的供應商與模型選擇，金鑰與端點網址共用 Bot 設定。
+
+獨立記憶與歷史搜尋限於該 agent；共用 agent 使用 Talaria 的共用記憶與共用對話搜尋。Agent 可讀取勾選的共用技能與自己建立的技能。工作區檔案仍共用，擁有者可從管理介面查看所有知識；這不是多使用者隔離。
+
+建立後固定記憶範圍。編輯只影響之後建立的對話，既有對話保留設定快照。封存會保留記憶與既有對話。Telegram `/new` 使用預設 Talaria，`/resume` 則沿用自建對話的 agent。
+
+Deep Agents 內建檔案系統使用對話內的虛擬狀態，不存取主機檔案。真實檔案使用 `workspace_list_files`、`workspace_read_file` 與 `workspace_write_file`，沿用 Talaria 權限。虛擬筆記與待辦會在成功完成時保存。真實寫入與長期知識保存仍需勾選工具及開啟本次寫入權限，不啟用 shell backend。
+
+目前沒有視覺化工作流程／交接編輯器或跨引擎協作。UI 尚未設定 OpenAI SDK handoffs；Deep Agents 可透過繼承工具權限的內部子任務進行委派。
 
 ## 模型連線
 
@@ -81,7 +101,7 @@ npm run dev
 
 Talaria 不會安裝 Ollama 或下載模型。此連接器只接受本機回送 HTTP 網址，讀取模型清單時會排除雲端模型，不需要 API key。目前已使用 `qwen3.5:9b` 進行本機整合測試。
 
-連接器會要求關閉思考模式，並將輸出上限設為 2,048 tokens。其上下文中繼資料為 8,192 tokens，實際上下文設定由 Ollama 控制。
+Pi 連接器要求關閉思考模式，輸出上限為 2,048 tokens，上下文中繼資料為 8,192 tokens；實際上下文由 Ollama 控制。另兩套連接器輸出上限為 4,096 tokens，也透過 `reasoning_effort: none` 關閉 Ollama 思考模式。
 
 ### 自訂 OpenAI 相容 API
 
@@ -177,12 +197,12 @@ Windows 也可將官方執行檔放在 `.tools/cloudflared.exe`，專案會自�
 
 模型會在取得寫入權限後判斷是否保存知識。目前沒有背景學習程序、自動記憶去重或相關性排序。記憶依儲存順序加入上下文，放不進預算的項目會跳過。技能描述直接取自內容開頭，並非模型生成的摘要。
 
-| 位置                  | 保存內容                                  |
-| --------------------- | ----------------------------------------- |
-| `.loom/state.json`    | 對話、Pi 執行紀錄、記憶與技能             |
-| `.loom/settings.json` | 模型設定與 API 金鑰                       |
-| `.loom/telegram.json` | Bot Token、擁有者配對、對話綁定與更新位置 |
-| `workspace/`          | Agent 檔案工具可存取的內容                |
+| 位置                  | 保存內容                                       |
+| --------------------- | ---------------------------------------------- |
+| `.loom/state.json`    | Agent 定義、對話設定快照、引擎狀態、記憶與技能 |
+| `.loom/settings.json` | 模型設定與 API 金鑰                            |
+| `.loom/telegram.json` | Bot Token、擁有者配對、對話綁定與更新位置      |
+| `workspace/`          | Agent 檔案工具可存取的內容                     |
 
 本機資料會在需要時建立，並已加入 Git 忽略清單。設定與 Token 以本機明文保存，設定 API 不會回傳機密值；支援的平台會以 0600 權限建立檔案。對話資料在單一伺服器程序內依序處理變更，並以原子替換方式寫入 JSON。
 
@@ -190,17 +210,17 @@ Windows 也可將官方執行檔放在 `.tools/cloudflared.exe`，專案會自�
 
 ## 目前範圍與限制
 
-- 單一本機擁有者與單一 Bot，尚未支援多使用者隔離、多 Bot 角色或雲端電腦。
+- 單一本機擁有者與單一 Telegram Bot，可建立多個 agent；尚未支援多使用者隔離或雲端電腦。
 - 伺服器綁定 `127.0.0.1`，檢查 Host／Origin，修改 API 需要指定標頭，並使用限制性 Content Security Policy。遠端存取請使用具登入保護的分享代理。
 - 檔案工具限於 `workspace/`，拒絕隱藏路徑、路徑穿越與符號連結，單檔內容上限為 256,000 bytes。不提供終端機執行，也不構成作業系統層級的沙箱。
-- 每次任務上限為五分鐘與十二次 Pi 模型回合。重啟後，中斷的任務會標記失敗，不會自動恢復。
-- 對話上下文尚未自動壓縮，過長的對話可能需要開啟新話題。
+- 每次任務上限為五分鐘。Pi 與 OpenAI SDK 為十二回合，Deep Agents 的圖執行遞迴上限為 48 步。重啟後，中斷任務標記失敗，不會自動恢復。
+- Pi 與 OpenAI SDK 尚未自動壓縮對話；Deep Agents 使用框架摘要，依模型調整上下文預算仍待完善。
 - JSON 儲存會載入完整狀態，每次變更也會重新寫入；同一資料目錄請只使用一個伺服器程序。
 - 尚未實作排程、瀏覽器／電腦控制、MCP 管理或多媒體輸入。
 
 ## 建議優化順序
 
-以下是根據目前程式整理的**改進建議，尚未實作**。
+以下是根據目前程式整理的**後續改進建議，尚未完整實作**。Deep Agents 已提供框架摘要，跨引擎一致的 token 預算仍待完善。
 
 | 優先順序 | 改進項目                                 | 預期效益                                                           |
 | -------- | ---------------------------------------- | ------------------------------------------------------------------ |
@@ -211,6 +231,10 @@ Windows 也可將官方執行檔放在 `.tools/cloudflared.exe`，專案會自�
 | 5        | 歷史分頁、資料驗證、版本遷移與備份       | 資料增加後仍能順暢操作並容易復原，維持簡單的 Node 啟動方式。       |
 
 ## 開發與驗證
+
+`npm run test:agents:ollama` 會以隔離暫存資料測試三套引擎的真實讀檔與續聊，接受 `OLLAMA_MODEL` 和 `OLLAMA_URL`。本機 Qwen 已透過三套引擎成功呼叫檔案工具，但真實測試也出現格式錯誤的工具呼叫、拒絕執行與錯稱沒有前文的回覆。可預期的 SDK 測試確認歷史有送出；不保證模型行為。測試會回報失敗，不會偷偷重試。
+
+Agent 測試另涵蓋建立／編輯驗證、設定快照、封存保留、記憶與技能隔離，以及三套實際 SDK 的 HTTP 串流與續聊。
 
 | 指令                   | 用途                                         |
 | ---------------------- | -------------------------------------------- |
@@ -234,6 +258,8 @@ Windows 也可將官方執行檔放在 `.tools/cloudflared.exe`，專案會自�
 ```text
 public/                瀏覽器 TypeScript、HTML 與 CSS
 server/agent.ts         Pi 執行整合與工具
+server/agents.ts        Agent 驗證與記憶／技能範圍
+server/engines/         Deep Agents 與 OpenAI SDK 轉接層
 server/context.ts      記憶與按需載入的技能上下文
 server/tasks.ts        共用任務生命週期
 server/app.ts          HTTP API 與串流
@@ -254,6 +280,8 @@ test/                  Node 測試套件
 ## 上游專案
 
 - [Pi](https://github.com/earendil-works/pi)：Agent 執行核心與模型抽象層。
+- [Deep Agents](https://docs.langchain.com/oss/javascript/deepagents/overview)：以任務規劃為主的 JavaScript Agent 框架。
+- [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/)：TypeScript Agent 執行引擎。
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent)：記憶與技能處理架構參考。
 
 Talaria 是獨立專案，與上述上游專案沒有隸屬關係。

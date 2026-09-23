@@ -16,13 +16,21 @@
     "format:check": "prettier --check .",
     "build": "npm run check && node scripts/build.ts",
     "test:ollama": "node scripts/test-ollama.ts",
+    "test:agents:ollama": "node scripts/test-agents-ollama.ts",
     "dev:share": "npm run check && node --env-file-if-exists=.env scripts/share.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.87.0",
     "@earendil-works/pi-ai": "0.87.0",
+    "@langchain/anthropic": "1.5.11",
+    "@langchain/core": "1.2.12",
+    "@langchain/openai": "1.5.13",
+    "@openai/agents": "0.18.0",
+    "deepagents": "1.14.0",
+    "langchain": "1.5.12",
     "markdown-it": "15.0.2",
-    "typebox": "1.3.27"
+    "typebox": "1.3.27",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "24.13.6",

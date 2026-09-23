@@ -14,6 +14,7 @@ import type {
   Session,
   RunEvent,
   RunResult,
+  AgentDefinition,
 } from "../shared/types.ts";
 import type { Store } from "./store.ts";
 import type { Workspace } from "./workspace.ts";
@@ -24,6 +25,7 @@ import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { buildContext, skillIndex } from "./context.ts";
+import { scopedState } from "./agents.ts";
 
 type ToolHandler = (
   args: Record<string, string>,
@@ -54,8 +56,18 @@ const tool = (
   label: name,
   description,
   parameters: schema(fields),
-  execute: async (_id, args, signal) =>
-    result(await run(args as Record<string, string>, signal)),
+  execute: async (_id, args, signal) => {
+    signal?.throwIfAborted();
+    if (
+      !args ||
+      typeof args !== "object" ||
+      fields.some(
+        (field) => typeof (args as Record<string, unknown>)[field] !== "string",
+      )
+    )
+      throw new Error("工具參數格式錯誤。");
+    return result(await run(args as Record<string, string>, signal));
+  },
 });
 
 export function configuration(env: Environment = process.env): Status {
@@ -85,6 +97,7 @@ export function configuration(env: Environment = process.env): Status {
 }
 
 export interface ToolOptions {
+  agent?: AgentDefinition;
   store: Store;
   workspace: Workspace;
   allowWrites: boolean;
@@ -102,7 +115,13 @@ export interface RunOptions extends PiOptions {
   session: Session;
 }
 
-export function createTools({ store, workspace, allowWrites }: ToolOptions) {
+export function createTools({
+  store,
+  workspace,
+  allowWrites,
+  agent,
+}: ToolOptions) {
+  const view = () => scopedState(store.state, agent);
   const writable =
     (fn: ToolHandler): ToolHandler =>
     async (...args) => {
@@ -115,7 +134,7 @@ export function createTools({ store, workspace, allowWrites }: ToolOptions) {
       "List reusable skill names, IDs and brief descriptions. Pass a query or empty string to list all.",
       ["query"],
       (a) =>
-        skillIndex(store.state)
+        skillIndex(view())
           .filter((s) =>
             (s.name + " " + s.description)
               .toLocaleLowerCase()
@@ -128,7 +147,7 @@ export function createTools({ store, workspace, allowWrites }: ToolOptions) {
       "Load the complete procedure for a skill ID from list_skills.",
       ["id"],
       (a) => {
-        const skill = store.state.skills.find((s) => s.id === a.id);
+        const skill = view().skills.find((s) => s.id === a.id);
         if (!skill) throw new Error("找不到技能。");
         return skill;
       },
@@ -141,8 +160,8 @@ export function createTools({ store, workspace, allowWrites }: ToolOptions) {
         const query = a.query.trim().toLocaleLowerCase();
         if (query.length < 2 || query.length > 200)
           throw new Error("查詢需為 2–200 字。");
-        return store.state.sessions
-          .flatMap((s) =>
+        return view()
+          .sessions.flatMap((s) =>
             s.messages
               .filter(
                 (m) =>
@@ -176,7 +195,9 @@ export function createTools({ store, workspace, allowWrites }: ToolOptions) {
         if (!a.content.trim() || a.content.length > 4000)
           throw new Error("記憶需為 1–4000 字。");
         await store.mutate((s) => {
-          const memory = s.memories.find((m) => m.id === a.id);
+          const memory = scopedState(s, agent).memories.find(
+            (m) => m.id === a.id,
+          );
           if (!memory) throw new Error("找不到記憶。");
           memory.content = a.content;
         });
@@ -207,6 +228,7 @@ export function createTools({ store, workspace, allowWrites }: ToolOptions) {
           throw new Error("記憶長度必須為 1–4000 字。");
         await store.mutate((s) =>
           s.memories.push({
+            ...(agent?.memoryScope === "private" ? { agentId: agent.id } : {}),
             id: randomUUID(),
             content: a.content,
             createdAt: new Date().toISOString(),
@@ -229,6 +251,7 @@ export function createTools({ store, workspace, allowWrites }: ToolOptions) {
           throw new Error("技能名稱或內容長度不符。");
         await store.mutate((s) =>
           s.skills.push({
+            ...(agent ? { agentId: agent.id } : {}),
             id: randomUUID(),
             name: a.name,
             content: a.content,
@@ -239,7 +262,20 @@ export function createTools({ store, workspace, allowWrites }: ToolOptions) {
       }),
     ),
   ];
-  return tools;
+  return agent ? tools.filter((t) => agent.tools.includes(t.name)) : tools;
+}
+
+export function agentContext(
+  store: Store,
+  allowWrites: boolean,
+  agent?: AgentDefinition,
+) {
+  return (
+    buildContext(scopedState(store.state, agent), allowWrites) +
+    (agent
+      ? `\nAgent name: ${agent.name}\nRole instructions:\n${agent.instructions}`
+      : "")
+  );
 }
 
 export async function runPi({
@@ -252,6 +288,7 @@ export async function runPi({
   signal,
   env = process.env,
   runtime,
+  agent: profile,
 }: PiOptions): Promise<RunResult> {
   const config = configuration(env);
   let models;
@@ -284,14 +321,14 @@ export async function runPi({
       );
     streamFn = models.streamSimple.bind(models);
   }
-  const context = buildContext(store.state, allowWrites);
+  const context = agentContext(store, allowWrites, profile);
   let turns = 0;
   const agent = new Agent({
     initialState: {
       systemPrompt: context,
       model,
       messages: session.piMessages || [],
-      tools: createTools({ store, workspace, allowWrites }),
+      tools: createTools({ store, workspace, allowWrites, agent: profile }),
     },
     streamFn,
     getApiKey: () =>
@@ -371,5 +408,9 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     return { text };
   }
   if (mode !== "pi") throw new Error("不支援的回覆模式。");
+  if (options.agent?.engine === "openai-agents")
+    return (await import("./engines/openai.ts")).runOpenAI(options);
+  if (options.agent?.engine === "deepagents")
+    return (await import("./engines/deep.ts")).runDeep(options);
   return runPi(options);
 }
