@@ -427,7 +427,7 @@ export class TelegramChannel {
       });
       await this.send(
         m,
-        "已綁定 Talaria。直接傳送任務即可開始；/new 開新對話，/stop 停止，/help 查看指令。",
+        "已綁定 Apsis。直接傳送任務即可開始；/new 開新對話，/stop 停止，/help 查看指令。",
         signal,
       );
       return;
@@ -436,7 +436,7 @@ export class TelegramChannel {
     if (command?.[1] === "where" && group) {
       await this.send(
         m,
-        "群組 ID：" + m.chat.id + "。請在 Talaria Web 設定這個 ID 後使用。",
+        "群組 ID：" + m.chat.id + "。請在 Apsis Web 設定這個 ID 後使用。",
         signal,
       );
       return;
@@ -488,7 +488,7 @@ export class TelegramChannel {
       if (!existing) {
         await this.send(
           m,
-          "找不到可接續的 Talaria 對話。請从 Web 複製續聊指令。",
+          "找不到可接續的 Apsis 對話。請从 Web 複製續聊指令。",
           signal,
         );
         return;

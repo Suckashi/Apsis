@@ -12,7 +12,7 @@ import type {
 } from "../shared/types.ts";
 
 const model = process.env.OLLAMA_MODEL || "qwen3.5:9b";
-const dir = await mkdtemp(join(tmpdir(), "talaria-engine-live-"));
+const dir = await mkdtemp(join(tmpdir(), "apsis-engine-live-"));
 const work = join(dir, "workspace");
 await mkdir(work);
 const token = "PROOF-" + Math.random().toString(36).slice(2, 10);

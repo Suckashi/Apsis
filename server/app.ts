@@ -166,7 +166,7 @@ export async function createApp({
       if (req.method === "GET" && path === "/api/storage/backup") {
         res.setHeader(
           "Content-Disposition",
-          'attachment; filename="talaria-backup.json"',
+          'attachment; filename="apsis-backup.json"',
         );
         return json(res, store.state);
       }
@@ -347,8 +347,7 @@ export async function createApp({
           if (running.has(id)) fail("請等待任務完成後再匯出。", 409);
           res.writeHead(200, {
             "Content-Type": "text/markdown; charset=utf-8",
-            "Content-Disposition":
-              'attachment; filename="talaria-' + id + '.md"',
+            "Content-Disposition": 'attachment; filename="apsis-' + id + '.md"',
           });
           return res.end(exportConversation(session));
         }

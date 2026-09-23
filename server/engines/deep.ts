@@ -45,7 +45,7 @@ export async function runDeep(options: RunOptions) {
             : {}),
         });
   // Built-in Deep Agents filesystem tools operate only on conversation state.
-  // Real workspace tools have distinct names and keep Talaria's permission checks.
+  // Real workspace tools have distinct names and keep Apsis's permission checks.
   const tools = createTools(options).map((t) =>
     tool(
       async (args) => {
@@ -77,7 +77,7 @@ export async function runDeep(options: RunOptions) {
         options.prompt,
         options.permissions,
       ) +
-      "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. Only workspace_* tools access real workspace files; use these when the user asks about their files. Never claim scratch writes modified the workspace. Long-term memory is managed only by Talaria remember/update_memory tools.",
+      "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. Only workspace_* tools access real workspace files; use these when the user asks about their files. Never claim scratch writes modified the workspace. Long-term memory is managed only by Apsis remember/update_memory tools.",
   });
   const previous = options.session.engineState as DeepState | undefined;
   const previousMessages = previous

@@ -151,7 +151,7 @@ export class TaskService {
       id: runId,
       sessionId: id,
       engine: session.mode === "demo" ? "demo" : session.agent?.engine || "pi",
-      agentName: session.agent?.name || "Talaria",
+      agentName: session.agent?.name || "Apsis",
       connectionId: session.agent?.connectionId,
       model: env.PI_MODEL || "",
       permissions: grants,
@@ -201,7 +201,7 @@ export class TaskService {
         });
       });
       controller.signal.throwIfAborted();
-      emit({ type: "activity", text: "Talaria 正在處理任務。" });
+      emit({ type: "activity", text: "Apsis 正在處理任務。" });
       const result = await this.runner({
         mode: session.mode,
         prompt,

@@ -177,7 +177,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       type: "activity",
       text: "示範流程：讀取本機記憶與技能（未呼叫 AI）",
     });
-    const text = `這是本機示範回覆，不是真實 AI 生成。\n\n你提出的任務：${prompt}\n\n## 我們可以一起做的事\n\n- 閱讀工作區檔案，理解你的專案。\n- 保存重要偏好與可重用的技能，讓下次對話接得上。\n- 在 Web 或已配對的 Telegram Bot 交辦任務。\n\n到「Bot 設定」連接模型，再從「任務選項」選擇 Talaria，就能開始真實對話。需要修改檔案或保存記憶時，請先開啟「對應的檔案／記憶／技能寫入權限」。`;
+    const text = `這是本機示範回覆，不是真實 AI 生成。\n\n你提出的任務：${prompt}\n\n## 我們可以一起做的事\n\n- 閱讀工作區檔案，理解你的專案。\n- 保存重要偏好與可重用的技能，讓下次對話接得上。\n- 在 Web 或已配對的 Telegram Bot 交辦任務。\n\n到「Bot 設定」連接模型，再從「任務選項」選擇 Apsis，就能開始真實對話。需要修改檔案或保存記憶時，請先開啟「對應的檔案／記憶／技能寫入權限」。`;
     for (const chunk of text.match(/.{1,14}|\n/gu) || []) {
       signal.throwIfAborted();
       emit({ type: "delta", text: chunk });

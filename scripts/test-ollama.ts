@@ -7,9 +7,9 @@ import assert from "node:assert/strict";
 import { createApp } from "../server/app.ts";
 const model = process.env.OLLAMA_MODEL || "qwen3.5:9b";
 const ollama = process.env.OLLAMA_URL || "http://127.0.0.1:11434";
-const dir = await mkdtemp(join(tmpdir(), "talaria-ollama-live-"));
+const dir = await mkdtemp(join(tmpdir(), "apsis-ollama-live-"));
 await mkdir(join(dir, "workspace"));
-const token = "TALARIA-" + Math.random().toString(36).slice(2, 10);
+const token = "APSIS-" + Math.random().toString(36).slice(2, 10);
 await writeFile(join(dir, "workspace", "probe.txt"), token);
 const { server } = await createApp({
   dataDir: join(dir, "data"),

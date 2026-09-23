@@ -12,7 +12,7 @@ import { compatibleUrl } from "../server/compatible.ts";
 import { createApp } from "../server/app.ts";
 
 test("compatible settings normalize custom paths, persist arbitrary models, isolate and rotate credentials", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-compatible-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-compatible-"));
   const settings = await new Settings(dir, {
     OPENAI_API_KEY: "official-secret",
   }).init();
@@ -152,7 +152,7 @@ test("saved compatible endpoint streams through real SDK, runs a tool, resumes a
     upstream.closeAllConnections();
     upstream.close();
   });
-  const dir = await mkdtemp(join(tmpdir(), "talaria-compatible-api-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-compatible-api-"));
   const workspace = join(dir, "work");
   await mkdir(workspace);
   await writeFile(join(workspace, "probe.txt"), "fixture-file-token");

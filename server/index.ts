@@ -6,7 +6,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535)
 const { server } = await createApp();
 server.listen(port, "127.0.0.1", () =>
   console.log(
-    "\n  Talaria  /  http://localhost:" +
+    "\n  Apsis  /  http://localhost:" +
       port +
       "\n  Node.js agent workspace · Ctrl+C to stop\n",
   ),

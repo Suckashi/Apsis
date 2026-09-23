@@ -1,12 +1,12 @@
-# Talaria
+# Apsis
 
 **English** | [繁體中文](README.zh-TW.md)
 
-A local-first personal AI workspace with a Web interface and a Telegram bot. Talaria uses **TypeScript and Node.js**, selectable Pi, Deep Agents and OpenAI Agents SDK runtimes, and a local memory architecture inspired by Hermes Agent.
+A local-first personal AI workspace with a Web interface and a Telegram bot. Apsis uses **TypeScript and Node.js**, selectable Pi, Deep Agents and OpenAI Agents SDK runtimes, and a local memory architecture inspired by Hermes Agent.
 
 Start development with `npm run dev`. Python, Docker, Redis, and a separate database server are not required. Ollama is optional for local models; cloud APIs can be used instead.
 
-## What Talaria does
+## What Apsis does
 
 - Create custom agents with separate instructions, model choices, tools, skills and private or shared memory; chat through Web or resume through paired Telegram.
 - Stream model replies and show expandable tool activity in Web conversations.
@@ -15,7 +15,7 @@ Start development with `npm run dev`. Python, Docker, Redis, and a separate data
 - Connect OpenAI, Anthropic, local Ollama, or a custom OpenAI-compatible API.
 - Use a compact messenger interface with dark, light, and system themes, mobile navigation, searchable history, Markdown, and code copying.
 
-The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/designing-grok-bot), while retaining Talaria's identity and capabilities. The application UI currently uses Traditional Chinese; this repository provides documentation in both languages.
+The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/designing-grok-bot), while retaining Apsis's identity and capabilities. The application UI currently uses Traditional Chinese; this repository provides documentation in both languages.
 
 ## Architecture and responsibilities
 
@@ -23,10 +23,10 @@ The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/desig
 | ------------------------------- | -------------------------------------------------------------------------------------------- |
 | `@earendil-works/pi-ai`         | Model providers, model abstraction, and streamed model responses.                            |
 | `@earendil-works/pi-agent-core` | The agent loop: ask the model, execute tools, return tool results, and continue.             |
-| Talaria                         | Web and Telegram interfaces, task lifecycle, permissions, local storage, memory, and skills. |
+| Apsis                           | Web and Telegram interfaces, task lifecycle, permissions, local storage, memory, and skills. |
 | Hermes Agent                    | A reference for memory handling and on-demand skills, implemented locally in TypeScript.     |
 
-Both Pi packages are pinned to `0.87.0`. Pi remains the default runtime; custom agents can also use `deepagents` or `@openai/agents`. Engine adapters share Talaria's tools, permissions and long-term memory. Talaria neither installs Hermes Agent nor connects to a Hermes Gateway. The memory implementation follows selected architectural ideas; it is not a complete port of Hermes.
+Both Pi packages are pinned to `0.87.0`. Pi remains the default runtime; custom agents can also use `deepagents` or `@openai/agents`. Engine adapters share Apsis's tools, permissions and long-term memory. Apsis neither installs Hermes Agent nor connects to a Hermes Gateway. The memory implementation follows selected architectural ideas; it is not a complete port of Hermes.
 
 ```text
 Web browser ── HTTP / run polling ──┐
@@ -45,8 +45,8 @@ Telegram ─── long polling ────┤
 Requires **Node.js 22.19 or later** and npm.
 
 ```sh
-git clone https://github.com/Suckashi/Talaria.git
-cd Talaria
+git clone https://github.com/Suckashi/Apsis.git
+cd Apsis
 npm ci
 npm run dev
 ```
@@ -63,17 +63,17 @@ Open **My Agents (我的 Agents) → Create Agent (建立 Agent)**. Start from a
 
 | Engine            | Model connections                                | Runtime behavior                                                                         |
 | ----------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| Pi                | OpenAI, Anthropic, Ollama, custom compatible API | Existing Talaria loop and tools                                                          |
+| Pi                | OpenAI, Anthropic, Ollama, custom compatible API | Existing Apsis loop and tools                                                            |
 | Deep Agents       | OpenAI, Anthropic, Ollama, custom compatible API | Planning, internal subagents, virtual scratch files and framework summarization          |
 | OpenAI Agents SDK | OpenAI, Ollama, custom compatible API            | SDK agent loop; OpenAI uses Responses, others use Chat Completions; SDK tracing disabled |
 
-All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a named model connection and model ID. Connections have independent URLs and credentials. Existing Bot settings remain available for default Talaria, Telegram and legacy agents.
+All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a named model connection and model ID. Connections have independent URLs and credentials. Existing Bot settings remain available for default Apsis, Telegram and legacy agents.
 
-Private memory and history retrieval are scoped to the agent. Shared agents use Talaria's shared memories and shared-conversation search. Agents see selected shared skills and skills they create themselves. Workspace files remain shared; the owner can inspect all knowledge in the management UI. This is not multi-user isolation.
+Private memory and history retrieval are scoped to the agent. Shared agents use Apsis's shared memories and shared-conversation search. Agents see selected shared skills and skills they create themselves. Workspace files remain shared; the owner can inspect all knowledge in the management UI. This is not multi-user isolation.
 
-Memory scope is fixed after creation. Edits affect new conversations only; existing conversations retain a configuration snapshot. Archiving preserves memory and existing conversations. Telegram `/new` uses default Talaria; `/resume` retains a custom conversation's agent.
+Memory scope is fixed after creation. Edits affect new conversations only; existing conversations retain a configuration snapshot. Archiving preserves memory and existing conversations. Telegram `/new` uses default Apsis; `/resume` retains a custom conversation's agent.
 
-Deep Agents' built-in filesystem uses conversation-local virtual state, never the host filesystem. Real files use `workspace_list_files`, `workspace_read_file`, and `workspace_write_file`, with Talaria's permissions. Virtual notes and todos persist on successful completion. Real writes and long-term knowledge require both tool selection and per-task write permission. No shell backend is enabled.
+Deep Agents' built-in filesystem uses conversation-local virtual state, never the host filesystem. Real files use `workspace_list_files`, `workspace_read_file`, and `workspace_write_file`, with Apsis's permissions. Virtual notes and todos persist on successful completion. Real writes and long-term knowledge require both tool selection and per-task write permission. No shell backend is enabled.
 
 There is no visual handoff/workflow editor or cross-engine delegation yet. OpenAI SDK handoffs are not configured by the UI. Deep Agents can delegate internally with inherited tools.
 
@@ -107,7 +107,7 @@ Configured means values are present. **Model connections → Test model** verifi
 3. Enter `http://127.0.0.1:11434`, or your local Ollama port.
 4. Use **Load installed models (讀取已安裝模型)**, select a model with tool support, and save.
 
-Talaria does not install Ollama or download models. This connector accepts loopback HTTP addresses only and filters cloud models from discovery. API keys are not required. `qwen3.5:9b` has been used for local integration testing.
+Apsis does not install Ollama or download models. This connector accepts loopback HTTP addresses only and filters cloud models from discovery. API keys are not required. `qwen3.5:9b` has been used for local integration testing.
 
 The Pi adapter requests thinking off and up to 2,048 output tokens. Its context metadata is 8,192 tokens; the actual context configuration is controlled by Ollama. The other adapters request up to 4,096 output tokens and also disable Ollama reasoning via `reasoning_effort: none`.
 
@@ -119,7 +119,7 @@ Choose **OpenAI-compatible API — custom (OpenAI 相容 API（自訂）)** and 
 - **Model:** the exact model ID supplied by the service. Custom names are accepted.
 - **API key:** the key for that endpoint. Leave it empty only when the service requires no authentication.
 
-Talaria appends `/chat/completions`. A pasted full Chat Completions URL is also normalized. The service and model must support SSE streaming and function tools. Responses-only and Azure-specific protocols are not implemented by this connector.
+Apsis appends `/chat/completions`. A pasted full Chat Completions URL is also normalized. The service and model must support SSE streaming and function tools. Responses-only and Azure-specific protocols are not implemented by this connector.
 
 The custom endpoint has its own credential. Leaving the key empty preserves it at the same URL. Changing the URL without supplying a replacement clears the previous key. For an unauthenticated service, the SDK sends a non-secret placeholder.
 
@@ -144,7 +144,7 @@ See [.env.example](.env.example) for configuration examples:
 
 ## Using the Web interface
 
-- The **＋** beside Talaria opens a new topic. It keeps saved memories and skills and creates a conversation when the first message is sent.
+- The **＋** beside Apsis opens a new topic. It keeps saved memories and skills and creates a conversation when the first message is sent.
 - The **＋** inside the input opens task options. File, memory and skill writes have independent switches, all off by default.
 - **Ctrl/Cmd + K** searches conversation titles and opens quick navigation. **Conversation history (對話紀錄)** expands the saved list.
 - On desktop, Enter sends and Shift+Enter adds a line. On mobile, Enter adds a line; use the send button or Ctrl/Cmd+Enter to send. IME confirmation does not submit.
@@ -163,11 +163,11 @@ Raw HTML in replies is not executed. Unsafe link schemes are blocked, and refere
 3. Once connected, generate a pairing code and privately send the displayed `/pair …` command to your bot. Codes expire after ten minutes and can be used once.
 4. Send a task. Its conversation appears in Web history, where you can inspect progress, stop it, or continue chatting.
 
-The bot shares Talaria's configured model, workspace, memories, and skills. Web conversations can also be resumed in a private bot chat using the conversation menu's Telegram resume command.
+The bot shares Apsis's configured model, workspace, memories, and skills. Web conversations can also be resumed in a private bot chat using the conversation menu's Telegram resume command.
 
 Supported commands: `/help`, `/new`, `/stop`, `/status`, and `/resume <conversation-id>` in private chats.
 
-Telegram uses outbound long polling and needs no public URL or tunnel. `npm run dev` starts an enabled bot alongside the Web server. Your computer and model must remain running. Existing webhooks or another polling process produce a visible conflict; Talaria does not remove another application's webhook.
+Telegram uses outbound long polling and needs no public URL or tunnel. `npm run dev` starts an enabled bot alongside the Web server. Your computer and model must remain running. Existing webhooks or another polling process produce a visible conflict; Apsis does not remove another application's webhook.
 
 Only one paired owner is supported. Unpaired users and unrelated group traffic are ignored. Unpairing or changing the token removes account bindings without deleting conversation history. Write permission for Telegram tasks is configured separately and defaults to off.
 
@@ -185,11 +185,11 @@ npm run dev:share
 
 On Windows, the project also detects the official executable at `.tools/cloudflared.exe`. This binary is not committed and is unnecessary for local development.
 
-The command reuses an existing Talaria server or starts one, then creates a password-protected proxy and a temporary Cloudflare URL. It prints the URL and random password and saves them in Git-ignored `.loom/share-connection.json`. Do not commit or share that file publicly.
+The command reuses an existing Apsis server or starts one, then creates a password-protected proxy and a temporary Cloudflare URL. It prints the URL and random password and saves them in Git-ignored `.loom/share-connection.json`. Do not commit or share that file publicly.
 
 Remote login grants **full owner access**, including model settings, conversations, and task execution. All application pages and APIs require authentication. Sessions use an HttpOnly, Secure, SameSite cookie and expire after eight hours; remote logout ends the session. The proxy checks the assigned hostname and request origin and limits failed logins. The Web UI polls progress and reply text by run ID; the legacy NDJSON API remains available.
 
-This uses Talaria's password authentication. A fixed domain and Cloudflare Access are separate setup work and are not provided by this command. Cloudflare carries the remote traffic; your computer must stay awake and online.
+This uses Apsis's password authentication. A fixed domain and Cloudflare Access are separate setup work and are not provided by this command. Cloudflare carries the remote traffic; your computer must stay awake and online.
 
 Ctrl+C closes sharing. An existing development server stays running; one started by the sharing command stops with it. Restarting sharing replaces the URL, password, and sessions.
 
@@ -255,7 +255,7 @@ Agent tests also cover CRUD validation, configuration snapshots, archive preserv
 
 The automated suite exercises the real Pi SDK with deterministic model transports, custom API streaming and tool calls, memory injection, history, permissions, migration, cancellation, settings, sharing authentication, and Telegram pairing and delivery behavior. It uses an injected Telegram transport rather than a live account.
 
-`npm run test:ollama` requires a running local model. It uses an isolated temporary workspace to verify actual file-tool execution, streaming, and conversation recall. It defaults to `qwen3.5:9b`; override with `OLLAMA_MODEL` and `OLLAMA_URL`. It does not use existing Talaria data or cloud credentials.
+`npm run test:ollama` requires a running local model. It uses an isolated temporary workspace to verify actual file-tool execution, streaming, and conversation recall. It defaults to `qwen3.5:9b`; override with `OLLAMA_MODEL` and `OLLAMA_URL`. It does not use existing Apsis data or cloud credentials.
 
 A [GitHub Actions template](docs/github-actions.yml.example) covers Windows/Linux and Node 22/24. It is a template, not an enabled workflow; copy it to `.github/workflows/ci.yml` to enable it with an appropriately authorized GitHub credential.
 
@@ -295,4 +295,4 @@ To add a tool, define it in `createTools()` in `server/tools.ts`, provide a sche
 - [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/): TypeScript agent runtime.
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent): reference for memory and skill architecture.
 
-Talaria is an independent project and is not affiliated with the upstream projects.
+Apsis is an independent project and is not affiliated with the upstream projects.

@@ -18,7 +18,7 @@ import { agentContext } from "../server/context.ts";
 import type { TaskRun, ToolOperation } from "../shared/types.ts";
 
 async function fixture(t: test.TestContext, runner?: AppOptions["runner"]) {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-product-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-product-"));
   const work = join(dir, "work");
   await mkdir(work);
   const app = await createApp({
@@ -174,7 +174,7 @@ test("write categories enforce independent grants and journal operations with kn
 });
 
 test("restart preserves completed operations and marks uncertain operations without replay", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-runs-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-runs-"));
   const runs = await new RunStore(dir).init();
   const run: TaskRun = {
     id: randomUUID(),
@@ -219,7 +219,7 @@ test("restart preserves completed operations and marks uncertain operations with
 });
 
 test("named credentials are isolated, endpoint changes clear keys, stale tests do not certify edited connections", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-connections-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-connections-"));
   const settings = await new Settings(dir, {
     OPENAI_API_KEY: "legacy-secret",
   }).init();
@@ -323,7 +323,7 @@ test("knowledge editing retains revisions, excludes disabled entries and confine
 });
 
 test("versioned storage migrates with backup and rejects corrupt data without overwriting it", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-schema-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-schema-"));
   const file = join(dir, "state.json");
   const old = JSON.stringify({ sessions: [], memories: [], skills: [] });
   await writeFile(file, old);

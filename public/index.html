@@ -8,7 +8,7 @@
     />
     <meta name="theme-color" content="#070707" />
     <meta name="color-scheme" content="light dark" />
-    <title>Talaria — 你的 AI 夥伴</title>
+    <title>Apsis — 你的 AI 夥伴</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
     <script type="module" src="/app.js"></script>
@@ -132,11 +132,11 @@
       ></button>
       <aside id="sidebar" class="sidebar" aria-label="Bot 與對話">
         <div class="brand-row">
-          <a class="brand" href="#chat" aria-label="Talaria 首頁"
+          <a class="brand" href="#chat" aria-label="Apsis 首頁"
             ><span class="brand-mark"
               ><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <use href="#i-logo"></use></svg></span
-            >Talaria</a
+            >Apsis</a
           >
           <button
             id="new-session"
@@ -170,7 +170,7 @@
             ><i class="presence-dot"></i></span
           ><span class="bot-card-copy"
             ><span class="bot-card-title"
-              ><strong>Talaria</strong><time id="bot-time"></time></span
+              ><strong>Apsis</strong><time id="bot-time"></time></span
             ><small id="bot-preview">準備好，隨時聊聊。</small></span
           >
         </button>
@@ -291,7 +291,7 @@
               ><i class="presence-dot"></i
             ></span>
             <div>
-              <strong id="page-name">Talaria</strong
+              <strong id="page-name">Apsis</strong
               ><span id="bot-status" role="status">正在連接你的夥伴…</span>
             </div>
           </div>
@@ -344,13 +344,13 @@
         <section id="chat-view" class="view chat-layout">
           <div class="conversation">
             <div class="conversation-heading">
-              <span id="session-title">與 Talaria 的對話</span>
+              <span id="session-title">與 Apsis 的對話</span>
             </div>
             <div
               id="messages"
               class="messages"
               role="log"
-              aria-label="與 Talaria 的訊息"
+              aria-label="與 Apsis 的訊息"
               aria-live="polite"
             >
               <template id="welcome-template"
@@ -362,7 +362,7 @@
                         <use href="#i-bot"></use></svg
                     ></span>
                     <div>
-                      <h1>Talaria</h1>
+                      <h1>Apsis</h1>
                       <span>你的個人 Bot</span>
                     </div>
                   </div>
@@ -407,13 +407,13 @@
                 ><span id="draft-status"></span>
               </div>
               <form id="chat-form" class="composer">
-                <label class="sr-only" for="prompt">傳訊息給 Talaria</label
+                <label class="sr-only" for="prompt">傳訊息給 Apsis</label
                 ><textarea
                   id="prompt"
                   aria-describedby="draft-status"
                   rows="1"
                   maxlength="16000"
-                  placeholder="傳訊息給 Talaria"
+                  placeholder="傳訊息給 Apsis"
                   disabled
                   required
                 ></textarea>
@@ -435,12 +435,12 @@
                         ><span>回覆模式</span
                         ><select id="mode" aria-label="回覆模式" disabled>
                           <option value="demo">示範模式</option>
-                          <option value="pi">Talaria</option>
+                          <option value="pi">Apsis</option>
                         </select></label
                       ><label class="mode-select"
                         ><span>Agent</span
                         ><select id="agent-select" aria-label="選擇 Agent">
-                          <option value="">Talaria · 預設</option>
+                          <option value="">Apsis · 預設</option>
                         </select></label
                       ><button
                         class="text-button"
@@ -524,12 +524,12 @@
           <aside
             id="workspace-panel"
             class="context-panel"
-            aria-label="Talaria 工作區"
+            aria-label="Apsis 工作區"
             hidden
           >
             <div class="panel-heading">
               <div>
-                <h2>Talaria 的工作區</h2>
+                <h2>Apsis 的工作區</h2>
               </div>
               <button
                 id="close-workspace"
@@ -550,7 +550,7 @@
                     <use href="#i-bot"></use></svg
                 ></span>
                 <div>
-                  <strong id="workspace-model">Talaria</strong
+                  <strong id="workspace-model">Apsis</strong
                   ><small id="pi-state">正在連接…</small>
                 </div>
               </div>
@@ -594,7 +594,7 @@
             <p class="workspace-footnote">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
                 <use href="#i-shield"></use></svg
-              >資料保存在執行 Talaria 的電腦。
+              >資料保存在執行 Apsis 的電腦。
             </p>
           </aside>
         </section>
@@ -602,7 +602,7 @@
           <span class="eyebrow">讓我們更了解彼此</span>
           <h1>長期記憶</h1>
           <p class="view-description">
-            保留偏好、專案背景與重要決策，Talaria 會在下次對話時參考。
+            保留偏好、專案背景與重要決策，Apsis 會在下次對話時參考。
           </p>
           <details class="entry-compose">
             <summary>
@@ -628,7 +628,7 @@
           <span class="eyebrow">把好方法，變成你的日常</span>
           <h1>技能庫</h1>
           <p class="view-description">
-            把有效的做法整理成指引，讓 Talaria 在不同對話中重複使用。
+            把有效的做法整理成指引，讓 Apsis 在不同對話中重複使用。
           </p>
           <details class="entry-compose">
             <summary>
@@ -675,8 +675,8 @@
                 aria-label="Agents 清單"
               ></div>
               <p class="field-help">
-                預設 Talaria 與 Telegram 新對話沿用 Bot 設定。自建 agent 可從
-                Web 開始，或以 /resume 在 Telegram 續聊。
+                預設 Apsis 與 Telegram 新對話沿用 Bot 設定。自建 agent 可從 Web
+                開始，或以 /resume 在 Telegram 續聊。
               </p>
             </div>
             <form
@@ -768,7 +768,7 @@
                 <label for="agent-memory">記憶範圍</label
                 ><select id="agent-memory">
                   <option value="private">獨立記憶 · 僅此 Agent 使用</option>
-                  <option value="shared">共用記憶 · 與 Talaria 共用</option>
+                  <option value="shared">共用記憶 · 與 Apsis 共用</option>
                 </select>
                 <p class="field-help">
                   建立後固定記憶範圍，避免意外公開獨立記憶。工作區檔案仍共用。
@@ -889,7 +889,7 @@
           </p>
           <div class="settings-heading">
             <div>
-              <span class="eyebrow">YOUR TALARIA</span>
+              <span class="eyebrow">YOUR APSIS</span>
               <h1>Bot 設定</h1>
             </div>
             <span class="settings-label">本機儲存 · 即時生效</span>
@@ -906,8 +906,8 @@
                     <use href="#i-logo"></use></svg
                 ></span>
                 <div>
-                  <h2>Talaria 模型</h2>
-                  <p>選擇 Talaria 思考與工作的模型</p>
+                  <h2>Apsis 模型</h2>
+                  <p>選擇 Apsis 思考與工作的模型</p>
                 </div>
                 <span class="setting-number">01</span>
               </div>
@@ -1025,7 +1025,7 @@
                   >@BotFather</a
                 >
                 建立自己的 Bot，再貼上 Token。完成配對後，就能在 Telegram 和
-                Talaria 聊天。
+                Apsis 聊天。
               </p>
               <div class="settings-step"><b>1</b>連接你的 Telegram Bot</div>
               <fieldset id="telegram-fields" disabled>

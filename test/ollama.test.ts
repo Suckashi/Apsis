@@ -18,7 +18,7 @@ import {
 } from "../server/ollama.ts";
 
 test("local Ollama settings preserve cloud keys and normalize loopback URLs", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-ollama-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-ollama-"));
   const settings = await new Settings(dir, {
     OPENAI_API_KEY: "cloud-secret",
     ANTHROPIC_API_KEY: "other-secret",
@@ -85,7 +85,7 @@ test("model discovery reports installed local models and protects its HTTP route
   assert.deepEqual(await discoverOllama(url), [
     { id: "qwen3.5:9b", name: "qwen3.5:9b" },
   ]);
-  const dir = await mkdtemp(join(tmpdir(), "talaria-ollama-api-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-ollama-api-"));
   const { server } = await createApp({
     dataDir: join(dir, "data"),
     workspaceDir: join(dir, "work"),
@@ -158,7 +158,7 @@ test("Pi uses real OpenAI-compatible SSE transport for Ollama without forwarding
   ollama.listen(0, "127.0.0.1");
   await once(ollama, "listening");
   t.after(() => ollama.close());
-  const dir = await mkdtemp(join(tmpdir(), "talaria-ollama-stream-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-ollama-stream-"));
   const result = await runPi({
     prompt: "hello",
     session: {},

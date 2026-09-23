@@ -267,7 +267,7 @@ test("HTTP chat streams, saves history, rejects cross-origin and invalid payload
   assert.equal(exported.status, 200);
   assert.match(
     exported.headers.get("content-disposition")!,
-    /attachment; filename="talaria-/,
+    /attachment; filename="apsis-/,
   );
   const markdown = await exported.text();
   assert.ok(markdown.includes(saved.messages[1].content));

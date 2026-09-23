@@ -159,7 +159,7 @@ try {
       )
         .then(() => {
           console.log(
-            `\nTalaria 遠端網址：${url}\n分享密碼：${password}\n登入有效 8 小時；Ctrl+C 關閉分享。重新啟動會更換網址與密碼。\n`,
+            `\nApsis 遠端網址：${url}\n分享密碼：${password}\n登入有效 8 小時；Ctrl+C 關閉分享。重新啟動會更換網址與密碼。\n`,
           );
         })
         .catch((error) => {

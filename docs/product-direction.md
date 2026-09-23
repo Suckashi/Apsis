@@ -1,8 +1,8 @@
-# Talaria 的產品方向
+# Apsis 的產品方向
 
 ## 已確認的方向
 
-Talaria 是自己的 bot 產品。使用體驗參考使用者所說的「Grok bot」，底層架構借鏡 Hermes Agent，模型與工具執行沿用 Pi 的 Node.js runtime。
+Apsis 是自己的 bot 產品。使用體驗參考使用者所說的「Grok bot」，底層架構借鏡 Hermes Agent，模型與工具執行沿用 Pi 的 Node.js runtime。
 
 開發環境維持 TypeScript、Node.js 與 `npm run dev`。使用核心能力不應要求另外部署 Python Hermes 或提供 Hermes gateway。這是產品方向修正；下述目標尚未全部實作。
 
@@ -10,7 +10,7 @@ Talaria 是自己的 bot 產品。使用體驗參考使用者所說的「Grok bo
 
 ## 目標分工
 
-- **入口**：Web UI 與後續確定的平台 adapter，把訊息送入同一個 Talaria 核心。
+- **入口**：Web UI 與後續確定的平台 adapter，把訊息送入同一個 Apsis 核心。
 - **對話與任務管理**：識別使用者、對話與工作區，載入歷史，管理執行狀態、取消與結果回傳。
 - **上下文組裝**：組合 Agent 身分、精簡的使用者偏好與專案記憶、技能索引及目前任務。完整技能在需要時讀取。
 - **Pi runtime**：連接 Ollama 或雲端模型，執行模型選擇工具、取得結果、繼續處理直到回覆的循環。
@@ -42,4 +42,4 @@ Telegram 使用一次性配對碼綁定單一擁有者。只有配對帳號可�
 - [Hermes Persistent Memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/)：持久記憶、使用者資訊與歷史對話查找。
 - [Hermes Skills System](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills/)：先讀技能索引，按需取得完整流程。
 
-Talaria 將用 Node.js／TypeScript 實作適合自身產品的能力；上述參考不表示與 Hermes 的工具、檔案格式或 runtime 完全相容。
+Apsis 將用 Node.js／TypeScript 實作適合自身產品的能力；上述參考不表示與 Hermes 的工具、檔案格式或 runtime 完全相容。

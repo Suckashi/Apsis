@@ -1,12 +1,12 @@
-# Talaria
+# Apsis
 
 [English](README.md) | **繁體中文**
 
-Talaria 是優先在本機運作的個人 AI 工作區，提供 Web 介面與 Telegram Bot。專案使用 **TypeScript 與 Node.js**，可選擇 Pi、Deep Agents 與 OpenAI Agents SDK 執行任務，並參考 Hermes Agent 架構實作本機記憶與技能管理。
+Apsis 是優先在本機運作的個人 AI 工作區，提供 Web 介面與 Telegram Bot。專案使用 **TypeScript 與 Node.js**，可選擇 Pi、Deep Agents 與 OpenAI Agents SDK 執行任務，並參考 Hermes Agent 架構實作本機記憶與技能管理。
 
 執行 `npm run dev` 即可開始開發，不需要 Python、Docker、Redis 或獨立資料庫伺服器。本機模型可選用 Ollama，也可以直接連接雲端 API。
 
-## Talaria 可以做什麼
+## Apsis 可以做什麼
 
 - 建立有各自角色、模型、工具、技能及獨立或共用記憶的 agent，透過 Web 對話或已配對的 Telegram 續聊。
 - 在 Web 串流顯示模型回覆，展開查看工具執行紀錄。
@@ -15,18 +15,18 @@ Talaria 是優先在本機運作的個人 AI 工作區，提供 Web 介面與 Te
 - 連接 OpenAI、Anthropic、本機 Ollama 或自訂 OpenAI 相容 API。
 - 使用通訊軟體式介面，包含深色、淺色、系統外觀、手機導覽、歷史搜尋、Markdown 與程式碼複製。
 
-Web 版面參考 [xAI 的 Grok Bot 官方設計](https://x.ai/news/designing-grok-bot)，保留 Talaria 自己的識別與功能。目前應用程式介面使用繁體中文，專案文件提供英文與繁體中文兩版。
+Web 版面參考 [xAI 的 Grok Bot 官方設計](https://x.ai/news/designing-grok-bot)，保留 Apsis 自己的識別與功能。目前應用程式介面使用繁體中文，專案文件提供英文與繁體中文兩版。
 
 ## 架構與分工
 
-| 元件                            | 負責內容                                                                      |
-| ------------------------------- | ----------------------------------------------------------------------------- |
-| `@earendil-works/pi-ai`         | 模型供應商連接、統一模型介面與串流回覆。                                      |
-| `@earendil-works/pi-agent-core` | Agent 執行循環：詢問模型、執行工具、回傳工具結果，再繼續完成任務。            |
-| Talaria                         | Web 與 Telegram 入口、任務生命週期、權限、本機資料保存、記憶與技能。          |
-| Hermes Agent                    | 作為記憶處理與技能按需載入的架構參考，由 Talaria 使用 TypeScript 在本機實作。 |
+| 元件                            | 負責內容                                                                    |
+| ------------------------------- | --------------------------------------------------------------------------- |
+| `@earendil-works/pi-ai`         | 模型供應商連接、統一模型介面與串流回覆。                                    |
+| `@earendil-works/pi-agent-core` | Agent 執行循環：詢問模型、執行工具、回傳工具結果，再繼續完成任務。          |
+| Apsis                           | Web 與 Telegram 入口、任務生命週期、權限、本機資料保存、記憶與技能。        |
+| Hermes Agent                    | 作為記憶處理與技能按需載入的架構參考，由 Apsis 使用 TypeScript 在本機實作。 |
 
-兩個 Pi 套件固定使用 `0.87.0`。Pi 仍是預設引擎，自建 agent 也可使用 `deepagents` 或 `@openai/agents`，共用 Talaria 的工具、權限與長期記憶。Talaria 不安裝 Hermes Agent，也不連接 Hermes Gateway；記憶實作採用部分架構概念，並非完整移植 Hermes。
+兩個 Pi 套件固定使用 `0.87.0`。Pi 仍是預設引擎，自建 agent 也可使用 `deepagents` 或 `@openai/agents`，共用 Apsis 的工具、權限與長期記憶。Apsis 不安裝 Hermes Agent，也不連接 Hermes Gateway；記憶實作採用部分架構概念，並非完整移植 Hermes。
 
 ```text
 Web 瀏覽器 ── HTTP / run polling ──┐
@@ -45,8 +45,8 @@ Telegram ───── 長輪詢 ────────┤
 需要 **Node.js 22.19 或更新版本**與 npm。
 
 ```sh
-git clone https://github.com/Suckashi/Talaria.git
-cd Talaria
+git clone https://github.com/Suckashi/Apsis.git
+cd Apsis
 npm ci
 npm run dev
 ```
@@ -63,17 +63,17 @@ npm run dev
 
 | 引擎              | 模型連線                                | 執行方式                                                                          |
 | ----------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
-| Pi                | OpenAI、Anthropic、Ollama、自訂相容 API | 既有 Talaria 執行迴圈與工具                                                       |
+| Pi                | OpenAI、Anthropic、Ollama、自訂相容 API | 既有 Apsis 執行迴圈與工具                                                         |
 | Deep Agents       | OpenAI、Anthropic、Ollama、自訂相容 API | 規劃、內部子任務、虛擬筆記與框架摘要                                              |
 | OpenAI Agents SDK | OpenAI、Ollama、自訂相容 API            | SDK 執行迴圈；OpenAI 使用 Responses，其餘使用 Chat Completions；停用 SDK 追蹤上傳 |
 
-所有引擎都在 Node.js 執行，不需要 Python 服務、LangSmith 部署或資料庫伺服器。npm 依賴會增加，引擎模組則按需載入。模型需支援工具與串流。每個 agent 選擇命名模型連線與模型 ID；各連線獨立保存網址與金鑰。原有 Bot 設定仍供預設 Talaria、Telegram 與舊版 agent 使用。
+所有引擎都在 Node.js 執行，不需要 Python 服務、LangSmith 部署或資料庫伺服器。npm 依賴會增加，引擎模組則按需載入。模型需支援工具與串流。每個 agent 選擇命名模型連線與模型 ID；各連線獨立保存網址與金鑰。原有 Bot 設定仍供預設 Apsis、Telegram 與舊版 agent 使用。
 
-獨立記憶與歷史搜尋限於該 agent；共用 agent 使用 Talaria 的共用記憶與共用對話搜尋。Agent 可讀取勾選的共用技能與自己建立的技能。工作區檔案仍共用，擁有者可從管理介面查看所有知識；這不是多使用者隔離。
+獨立記憶與歷史搜尋限於該 agent；共用 agent 使用 Apsis 的共用記憶與共用對話搜尋。Agent 可讀取勾選的共用技能與自己建立的技能。工作區檔案仍共用，擁有者可從管理介面查看所有知識；這不是多使用者隔離。
 
-建立後固定記憶範圍。編輯只影響之後建立的對話，既有對話保留設定快照。封存會保留記憶與既有對話。Telegram `/new` 使用預設 Talaria，`/resume` 則沿用自建對話的 agent。
+建立後固定記憶範圍。編輯只影響之後建立的對話，既有對話保留設定快照。封存會保留記憶與既有對話。Telegram `/new` 使用預設 Apsis，`/resume` 則沿用自建對話的 agent。
 
-Deep Agents 內建檔案系統使用對話內的虛擬狀態，不存取主機檔案。真實檔案使用 `workspace_list_files`、`workspace_read_file` 與 `workspace_write_file`，沿用 Talaria 權限。虛擬筆記與待辦會在成功完成時保存。真實寫入與長期知識保存仍需勾選工具及開啟本次寫入權限，不啟用 shell backend。
+Deep Agents 內建檔案系統使用對話內的虛擬狀態，不存取主機檔案。真實檔案使用 `workspace_list_files`、`workspace_read_file` 與 `workspace_write_file`，沿用 Apsis 權限。虛擬筆記與待辦會在成功完成時保存。真實寫入與長期知識保存仍需勾選工具及開啟本次寫入權限，不啟用 shell backend。
 
 目前沒有視覺化工作流程／交接編輯器或跨引擎協作。UI 尚未設定 OpenAI SDK handoffs；Deep Agents 可透過繼承工具權限的內部子任務進行委派。
 
@@ -107,7 +107,7 @@ Deep Agents 內建檔案系統使用對話內的虛擬狀態，不存取主機�
 3. 填入 `http://127.0.0.1:11434`，或你使用的本機 Ollama 連接埠。
 4. 點選 **讀取已安裝模型**，選擇支援工具呼叫的模型並儲存。
 
-Talaria 不會安裝 Ollama 或下載模型。此連接器只接受本機回送 HTTP 網址，讀取模型清單時會排除雲端模型，不需要 API key。目前已使用 `qwen3.5:9b` 進行本機整合測試。
+Apsis 不會安裝 Ollama 或下載模型。此連接器只接受本機回送 HTTP 網址，讀取模型清單時會排除雲端模型，不需要 API key。目前已使用 `qwen3.5:9b` 進行本機整合測試。
 
 Pi 連接器要求關閉思考模式，輸出上限為 2,048 tokens，上下文中繼資料為 8,192 tokens；實際上下文由 Ollama 控制。另兩套連接器輸出上限為 4,096 tokens，也透過 `reasoning_effort: none` 關閉 Ollama 思考模式。
 
@@ -119,7 +119,7 @@ Pi 連接器要求關閉思考模式，輸出上限為 2,048 tokens，上下文�
 - **模型**：服務提供的完整模型 ID，可使用自訂名稱。
 - **API key**：此端點的金鑰；只有不需要驗證的服務才可留空。
 
-Talaria 會在網址後接上 `/chat/completions`，也能正規化直接貼上的完整 Chat Completions 網址。服務與模型必須支援 SSE 串流和函式工具呼叫；此連接器未實作僅提供 Responses 的服務或 Azure 專用協定。
+Apsis 會在網址後接上 `/chat/completions`，也能正規化直接貼上的完整 Chat Completions 網址。服務與模型必須支援 SSE 串流和函式工具呼叫；此連接器未實作僅提供 Responses 的服務或 Azure 專用協定。
 
 自訂端點的金鑰獨立保存。同一網址下，金鑰留空會保留原值；更換網址卻未提供新金鑰時，會清除舊金鑰。免驗證服務會由 SDK 傳送不含機密的占位值。
 
@@ -144,7 +144,7 @@ UI 設定保存在 `.loom/settings.json`，優先於環境變數。移除金鑰�
 
 ## Web 介面操作
 
-- Talaria 名稱旁的 **＋** 用於開啟新話題。已保存的記憶與技能會保留，第一則訊息送出時才建立對話。
+- Apsis 名稱旁的 **＋** 用於開啟新話題。已保存的記憶與技能會保留，第一則訊息送出時才建立對話。
 - 輸入框內的 **＋** 開啟任務選項；檔案、記憶、技能的寫入權限分別勾選，預設全部關閉。
 - **Ctrl/Cmd + K** 可搜尋對話標題或快速前往功能；**對話紀錄**可展開已保存的清單。
 - 桌機按 Enter 傳送、Shift+Enter 換行；手機按 Enter 換行，可使用傳送按鈕或 Ctrl/Cmd+Enter 送出。中文輸入法選字確認不會直接送出。
@@ -163,11 +163,11 @@ UI 設定保存在 `.loom/settings.json`，優先於環境變數。移除金鑰�
 3. 連線成功後產生配對碼，將畫面上的 `/pair …` 指令私訊給 Bot。配對碼十分鐘後失效，且只能使用一次。
 4. 傳送任務後，可在 Web 歷史紀錄看到該對話、查看進度、停止任務或繼續聊天。
 
-Bot 共用 Talaria 設定的模型、工作區、記憶與技能。也能透過對話選單中的 Telegram 續聊指令，在私訊中繼續 Web 對話。
+Bot 共用 Apsis 設定的模型、工作區、記憶與技能。也能透過對話選單中的 Telegram 續聊指令，在私訊中繼續 Web 對話。
 
 支援的指令：`/help`、`/new`、`/stop`、`/status`，以及私訊中的 `/resume <conversation-id>`。
 
-Telegram 使用對外長輪詢，不需要公開網址或 Tunnel。`npm run dev` 會一起啟動已啟用的 Bot 與 Web 服務。電腦與模型需持續運作。若 Bot 已設定 webhook 或有其他輪詢程序，介面會顯示衝突；Talaria 不會刪除其他應用程式的 webhook。
+Telegram 使用對外長輪詢，不需要公開網址或 Tunnel。`npm run dev` 會一起啟動已啟用的 Bot 與 Web 服務。電腦與模型需持續運作。若 Bot 已設定 webhook 或有其他輪詢程序，介面會顯示衝突；Apsis 不會刪除其他應用程式的 webhook。
 
 目前只支援一位已配對的擁有者，未配對使用者與不相關群組訊息會被忽略。解除配對或更換 Token 會移除帳號綁定，但不會刪除對話。Telegram 任務的寫入權限獨立設定，預設關閉。
 
@@ -185,11 +185,11 @@ npm run dev:share
 
 Windows 也可將官方執行檔放在 `.tools/cloudflared.exe`，專案會自動偵測。此檔案不會提交至 Git，本機開發也不需要它。
 
-指令會沿用既有的 Talaria 伺服器，或自行啟動一個，再建立密碼保護的代理與臨時 Cloudflare 網址。網址與隨機密碼會顯示在終端機，並保存在已被 Git 忽略的 `.loom/share-connection.json`。請勿將此檔案公開或提交。
+指令會沿用既有的 Apsis 伺服器，或自行啟動一個，再建立密碼保護的代理與臨時 Cloudflare 網址。網址與隨機密碼會顯示在終端機，並保存在已被 Git 忽略的 `.loom/share-connection.json`。請勿將此檔案公開或提交。
 
 遠端登入取得的是**完整擁有者權限**，包含模型設定、對話與任務執行。所有應用程式頁面與 API 都需要登入。登入狀態使用 HttpOnly、Secure、SameSite Cookie，八小時後過期，也可透過遠端登出結束。代理會檢查指定主機名稱、請求來源，並限制登入失敗次數。Web 以任務 ID 輪詢進度與回覆；舊版 NDJSON API 仍保留。
 
-此功能使用 Talaria 的密碼驗證。固定網域與 Cloudflare Access 需要另外設定，不包含在此指令內。遠端流量會經過 Cloudflare，電腦需保持喚醒並連上網路。
+此功能使用 Apsis 的密碼驗證。固定網域與 Cloudflare Access 需要另外設定，不包含在此指令內。遠端流量會經過 Cloudflare，電腦需保持喚醒並連上網路。
 
 按 Ctrl+C 可停止分享。原本就存在的開發伺服器會繼續執行；由分享指令啟動的伺服器則會一起停止。重新啟動分享會更換網址、密碼與所有登入狀態。
 
@@ -255,7 +255,7 @@ Agent 測試另涵蓋建立／編輯驗證、設定快照、封存保留、記�
 
 自動化測試使用實際 Pi SDK 與可預期的模型傳輸模擬，涵蓋自訂 API 串流與工具呼叫、記憶注入、歷史、權限、資料遷移、取消、設定、分享驗證，以及 Telegram 配對與傳送行為。Telegram 使用注入的測試傳輸層，不會操作真實帳號。
 
-`npm run test:ollama` 需要正在執行的本機模型。它會使用隔離的暫存工作區驗證真實讀檔工具、串流與對話記憶，預設模型為 `qwen3.5:9b`，可透過 `OLLAMA_MODEL` 與 `OLLAMA_URL` 更改。不會使用既有 Talaria 資料或雲端金鑰。
+`npm run test:ollama` 需要正在執行的本機模型。它會使用隔離的暫存工作區驗證真實讀檔工具、串流與對話記憶，預設模型為 `qwen3.5:9b`，可透過 `OLLAMA_MODEL` 與 `OLLAMA_URL` 更改。不會使用既有 Apsis 資料或雲端金鑰。
 
 [GitHub Actions 範本](docs/github-actions.yml.example) 包含 Windows／Linux 與 Node 22／24。這是尚未啟用的範本；如需啟用，請使用具備對應 GitHub 權限的憑證，將它複製到 `.github/workflows/ci.yml`。
 
@@ -295,4 +295,4 @@ test/                  Node 測試套件
 - [OpenAI Agents SDK](https://openai.github.io/openai-agents-js/)：TypeScript Agent 執行引擎。
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent)：記憶與技能處理架構參考。
 
-Talaria 是獨立專案，與上述上游專案沒有隸屬關係。
+Apsis 是獨立專案，與上述上游專案沒有隸屬關係。

@@ -34,7 +34,7 @@ const state: {
 };
 const labels: Record<string, string> = {
   demo: "示範模式",
-  pi: "Talaria",
+  pi: "Apsis",
 };
 let navigating = false;
 let detachRun = false;
@@ -276,6 +276,7 @@ const composer = initComposer($("#prompt"), () =>
   $("#chat-form").requestSubmit(),
 );
 function draftKey() {
+  // Retain the existing key so Apsis can restore pre-rename drafts.
   return "talaria-draft:" + (state.session?.id || "new");
 }
 function saveDraft() {
@@ -404,7 +405,7 @@ function showView(view: string) {
     );
   $("#page-name").textContent =
     {
-      chat: "Talaria",
+      chat: "Apsis",
       memories: "長期記憶",
       skills: "技能庫",
       settings: "Bot 設定",
@@ -620,7 +621,7 @@ function renderConversation() {
   activeReply = undefined;
   if (!state.session) {
     renderWelcome();
-    $("#session-title").textContent = "與 Talaria 的新話題";
+    $("#session-title").textContent = "與 Apsis 的新話題";
     $("#background-stop").hidden = true;
     $("#resume-bot").hidden = true;
     updateMode();
@@ -672,7 +673,7 @@ function renderConversation() {
 function updateMode() {
   const mode = $("#mode").value as Mode;
   const agent = state.session?.agent || agentsUI.selected();
-  const name = agent?.name || "Talaria";
+  const name = agent?.name || "Apsis";
   if (state.view === "chat") $("#page-name").textContent = name;
   $("#workspace-model").textContent =
     `${agent?.model || state.status.model || "尚未設定"} · ${agent?.memoryScope === "private" ? "獨立記憶" : "共用記憶"}`;
@@ -695,7 +696,7 @@ function updateMode() {
       ? "示範模式 · 不會呼叫 AI，也不會消耗 API 額度"
       : agent
         ? `${agent.name} · ${engineLabels[agent.engine]} · ${agent.memoryScope === "private" ? "獨立記憶" : "共用記憶"}`
-        : "Talaria · 自動選用工具與技能，與 bot 共用記憶；預設僅讀取工作區。");
+        : "Apsis · 自動選用工具與技能，與 bot 共用記憶；預設僅讀取工作區。");
 }
 async function loadSession(id: string) {
   if (state.busy || navigating) return;
@@ -833,8 +834,7 @@ function finishTrace(content: HTMLElement | undefined, failed = false) {
   const records = [...trace.querySelectorAll(".activity-item")];
   const lastAction = records
     .findLast(
-      (item) =>
-        item.textContent && item.textContent !== "Talaria 正在處理任務。",
+      (item) => item.textContent && item.textContent !== "Apsis 正在處理任務。",
     )
     ?.textContent?.replace(/^正在/, "")
     .replace(/…$/, "")
@@ -1153,7 +1153,7 @@ $("#memory-form").addEventListener("submit", async (event) => {
     await post("memories", { content: $("#memory-content").value });
     $("#memory-form").reset();
     await refresh();
-    toast("記憶已儲存，Talaria 下次執行時生效。");
+    toast("記憶已儲存，Apsis 下次執行時生效。");
   } catch (cause) {
     const e = asError(cause);
     toast(e.message);
@@ -1231,7 +1231,7 @@ const agentsUI = createAgentsUI(api, toast, async (agent) => {
   $("#mode").value = "pi";
   renderWelcome();
   updateMode();
-  $("#session-title").textContent = agent?.name || "Talaria";
+  $("#session-title").textContent = agent?.name || "Apsis";
   $("#prompt").focus();
 });
 $<HTMLSelectElement>("#agent-select").addEventListener("change", async () => {
@@ -1240,7 +1240,7 @@ $<HTMLSelectElement>("#agent-select").addEventListener("change", async () => {
   agentsUI.select(selected);
   $("#mode").value = "pi";
   renderWelcome();
-  $("#session-title").textContent = selected?.name || "Talaria";
+  $("#session-title").textContent = selected?.name || "Apsis";
   updateMode();
 });
 const telegramUI = createTelegramUI(api, toast);
@@ -1361,7 +1361,7 @@ initCommandPalette(
       {
         id: "new",
         label: "開啟新話題",
-        hint: "相同的 Talaria，新的開始",
+        hint: "相同的 Apsis，新的開始",
         group: "快速前往",
         keywords: "new chat topic",
         disabled: locked,
@@ -1370,7 +1370,7 @@ initCommandPalette(
       {
         id: "chat",
         label: "回到對話",
-        hint: "與 Talaria 繼續聊聊",
+        hint: "與 Apsis 繼續聊聊",
         group: "快速前往",
         keywords: "chat home",
         run: () => {
@@ -1393,7 +1393,7 @@ initCommandPalette(
         ["agents", "我的 Agents", "角色、工具與記憶範圍", "agents"],
         ["connections", "模型連線", "管理端點與測試模型", "connections models"],
         ["runs", "任務紀錄", "背景工作與操作結果", "runs tasks"],
-        ["memories", "長期記憶", "管理 Talaria 記得的事", "memory"],
+        ["memories", "長期記憶", "管理 Apsis 記得的事", "memory"],
         ["skills", "技能庫", "保存與整理可重用的方法", "skills"],
         [
           "settings",

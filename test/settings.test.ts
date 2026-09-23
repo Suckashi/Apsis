@@ -15,7 +15,7 @@ import { createApp } from "../server/app.ts";
 import { runPi } from "../server/agent.ts";
 import { Store } from "../server/store.ts";
 import { Workspace } from "../server/workspace.ts";
-const temporary = () => mkdtemp(join(tmpdir(), "talaria-settings-"));
+const temporary = () => mkdtemp(join(tmpdir(), "apsis-settings-"));
 const pi = (extra = {}) => ({
   provider: "openai",
   model: "gpt-4.1-mini",

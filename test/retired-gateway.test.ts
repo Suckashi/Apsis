@@ -11,7 +11,7 @@ import { createApp } from "../server/app.ts";
 import { createTools } from "../server/agent.ts";
 
 test("retired gateway conversations migrate without losing messages, transcripts, memories or skills", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-migrate-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-migrate-"));
   const original = {
     sessions: ["hermes", "hybrid"].map((mode, i) => ({
       id: String(i),
@@ -45,7 +45,7 @@ test("retired gateway conversations migrate without losing messages, transcripts
 });
 
 test("retired settings are ignored and removed on save while active credentials survive", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-retired-settings-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-retired-settings-"));
   await writeFile(
     join(dir, "settings.json"),
     JSON.stringify({
@@ -75,7 +75,7 @@ test("retired settings are ignored and removed on save while active credentials 
 });
 
 test("HTTP and tools no longer expose gateway execution", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-retired-api-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-retired-api-"));
   const app = await createApp({
     dataDir: join(dir, "data"),
     workspaceDir: join(dir, "work"),

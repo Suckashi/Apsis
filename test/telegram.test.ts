@@ -26,7 +26,7 @@ async function until(check: () => boolean) {
   }
 }
 async function fixture(t: TestContext, runner?: AppOptions["runner"]) {
-  const directory = await mkdtemp(join(tmpdir(), "talaria-bot-"));
+  const directory = await mkdtemp(join(tmpdir(), "apsis-bot-"));
   const calls: { method: string; params: Record<string, unknown> }[] = [];
   const runs: Parameters<NonNullable<AppOptions["runner"]>>[0][] = [];
   const call: TelegramCall = async <T>(
@@ -37,7 +37,7 @@ async function fixture(t: TestContext, runner?: AppOptions["runner"]) {
   ) => {
     calls.push({ method, params });
     if (method === "getMe")
-      return { id: 99, username: "TalariaTestBot", is_bot: true } as T;
+      return { id: 99, username: "ApsisTestBot", is_bot: true } as T;
     if (method === "getWebhookInfo") return { url: "" } as T;
     if (method === "getUpdates") {
       if (params.offset === -1) return [] as T;
@@ -189,19 +189,19 @@ test("group replies require the paired sender, configured group and an explicit 
   await app.pair();
   const group = {
     chat: { id: -100123, type: "supergroup" },
-    entities: [{ type: "mention", offset: 0, length: 15 }],
+    entities: [{ type: "mention", offset: 0, length: "@ApsisTestBot".length }],
   };
-  await app.telegram.accept(app.message("@TalariaTestBot hello", 8, group));
+  await app.telegram.accept(app.message("@ApsisTestBot hello", 8, group));
   await app.telegram.accept(app.message("hello", 7, { chat: group.chat }));
   await app.telegram.accept(
-    app.message("@TalariaTestBot hello", 7, {
+    app.message("@ApsisTestBot hello", 7, {
       ...group,
       chat: { id: -999, type: "group" },
     }),
   );
   assert.equal(app.runs.length, 0);
   await app.telegram.accept(
-    app.message("@TalariaTestBot hello", 7, {
+    app.message("@ApsisTestBot hello", 7, {
       ...group,
       message_thread_id: 55,
     }),
@@ -215,7 +215,7 @@ test("group replies require the paired sender, configured group and an explicit 
     55,
   );
   await app.telegram.accept(
-    app.message("/resume@TalariaTestBot " + app.runs[0].session.id, 7, group),
+    app.message("/resume@ApsisTestBot " + app.runs[0].session.id, 7, group),
   );
   assert.equal(app.runs.length, 1);
 });
@@ -334,7 +334,7 @@ test("Hermes-inspired context loads full skills on demand and history search use
 });
 
 test("interrupted persisted tasks are marked failed on restart; long Telegram replies preserve Unicode", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-recovery-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-recovery-"));
   const store = await new Store(dir).init();
   await store.mutate((s) =>
     s.sessions.push({

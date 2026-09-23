@@ -61,7 +61,7 @@ export function createAgentsUI(
         ? "內建規劃、子任務與上下文整理；虛擬筆記獨立於真實工作區。"
         : engine === "openai-agents"
           ? "使用 OpenAI SDK 執行工具迴圈；此版支援 OpenAI、Ollama 與相容端點，追蹤資料不上傳。"
-          : "現有 Talaria 執行引擎，支援四種模型連線。";
+          : "現有 Apsis 執行引擎，支援四種模型連線。";
     if (changeModel && settings)
       field("model").value =
         provider.value === settings.pi.provider
@@ -125,7 +125,7 @@ export function createAgentsUI(
     if (snapshot) conversationSnapshot = snapshot;
     snapshot ||= conversationSnapshot;
     const value = select.value;
-    select.replaceChildren(new Option("Talaria · 預設", ""));
+    select.replaceChildren(new Option("Apsis · 預設", ""));
     for (const agent of agents)
       select.append(
         new Option(agent.name + " · " + engineLabels[agent.engine], agent.id),
@@ -140,7 +140,7 @@ export function createAgentsUI(
       roster.replaceChildren();
       for (const [id, name] of [
         ["all", "全部對話"],
-        ["", "Talaria"],
+        ["", "Apsis"],
         ...agents.map((a) => [a.id, a.name]),
       ]) {
         const button = document.createElement("button");
@@ -160,7 +160,7 @@ export function createAgentsUI(
       badge.className = "agent-engine-badge";
       badge.textContent = agent ? engineLabels[agent.engine] : "DEFAULT · PI";
       const name = document.createElement("h2");
-      name.textContent = agent?.name || "Talaria";
+      name.textContent = agent?.name || "Apsis";
       const description = document.createElement("p");
       description.textContent =
         agent?.description ||

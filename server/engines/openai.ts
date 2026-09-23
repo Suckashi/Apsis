@@ -23,7 +23,7 @@ export async function runOpenAI(options: RunOptions) {
   });
   const runner = new Runner({ modelProvider: provider, tracingDisabled: true });
   const agent = new Agent({
-    name: options.agent?.name || "Talaria",
+    name: options.agent?.name || "Apsis",
     instructions: agentContext(
       options.store,
       options.allowWrites,

@@ -35,7 +35,7 @@ const definition = {
   skillIds: ["starter"],
 };
 async function fixture(t: test.TestContext, env = {}) {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-agents-"));
+  const dir = await mkdtemp(join(tmpdir(), "apsis-agents-"));
   const work = join(dir, "work");
   await mkdir(work);
   await writeFile(join(work, "probe.txt"), "EVIDENCE-4521");

@@ -1,8 +1,8 @@
-# Talaria architecture
+# Apsis architecture
 
 [English README](../README.md) · [繁體中文說明](../README.zh-TW.md)
 
-Talaria is a single-owner, single-process TypeScript application. `npm run dev` starts the browser build and Node server. Optional models and remote sharing do not change the development entry point.
+Apsis is a single-owner, single-process TypeScript application. `npm run dev` starts the browser build and Node server. Optional models and remote sharing do not change the development entry point.
 
 ## Domain boundaries
 

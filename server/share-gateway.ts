@@ -7,11 +7,12 @@ import {
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
+// Keep the established wire name so rebranding does not invalidate login sessions.
 const cookieName = "__Host-talaria-share";
 const lifetime = 8 * 60 * 60 * 1000;
 const digest = (value: string) => createHash("sha256").update(value).digest();
 const loginPage = (error = "") =>
-  `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登入 Talaria</title><link rel="stylesheet" href="/__share/style.css"></head><body><main><div class="brand">⌘ Talaria</div><span class="eyebrow">YOUR PRIVATE WORKSPACE</span><h1>你的工作台，隨處可達。</h1><p>輸入本次分享密碼，連回你的 Talaria。</p><form method="post" action="/__share/login"><label for="password">分享密碼</label><input id="password" name="password" type="password" required maxlength="256" autocomplete="current-password" autofocus><p class="error" role="alert">${error}</p><button type="submit">登入工作台 →</button></form><small>登入有效 8 小時。停止分享後，這個入口就會關閉。</small></main></body></html>`;
+  `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登入 Apsis</title><link rel="stylesheet" href="/__share/style.css"></head><body><main><div class="brand">⌘ Apsis</div><span class="eyebrow">YOUR PRIVATE WORKSPACE</span><h1>你的工作台，隨處可達。</h1><p>輸入本次分享密碼，連回你的 Apsis。</p><form method="post" action="/__share/login"><label for="password">分享密碼</label><input id="password" name="password" type="password" required maxlength="256" autocomplete="current-password" autofocus><p class="error" role="alert">${error}</p><button type="submit">登入工作台 →</button></form><small>登入有效 8 小時。停止分享後，這個入口就會關閉。</small></main></body></html>`;
 
 export function createShareGateway({
   upstreamPort,

@@ -5,7 +5,7 @@ export function modeRequirement(
   status: Partial<Status>,
 ): string | null {
   if (mode === "pi" && !status.piReady)
-    return "先設定 Talaria 的模型（雲端 API 或本機 Ollama），就能開始真實任務。";
+    return "先設定 Apsis 的模型（雲端 API 或本機 Ollama），就能開始真實任務。";
   return null;
 }
 

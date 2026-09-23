@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createShareGateway } from "../server/share-gateway.ts";
 import { createApp } from "../server/app.ts";
-const origin = "https://talaria-test.trycloudflare.com";
+const origin = "https://apsis-test.trycloudflare.com";
 const password = "test-only-strong-random-password-12345";
 async function listen(server: Server) {
   server.listen(0, "127.0.0.1");
@@ -35,7 +35,7 @@ function call(
         port,
         path,
         method,
-        headers: { Host: "talaria-test.trycloudflare.com", ...headers },
+        headers: { Host: "apsis-test.trycloudflare.com", ...headers },
       },
       (res) => {
         let data = "";
@@ -89,7 +89,7 @@ test("share gateway fails closed, authenticates exact origin and strips forwarde
       await call(port, "/", {
         headers: {
           Host: "127.0.0.1:" + port,
-          "X-Forwarded-Host": "talaria-test.trycloudflare.com",
+          "X-Forwarded-Host": "apsis-test.trycloudflare.com",
         },
       })
     ).status,
@@ -145,8 +145,8 @@ test("share gateway fails closed, authenticates exact origin and strips forwarde
   );
 });
 
-test("authenticated remote requests preserve Talaria chat streaming, exports, and CSRF checks", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "talaria-share-"));
+test("authenticated remote requests preserve Apsis chat streaming, exports, and CSRF checks", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "apsis-share-"));
   const app = await createApp({
     dataDir: join(dir, "data"),
     workspaceDir: join(dir, "work"),
