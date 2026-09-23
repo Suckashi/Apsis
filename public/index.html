@@ -359,6 +359,23 @@
                 <span id="run-status" role="status"></span
                 ><span id="draft-status"></span>
               </div>
+              <div class="project-bar">
+                <label for="chat-project">專案</label>
+                <select id="chat-project" aria-label="對話專案">
+                  <option value="workspace">預設工作區</option>
+                </select>
+                <button id="project-add" type="button" class="quiet-button">
+                  加入專案
+                </button>
+                <button
+                  id="project-new-chat"
+                  type="button"
+                  class="quiet-button"
+                  hidden
+                >
+                  另開專案對話
+                </button>
+              </div>
               <form id="chat-form" class="composer">
                 <label class="sr-only" for="prompt">傳訊息給 Apsis</label
                 ><textarea
@@ -483,6 +500,7 @@
                   </svg>
                 </button>
               </div>
+              <p id="project-path" class="field-help"></p>
               <div id="files" class="file-list">正在讀取…</div>
             </div>
             <p class="workspace-footnote">
@@ -1123,5 +1141,32 @@
       </div>
     </dialog>
     <div id="toast" class="toast" role="alert" hidden></div>
+    <dialog id="project-dialog" class="project-dialog">
+      <form id="project-form">
+        <h2>加入專案資料夾</h2>
+        <p>填入執行 Apsis 的電腦上的既有資料夾。檔案工具與命令會從這裡開始。</p>
+        <label
+          >專案名稱<input
+            name="name"
+            required
+            maxlength="100"
+            placeholder="我的網站"
+        /></label>
+        <label
+          >完整資料夾路徑<input
+            name="path"
+            required
+            maxlength="4096"
+            placeholder="D:\Code\my-project"
+        /></label>
+        <p id="project-status" role="status"></p>
+        <div class="project-actions">
+          <button type="submit" class="primary">加入專案</button
+          ><button id="project-cancel" type="button" class="quiet-button">
+            取消
+          </button>
+        </div>
+      </form>
+    </dialog>
   </body>
 </html>

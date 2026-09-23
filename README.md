@@ -86,6 +86,12 @@ In **Model connections**, choose a service first, configure its endpoint and cre
 
 ## Background tasks and operation history
 
+**Projects:** choose a project above the composer, or use **加入專案** to register an existing absolute directory on the computer running Apsis. Each new conversation snapshots that directory; file tools, Shell and the file panel use it. Existing conversations without a project keep the default workspace. Use **另開專案對話** to change projects. A moved or missing directory fails closed instead of silently creating another folder. Project selection is not filesystem isolation for Shell; conversations sharing a project still share its files.
+
+**Results:** expand **查看操作結果** below a reply or operation history in Task history. New runs retain bounded tool output, unified patches for `write_file` / `edit_file`, and Shell commands and exit codes (including partial output on failure or cancellation). Each output/patch/command keeps up to 24,000 characters and marks truncation. Shell-driven file changes do not get automatic diffs. Older runs remain readable but cannot recover output that was never stored. “回合結束” means execution ended, not that every requested check passed.
+
+**Continuation:** **檢查並接續** prepares an editable message; review current permissions and send it. Any next message after failure, cancellation or restart receives a bounded, same-conversation journal excerpt from attempts since the latest completed run (up to eight attempts / 16,000 characters). All three engines are instructed to inspect current state before repeating actions. No commands are replayed automatically; successful native state remains the continuation baseline. This supplies evidence to the model, not a guarantee that it will correctly complete every remaining step.
+
 Tasks belong to the server. After sending, switch conversations or open settings directly; closing the tab or losing the network does not cancel a task. **Task history (任務紀錄)** shows status, output, tool names, targets, operation outcomes and provider-reported token usage, with 50 runs per page. Stop an active run or open its conversation from its card.
 
 The server and computer must remain running. Restart marks unfinished runs interrupted and started-but-unconfirmed operations unknown, without automatic replay. A new message creates a new run; inspect previous side effects first. Deep Agents usage covers available main-flow message statistics, not a complete subagent bill. No estimated prices are shown.

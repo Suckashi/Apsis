@@ -51,6 +51,7 @@ export async function runPi({
   source,
   recordOperation,
   probe,
+  executionContext,
 }: PiOptions): Promise<RunResult> {
   const config = configuration(env);
   const models = await ModelRuntime.create({
@@ -90,6 +91,7 @@ export async function runPi({
     profile,
     prompt,
     permissions,
+    executionContext,
   );
   const usage = { inputTokens: 0, outputTokens: 0 };
   let turns = 0;

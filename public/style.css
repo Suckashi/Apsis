@@ -1,3 +1,105 @@
+.project-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 4px 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.project-bar select {
+  flex: 1;
+  min-width: 0;
+  max-width: 240px;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+}
+.project-bar button {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.project-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.project-dialog::backdrop {
+  background: #0009;
+}
+.project-dialog p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+.project-dialog label {
+  display: block;
+  margin: 16px 0;
+}
+.project-dialog input {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+.project-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+.message-results {
+  margin: 10px 0;
+  font-size: 13px;
+}
+.run-evidence {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.run-evidence > p,
+.run-evidence small {
+  color: var(--muted);
+}
+.operation-evidence {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  margin: 8px 0;
+  min-width: 0;
+}
+.operation-evidence summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.operation-evidence pre {
+  max-height: 320px;
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.operation-evidence strong {
+  display: block;
+  margin-top: 12px;
+}
+#project-path {
+  overflow-wrap: anywhere;
+}
 .agent-layout {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.35fr);

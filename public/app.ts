@@ -1,4 +1,6 @@
 import { createManagement, knowledgeActions } from "./management.ts";
+import { createProjectsUI } from "./projects.ts";
+import { renderRunEvidence } from "./results.ts";
 import type {
   Mode,
   SessionView,
@@ -785,6 +787,34 @@ function renderConversation() {
       content.dataset.traceKey = m.id;
       for (const text of m.activity || []) addActivity(text, content, false);
       finishTrace(content, m.status === "error" || m.status === "failed");
+      if (m.runId) {
+        const results = document.createElement("details");
+        results.className = "message-results";
+        const summary = document.createElement("summary");
+        summary.textContent = "查看操作結果";
+        results.append(summary);
+        let loaded = false;
+        results.addEventListener("toggle", async () => {
+          if (!results.open || loaded) return;
+          loaded = true;
+          try {
+            results.append(
+              renderRunEvidence(await api<TaskRun>("runs/" + m.runId)),
+            );
+          } catch (e) {
+            loaded = false;
+            toast(asError(e).message);
+          }
+        });
+        content.after(results);
+      }
+      if (m.status === "error" && m === state.session.messages.at(-1)) {
+        const resume = document.createElement("button");
+        resume.className = "quiet-button";
+        resume.textContent = "檢查並接續";
+        resume.onclick = prepareResume;
+        content.closest(".message-body")!.append(resume);
+      }
     }
   }
   if (state.session.running && state.session.live) {
@@ -847,6 +877,7 @@ async function loadSession(id: string) {
     navigating = false;
   }
   await loadModelChoices(true);
+  await projectsUI.load();
   restoreDraft();
   $("#run-status").textContent = state.session?.running ? "任務執行中" : "";
   $("#allow-writes").checked = false;
@@ -858,6 +889,7 @@ async function loadSession(id: string) {
   preferences.set("loom-session", id);
   renderConversation();
   renderSessions();
+  await refreshFiles();
   showView("chat");
   if (state.session.running) toast("任務正在執行，此頁會自動更新進度。");
 }
@@ -979,13 +1011,14 @@ function finishTrace(content: HTMLElement | undefined, failed = false) {
     (failed
       ? "任務未完成"
       : lastAction
-        ? "已完成 · " + lastAction
-        : "工作完成") +
+        ? "回合結束 · " + lastAction
+        : "回合結束") +
     " · " +
     records.length +
     " 項紀錄";
 }
 function syncComposer() {
+  projectsUI.sync();
   const running = state.busy || !!state.session?.running;
   $("#send").disabled =
     !connected ||
@@ -1062,6 +1095,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
     };
     if (!state.session) {
       state.session = await post<SessionView>("sessions", {
+        projectId: projectsUI.selected(),
         mode: replyMode,
         agentId: replyMode === "pi" ? chosenAgent?.id : undefined,
         ...(replyMode === "pi" && !chosenAgent && modelChoice
@@ -1223,12 +1257,21 @@ $("#skill-form").addEventListener("submit", async (event) => {
   }
 });
 async function refreshFiles() {
-  const files = await api<WorkspaceFile[]>("files");
+  const query = state.session
+    ? "sessionId=" + encodeURIComponent(state.session.id)
+    : "projectId=" + encodeURIComponent(projectsUI.selected());
+  let files: WorkspaceFile[];
+  try {
+    files = await api<WorkspaceFile[]>("files?" + query);
+  } catch (e) {
+    $("#files").textContent = asError(e).message;
+    return;
+  }
   $("#files").textContent = files.length
     ? files
         .map((f) => (f.type === "directory" ? "▱ " : "▧ ") + f.name)
         .join("\n")
-    : "workspace/ 尚無檔案";
+    : "此專案尚無可顯示的檔案";
 }
 async function refreshKnowledge() {
   const [memories, skills] = await Promise.all([
@@ -1248,6 +1291,7 @@ async function refreshKnowledge() {
   $("#skill-count").textContent = String(skills.length);
 }
 async function refresh(preferDefault = false) {
+  await projectsUI.load();
   await agentsUI.load(state.session?.agent);
   const [status, sessions, memories, skills] = await Promise.all([
     api<Status>("status"),
@@ -1271,9 +1315,49 @@ async function refresh(preferDefault = false) {
 $("#refresh-files").addEventListener("click", () =>
   refreshFiles().catch((e: unknown) => toast(asError(e).message)),
 );
-const management = createManagement(api, toast, loadSession, async () => {
-  await refresh(true);
-});
+const projectsUI = createProjectsUI(
+  api,
+  () => state.session,
+  () => state.busy,
+  refreshFiles,
+  async () => {
+    await newSession(true);
+    projectsUI.sync();
+    await refreshFiles();
+    $<HTMLSelectElement>("#chat-project").focus();
+  },
+  toast,
+);
+function prepareResume() {
+  if (state.session?.running || state.busy) return;
+  if (state.session?.messages.at(-1)?.status !== "error") {
+    toast("這段對話後來已有新回覆，請直接描述接下來要做的事。");
+    return;
+  }
+  if ($("#prompt").value.trim()) {
+    toast("輸入框已有草稿，請先送出或清除；接續時會自動帶入中斷紀錄。");
+    return;
+  }
+  $("#prompt").value =
+    "請先核對上次未完成任務的檔案與命令結果，再接續尚未完成的工作；不要重複已完成的操作。";
+  saveDraft();
+  composer.resize();
+  $("#prompt").dispatchEvent(new Event("input", { bubbles: true }));
+  $("#prompt").focus();
+  toast("已準備接續訊息；請確認本次權限後送出。");
+}
+const management = createManagement(
+  api,
+  toast,
+  loadSession,
+  async () => {
+    await refresh(true);
+  },
+  async (id) => {
+    await loadSession(id);
+    prepareResume();
+  },
+);
 const agentsUI = createAgentsUI(api, toast, async (agent) => {
   if (state.busy) {
     toast("請先停止或等待任務完成。");

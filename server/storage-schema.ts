@@ -1,6 +1,13 @@
 import { z } from "zod";
+const projectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  path: z.string(),
+});
 export const runSchema = z
   .object({
+    project: projectSchema.optional(),
+    recoveryRunIds: z.array(z.string()).optional(),
     id: z.string().uuid(),
     sessionId: z.string(),
     engine: z.enum(["demo", "pi", "deepagents", "openai-agents"]),
@@ -32,6 +39,15 @@ export const runSchema = z
           mutating: z.boolean(),
           target: z.string().optional(),
           error: z.string().optional(),
+          evidence: z
+            .object({
+              command: z.string().optional(),
+              output: z.string().optional(),
+              patch: z.string().optional(),
+              exitCode: z.number().nullable().optional(),
+              truncated: z.boolean().optional(),
+            })
+            .optional(),
         })
         .passthrough(),
     ),
@@ -84,10 +100,12 @@ const knowledge = z
   .passthrough();
 export const storageSchema = z
   .object({
+    projects: z.array(projectSchema).optional(),
     schemaVersion: z.literal(1).optional(),
     sessions: z.array(
       z
         .object({
+          project: projectSchema.optional(),
           id: z.string(),
           title: z.string(),
           mode: z.enum(["pi", "demo", "hermes", "hybrid"]),

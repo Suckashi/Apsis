@@ -22,7 +22,11 @@ Per-conversation concurrency is rejected. Requests are not automatically retried
 
 Tools first persist a `started` record, execute, then persist `succeeded` or `failed`. If execution finishes but final logging fails, the result is `unknown`. A crash can occur between a side effect and its journal update, so the log is evidence, not an exactly-once guarantee. Restart marks active runs interrupted and outstanding operations unknown. It never replays them automatically. A completed conversation reply with the same run ID reconciles a crash between transcript and run finalization.
 
-Successful native state is retained for continuation. Failed/aborted partial state is not adopted. A subsequent user message starts a new run against the last successful native state; inspect the operation log and provide needed correction after a partial failure.
+Successful native state is retained for continuation. Failed/aborted partial state is not adopted. A subsequent user message starts a new run against the last successful native state plus a bounded journal excerpt from the same conversation since its latest completed run. This includes at most eight failed/cancelled/interrupted attempts in a 16,000-character JSON budget, newest first. All engines receive the excerpt as explicitly untrusted evidence with instructions to verify current state and honor current grants; nothing is automatically replayed. Recovery source IDs are saved on the new run. An execution marked completed ends this recovery window, even if the model did not fulfill every part of the user's objective.
+
+Operation evidence stores bounded text, Shell commands and exit codes, and unified patches for file write/edit tools. The active connection's known API keys are redacted before journal persistence. Each field is capped at 24,000 characters; truncation is visible. This is not general secret discovery or a Git change tracker. Shell writes may affect arbitrary files and have no automatic patch. Write tools join the SDK's per-file mutation queue; Shell commands and separate processes are outside that queue.
+
+Projects are a backward-compatible optional collection in the main store. Registration requires an existing absolute directory, canonicalizes it with realpath, and deduplicates roots. New conversations snapshot a project; legacy conversations without a snapshot use the original default workspace. The runtime and file-list endpoint resolve that snapshot and reject missing/repointed roots without creating them. The project is immutable for that conversation. Project selection does not isolate concurrent conversations or confine Shell. Telegram new conversations use the default project; resuming a Web conversation retains its project.
 
 ## Memory and permissions
 
@@ -42,7 +46,7 @@ The run journal is saved initially, at tool boundaries, and at completion. Live 
 
 SQLite is a suitable next storage adapter when indexed conversation retrieval, incremental writes or multiple processes become necessary. It is deliberately not added in this iteration: the current Node minimum, migration complexity and existing deployment should remain stable. No external database service is needed. Backups and schema validation are implemented now; a database migration and restore UI are not.
 
-Stop the server before copying `.loom/` and `workspace/` for a complete backup. The downloadable state snapshot excludes credential files and run journals but can still contain private transcript/knowledge content. Restore while stopped, after preserving a copy of current data. Only one server may write to a data directory.
+Stop the server before copying `.loom/`, `workspace/` and any registered project directories for a complete backup. Project registration stores paths, not copies of project files. The downloadable state snapshot excludes credential files and run journals but can still contain private transcript/knowledge content. Restore while stopped, after preserving a copy of current data. Only one server may write to a data directory.
 
 ## Verification boundary
 

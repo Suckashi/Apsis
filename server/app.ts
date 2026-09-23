@@ -259,6 +259,11 @@ export async function createApp({
           return json(res, { ok: true });
         }
       }
+      if (path === "/api/projects") {
+        if (req.method === "GET") return json(res, tasks.projects.list());
+        if (req.method === "POST")
+          return json(res, await tasks.projects.add(await body(req)), 201);
+      }
       if (path === "/api/runs" && req.method === "GET") {
         const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
         const all = tasks.runs.list(
@@ -404,6 +409,9 @@ export async function createApp({
           "web",
           agent,
           selection,
+          input.projectId === undefined
+            ? undefined
+            : string(input.projectId, 100, "專案"),
         );
         return json(res, session, 201);
       }
@@ -571,8 +579,28 @@ export async function createApp({
           return json(res, { ok: true });
         }
       }
-      if (path === "/api/files" && req.method === "GET")
-        return json(res, await workspace.list());
+      if (path === "/api/files" && req.method === "GET") {
+        const sessionId = url.searchParams.get("sessionId");
+        const session = sessionId
+          ? store.state.sessions.find((s) => s.id === sessionId)
+          : undefined;
+        if (sessionId && !session) fail("找不到對話。", 404);
+        const selected = await tasks.projects.workspace(
+          session || {
+            project: tasks.projects.get(
+              url.searchParams.get("projectId") || undefined,
+            ),
+          },
+        );
+        try {
+          return json(
+            res,
+            await selected.list(url.searchParams.get("path") || ""),
+          );
+        } catch (error) {
+          fail(asError(error).message, 400);
+        }
+      }
       fail("找不到此頁面。", 404);
     } catch (caught) {
       const error = asError(caught);

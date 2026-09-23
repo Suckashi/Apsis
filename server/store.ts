@@ -66,9 +66,13 @@ export class Store {
           // Keep the transcript and ID; future turns use the configured Pi model.
           if (legacyMode(session.mode)) session.mode = "pi";
           if (!session.messages.some((m) => m.status === "pending")) continue;
+          const interruptedRunId = session.messages.findLast(
+            (m) => m.status === "pending",
+          )?.runId;
           for (const message of session.messages)
             if (message.status === "pending") message.status = "failed";
           session.messages.push({
+            runId: interruptedRunId,
             id: randomUUID(),
             role: "assistant",
             content:

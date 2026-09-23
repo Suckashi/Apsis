@@ -296,6 +296,7 @@ for (const engine of ["pi", "deepagents", "openai-agents"] as const)
       JSON.stringify(requests[0].messages),
       /Specialist instruction/,
     );
+    assert.match(JSON.stringify(requests[0].messages), /Current project/);
     assert.doesNotMatch(
       JSON.stringify(requests[0].tools),
       /workspace_write_file|remember/,

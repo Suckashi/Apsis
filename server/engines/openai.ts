@@ -30,6 +30,7 @@ export async function runOpenAI(options: RunOptions) {
       options.agent,
       options.prompt,
       options.permissions,
+      options.executionContext,
     ),
     model: config.model,
     modelSettings: {

@@ -1,5 +1,10 @@
 import { Type, type TSchema } from "typebox";
 import { codingTools } from "./coding-tools.ts";
+import {
+  boundedEvidence,
+  ToolExecutionError,
+  type Evidence,
+} from "./evidence.ts";
 import { randomUUID } from "node:crypto";
 import { skillIndex } from "./context.ts";
 import { scopedState } from "./agents.ts";
@@ -185,12 +190,6 @@ export function createTools({
       workspace.read(a.path),
     ),
     tool(
-      "write_file",
-      "Create or replace a workspace file. Requires user-enabled writes.",
-      ["path", "content"],
-      writable((a) => workspace.write(a.path, a.content), "files"),
-    ),
-    tool(
       "remember",
       "Save a useful user preference or durable project fact. Never store credentials.",
       ["content"],
@@ -278,6 +277,11 @@ export function createTools({
         await recordOperation?.({
           ...operation,
           status: "succeeded",
+          evidence:
+            (output.details.evidence as Evidence | undefined) ||
+            boundedEvidence({
+              output: output.content.map((c) => c.text).join("\n"),
+            }),
           endedAt: new Date().toISOString(),
         });
         return output;
@@ -287,6 +291,8 @@ export function createTools({
           status: executed || t.name === "shell" ? "unknown" : "failed",
           endedAt: new Date().toISOString(),
           error: (error as Error).message,
+          evidence:
+            error instanceof ToolExecutionError ? error.evidence : undefined,
         });
         throw error;
       }

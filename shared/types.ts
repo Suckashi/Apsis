@@ -44,6 +44,7 @@ export interface ChatMessage {
   activity?: string[];
 }
 export interface Session {
+  project?: Project;
   runtimeState?: { engine: AgentEngine; version: 1; data: unknown };
   agent?: AgentDefinition;
   connectionId?: string;
@@ -74,6 +75,7 @@ export type SessionSummary = Omit<
   running: boolean;
 };
 export interface StoreState {
+  projects?: Project[];
   schemaVersion?: number;
   agents?: AgentDefinition[];
   sessions: Session[];
@@ -97,6 +99,13 @@ export interface RunPermissions {
   skills: boolean;
 }
 export interface ToolOperation {
+  evidence?: {
+    command?: string;
+    output?: string;
+    patch?: string;
+    exitCode?: number | null;
+    truncated?: boolean;
+  };
   id: string;
   name: string;
   status: "started" | "succeeded" | "failed" | "unknown";
@@ -107,6 +116,8 @@ export interface ToolOperation {
   error?: string;
 }
 export interface TaskRun {
+  project?: Project;
+  recoveryRunIds?: string[];
   id: string;
   sessionId: string;
   engine: AgentEngine | "demo";
@@ -122,6 +133,11 @@ export interface TaskRun {
   operations: ToolOperation[];
   error?: string;
   usage?: RunResult["usage"];
+}
+export interface Project {
+  id: string;
+  name: string;
+  path: string;
 }
 export interface ModelConnection {
   id: string;

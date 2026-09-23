@@ -7,6 +7,7 @@ import type {
 } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { renderRunEvidence, runStatuses } from "./results.ts";
 import {
   connectionModels,
   providerName,
@@ -48,6 +49,7 @@ export function createManagement(
   notify: (text: string) => void,
   open: (id: string) => Promise<void>,
   changed: () => Promise<void>,
+  resume: (id: string) => Promise<void>,
 ) {
   let connections: ModelConnection[] = [];
   let defaultChoice: { connectionId: string; model: string } | null = null;
@@ -439,16 +441,7 @@ export function createManagement(
   }
   let next: number | null = null;
   let loading = false;
-  const statuses: Record<string, string> = {
-    running: "執行中",
-    completed: "已完成",
-    failed: "失敗",
-    cancelled: "已停止",
-    interrupted: "服務重啟中斷",
-    started: "已開始",
-    succeeded: "成功",
-    unknown: "結果待確認",
-  };
+  const statuses = runStatuses;
   async function loadRuns(append = false) {
     if (loading) return;
     loading = true;
@@ -477,15 +470,7 @@ export function createManagement(
         card.append(preview);
         const details = el("details");
         details.append(el("summary", `操作紀錄 · ${run.operations.length} 項`));
-        if (!run.operations.length)
-          details.append(el("p", "尚無工具操作。", "field-help"));
-        for (const op of run.operations)
-          details.append(
-            el(
-              "p",
-              `${statuses[op.status]} · ${op.name}${op.target ? " · " + op.target : ""}${op.error ? " · " + op.error : ""}`,
-            ),
-          );
+        details.append(renderRunEvidence(run));
         card.append(details);
         if (run.usage)
           card.append(
@@ -496,6 +481,10 @@ export function createManagement(
           );
         const actions = el("div", "", "agent-card-actions");
         actions.append(button("開啟對話", () => open(run.sessionId), notify));
+        if (["failed", "cancelled", "interrupted"].includes(run.status))
+          actions.append(
+            button("檢查並接續", () => resume(run.sessionId), notify),
+          );
         if (run.status === "running")
           actions.append(
             button(

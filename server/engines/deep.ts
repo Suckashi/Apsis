@@ -78,6 +78,7 @@ export async function runDeep(options: RunOptions) {
         options.agent,
         options.prompt,
         options.permissions,
+        options.executionContext,
       ) +
       "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. workspace_* tools access real workspace files; use these when the user asks about their files. The separately granted shell tool executes on the host. Never claim scratch writes modified the workspace. Long-term memory is managed only by Apsis remember/update_memory tools.",
   });

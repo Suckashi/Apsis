@@ -44,6 +44,7 @@ export function agentContext(
   agent?: AgentDefinition,
   query = "",
   permissions?: RunPermissions,
+  executionContext = "",
 ) {
   return (
     buildContext(
@@ -54,6 +55,8 @@ export function agentContext(
     ) +
     (agent
       ? `\nAgent name: ${agent.name}\nRole instructions:\n${agent.instructions}`
-      : "")
+      : "") +
+    "\n" +
+    executionContext
   );
 }

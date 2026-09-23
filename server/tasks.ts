@@ -15,6 +15,8 @@ import { asError } from "../shared/errors.ts";
 import { RunStore } from "./runs.ts";
 import type { Connections } from "./connections.ts";
 import type { RunPermissions, TaskRun } from "../shared/types.ts";
+import { Projects } from "./projects.ts";
+import { recoveryContext } from "./recovery.ts";
 
 export type AgentRunner = typeof runAgent;
 export class TaskService {
@@ -24,6 +26,7 @@ export class TaskService {
   runner: AgentRunner;
   runs: RunStore;
   connections?: Connections;
+  projects: Projects;
   running = new Map<
     string,
     {
@@ -44,12 +47,14 @@ export class TaskService {
     this.settings = settings;
     this.runner = runner;
     this.runs = new RunStore(store.directory);
+    this.projects = new Projects(store, workspace);
   }
   async create(
     mode: Mode = "pi",
     source: Session["source"] = "web",
     agent?: AgentDefinition,
     selection?: ConnectionSelection,
+    projectId?: string,
   ) {
     const selected =
       mode === "pi" && !agent
@@ -63,6 +68,7 @@ export class TaskService {
           ?.provider
       : undefined;
     const session: Session = {
+      project: this.projects.get(projectId),
       id: randomUUID(),
       title: "新的對話",
       mode,
@@ -162,6 +168,7 @@ export class TaskService {
     }
     const userId = randomUUID();
     const run: TaskRun = {
+      project: session.project || this.projects.get(),
       id: runId,
       sessionId: id,
       engine: session.mode === "demo" ? "demo" : session.agent?.engine || "pi",
@@ -193,6 +200,9 @@ export class TaskService {
     };
     try {
       await initialSave;
+      const workspace = await this.projects.workspace(session);
+      const recovery = recoveryContext(this.runs, session);
+      run.recoveryRunIds = recovery.ids;
       if (session.agent?.connectionId) {
         if (!this.connections) throw new Error("模型連線服務尚未初始化。");
         env = this.connections.environment(
@@ -227,7 +237,8 @@ export class TaskService {
         prompt,
         session,
         store: this.store,
-        workspace: this.workspace,
+        workspace,
+        executionContext: `Current project: ${JSON.stringify(run.project)}. All relative file tools and shell start in ${JSON.stringify(workspace.root)}. A project directory is not an OS sandbox. Before reporting completion, distinguish actual tool results, checks performed and remaining unverified work.\n${recovery.context}`,
         allowWrites,
         emit,
         signal: controller.signal,
@@ -239,7 +250,27 @@ export class TaskService {
           const index = run.operations.findIndex((o) => o.id === operation.id);
           const safe = {
             ...operation,
-            error: operation.error ? redact(operation.error) : undefined,
+            error: operation.error
+              ? redact(operation.error).slice(0, 16000)
+              : undefined,
+            target: operation.target ? redact(operation.target) : undefined,
+            evidence: operation.evidence
+              ? {
+                  ...operation.evidence,
+                  command:
+                    operation.evidence.command === undefined
+                      ? undefined
+                      : redact(operation.evidence.command),
+                  output:
+                    operation.evidence.output === undefined
+                      ? undefined
+                      : redact(operation.evidence.output),
+                  patch:
+                    operation.evidence.patch === undefined
+                      ? undefined
+                      : redact(operation.evidence.patch),
+                }
+              : undefined,
           };
           if (index < 0) run.operations.push(safe);
           else run.operations[index] = safe;

@@ -10,6 +10,7 @@ import type {
 import type { Store } from "./store.ts";
 import type { Workspace } from "./workspace.ts";
 export interface ToolOptions {
+  executionContext?: string;
   probe?: { nonce: string; called: () => void };
   agent?: AgentDefinition;
   permissions?: RunPermissions;
