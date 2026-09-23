@@ -2,6 +2,52 @@ import MarkdownIt from "markdown-it";
 
 // Model output is untrusted: raw HTML stays text, and unsafe link schemes are rejected.
 const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });
+const codeLanguages: Record<string, string> = {
+  ts: "TypeScript",
+  typescript: "TypeScript",
+  tsx: "TSX",
+  js: "JavaScript",
+  javascript: "JavaScript",
+  jsx: "JSX",
+  html: "HTML",
+  css: "CSS",
+  json: "JSON",
+  md: "Markdown",
+  markdown: "Markdown",
+  bash: "Bash",
+  sh: "Shell",
+  shell: "Shell",
+  powershell: "PowerShell",
+  ps1: "PowerShell",
+  py: "Python",
+  python: "Python",
+  sql: "SQL",
+  yaml: "YAML",
+  yml: "YAML",
+  text: "純文字",
+  plaintext: "純文字",
+};
+
+// Re-rendering a streamed fence creates one complete block. Code stays escaped
+// text, so the copy action can read textContent without a second encoded payload.
+markdown.renderer.rules.fence = (tokens, index) => {
+  const token = tokens[index];
+  const language = markdown.utils
+    .unescapeAll(token.info)
+    .trim()
+    .split(/\s+/)[0];
+  const normalizedLanguage = language.toLowerCase();
+  const label = language
+    ? Object.hasOwn(codeLanguages, normalizedLanguage)
+      ? codeLanguages[normalizedLanguage]
+      : language
+    : "純文字";
+  const languageClass =
+    language && /^[a-z0-9_+-]+$/i.test(language)
+      ? ` class="language-${language}"`
+      : "";
+  return `<div class="code-block"><div class="code-header"><span class="code-language">${markdown.utils.escapeHtml(label)}</span><button class="copy-code" type="button" data-copy-code aria-label="複製程式碼">複製</button></div><pre tabindex="0" aria-label="程式碼，可左右捲動"><code${languageClass}>${markdown.utils.escapeHtml(token.content)}</code></pre></div>\n`;
+};
 markdown.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
   tokens[index].attrSet("target", "_blank");
   tokens[index].attrSet("rel", "noopener noreferrer");

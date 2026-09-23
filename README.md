@@ -6,6 +6,8 @@ A local-first assistant with **Web and Telegram bot entry points**, powered by P
 
 The Web interface is organized around one persistent Talaria bot: conversations with inline, expandable work records; shared memories and skills; and an on-demand workspace panel. The mobile layout keeps messages and the composer in view, with history and settings behind the navigation menu. **開啟新話題** keeps saved memory and skills, and creates a conversation only when the first message is sent. Model selection and write permission live under **任務選項**; credentials and Telegram pairing live in **Bot 設定**. This is a single-bot, single-owner product; multiple bots, hosted computers and scheduled routines are not implemented.
 
+The interface supports light, dark and system appearance, saved per browser. Use **Ctrl/Cmd + K** to find a conversation by title or jump to a feature. Desktop Enter sends; Shift+Enter adds a line. On mobile, Enter adds a line and the send button submits. Chinese IME confirmation does not submit. Code blocks have language labels and exact-text copy controls. Work records stay expanded while progress streams, and a lost connection preserves drafts and reconnects automatically. New topics use the configured model; demo mode remains available under **任務選項**.
+
 ## Quick start / 三個步驟
 
 Requires **Node.js 22.19+** (Node 24 LTS recommended) and npm.
