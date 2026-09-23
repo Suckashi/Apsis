@@ -645,7 +645,27 @@
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
                   <option value="ollama">Ollama（本機）</option>
+                  <option value="openai-compatible">
+                    OpenAI 相容 API（自訂）
+                  </option>
                 </select>
+                <div id="compatible-fields" class="local-model-fields" hidden>
+                  <label for="compatible-url">Base URL</label>
+                  <input
+                    id="compatible-url"
+                    type="url"
+                    maxlength="2048"
+                    placeholder="https://api.example.com/v1"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-describedby="compatible-url-help"
+                  />
+                  <small id="compatible-url-help" class="field-help"
+                    >填入服務提供的完整 API 基底網址（包含 /v1 等路徑）。使用
+                    Chat Completions
+                    格式。更換網址時，請重新填入該服務的金鑰。</small
+                  >
+                </div>
                 <div id="ollama-fields" class="local-model-fields" hidden>
                   <label for="ollama-url">Ollama 網址</label>
                   <input

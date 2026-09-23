@@ -1,4 +1,5 @@
 import { ollamaProvider, defaultOllamaUrl } from "./ollama.ts";
+import { compatibleProvider } from "./compatible.ts";
 import type {
   AgentMessage,
   AgentTool,
@@ -66,16 +67,20 @@ export function configuration(env: Environment = process.env): Status {
       ? "qwen3.5:9b"
       : provider === "anthropic"
         ? "claude-sonnet-4-6"
-        : "gpt-4.1-mini");
+        : provider === "openai-compatible"
+          ? ""
+          : "gpt-4.1-mini");
   return {
     provider,
     model,
     piReady: Boolean(
       provider === "ollama"
         ? true
-        : provider === "anthropic"
-          ? env.ANTHROPIC_API_KEY
-          : provider === "openai" && env.OPENAI_API_KEY,
+        : provider === "openai-compatible"
+          ? env.COMPATIBLE_BASE_URL && env.PI_MODEL
+          : provider === "anthropic"
+            ? env.ANTHROPIC_API_KEY
+            : provider === "openai" && env.OPENAI_API_KEY,
     ),
     hermesReady: Boolean(env.HERMES_URL && env.HERMES_API_KEY),
   };
@@ -289,9 +294,15 @@ export async function runPi({
     models.setProvider(
       config.provider === "ollama"
         ? ollamaProvider(config.model, env.OLLAMA_URL || defaultOllamaUrl)
-        : config.provider === "anthropic"
-          ? anthropicProvider()
-          : openaiProvider(),
+        : config.provider === "openai-compatible"
+          ? compatibleProvider(
+              config.model,
+              env.COMPATIBLE_BASE_URL || "",
+              env.COMPATIBLE_API_KEY,
+            )
+          : config.provider === "anthropic"
+            ? anthropicProvider()
+            : openaiProvider(),
     );
     model = models.getModel(config.provider, config.model);
     if (!model)
@@ -313,9 +324,11 @@ export async function runPi({
     getApiKey: () =>
       config.provider === "ollama"
         ? "ollama"
-        : config.provider === "anthropic"
-          ? env.ANTHROPIC_API_KEY
-          : env.OPENAI_API_KEY,
+        : config.provider === "openai-compatible"
+          ? env.COMPATIBLE_API_KEY || "not-required"
+          : config.provider === "anthropic"
+            ? env.ANTHROPIC_API_KEY
+            : env.OPENAI_API_KEY,
     toolExecution: "sequential",
     finishTurn: () => {
       if (++turns >= 12) {

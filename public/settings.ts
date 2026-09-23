@@ -47,16 +47,24 @@ export function createSettingsUI({
     $("#pi-api-key").disabled = false;
     $("#pi-clear-key").checked = false;
     const local = provider === "ollama";
+    const compatible = provider === "openai-compatible";
+    $("#compatible-fields").hidden = !compatible;
+    $<HTMLInputElement>("#compatible-url").required = compatible;
     $("#ollama-fields").hidden = !local;
     $("#pi-key-fields").hidden = local;
     $<HTMLInputElement>("#ollama-url").required = local;
     $("#pi-model-help").textContent = local
       ? "先讀取已安裝模型，或輸入完整模型名稱（含標籤）。"
-      : "可從建議清單選擇目前支援的模型。";
+      : compatible
+        ? "輸入服務提供的模型 ID，可使用自訂名稱；模型需支援串流與工具呼叫。"
+        : "可從建議清單選擇目前支援的模型。";
     const credential = local
       ? undefined
       : saved.pi.credentials[provider as Exclude<Provider, "ollama">];
     $("#pi-key-help").textContent = credentialHint(credential);
+    if (compatible && !credential?.configured)
+      $("#pi-key-help").textContent =
+        "填入此服務的 API key；不需要驗證的本機服務可留空。";
     $("#pi-api-key").placeholder = credential?.configured
       ? "留空保留目前金鑰"
       : "貼上你的 API key";
@@ -66,6 +74,7 @@ export function createSettingsUI({
       $("#pi-provider").value = saved.pi.provider;
       piFields(saved.pi.provider, saved.pi.model);
       $<HTMLInputElement>("#ollama-url").value = saved.pi.ollamaUrl;
+      $<HTMLInputElement>("#compatible-url").value = saved.pi.compatibleUrl;
     } else {
       $("#hermes-url").value = saved.hermes.url;
       $("#hermes-model").value = saved.hermes.model;
@@ -116,6 +125,15 @@ export function createSettingsUI({
     );
     status("pi", "變更尚未儲存。");
   });
+  $("#compatible-url").addEventListener("input", () => {
+    if (!saved || $("#pi-provider").value !== "openai-compatible") return;
+    const changed =
+      $<HTMLInputElement>("#compatible-url").value.trim() !==
+      saved.pi.compatibleUrl;
+    $("#pi-key-help").textContent = changed
+      ? "網址已變更，請填入新服務的金鑰；留空儲存會移除舊金鑰。免驗證服務可留空。"
+      : credentialHint(saved.pi.credentials["openai-compatible"]);
+  });
   for (const section of ["pi", "hermes"] as const) {
     const form = $("#" + section + "-settings-form");
     form.addEventListener("input", () => status(section, "變更尚未儲存。"));
@@ -148,6 +166,8 @@ export function createSettingsUI({
             };
       const local = section === "pi" && input.provider === "ollama";
       if (local) input.url = $<HTMLInputElement>("#ollama-url").value.trim();
+      if (section === "pi" && input.provider === "openai-compatible")
+        input.url = $<HTMLInputElement>("#compatible-url").value.trim();
       const key = $<HTMLInputElement>("#" + section + "-api-key").value.trim();
       if (!local && $<HTMLInputElement>("#" + section + "-clear-key").checked)
         input.apiKey = null;

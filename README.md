@@ -105,6 +105,16 @@ The local adapter uses text input, a 2,048-token output limit, and requests thin
 
 Run the optional real-model test with `npm run test:ollama`. It creates an isolated temporary workspace, checks file-tool execution and streamed output through the actual Talaria API, then checks conversation recall. It defaults to `qwen3.5:9b`; override with `OLLAMA_MODEL` and `OLLAMA_URL`. This test needs your running local model and is separate from the offline `npm test` suite. No cloud keys or existing Talaria settings are used.
 
+## Custom OpenAI-compatible API
+
+In **Bot 設定 → 模型服務**, select **OpenAI 相容 API（自訂）**, enter the service's **Base URL**, **model ID**, and **API key**, then save. Changes apply to the next Web or Telegram task without restarting. Model IDs are not restricted to the built-in catalog.
+
+Use the complete API base path, for example `https://api.example.com/v1`, `https://gateway.example.com/api/v1`, or `http://127.0.0.1:1234/v1`. Talaria appends `/chat/completions`; a pasted full Chat Completions URL is also normalized. This connector uses **Chat Completions with SSE streaming and function tools**, not the Responses API or Azure-specific protocols. The selected model and service must support that combination.
+
+The custom endpoint has a separate credential. Leaving the key blank preserves it at the same URL; changing the URL without supplying a replacement clears the old credential. A server that requires no authentication can use a blank key (the SDK sends a non-secret placeholder). Existing OpenAI, Anthropic and Ollama settings are preserved, and API keys are never returned to the browser.
+
+Optional environment setup: `PI_PROVIDER=openai-compatible`, `PI_MODEL=your-model-id`, `COMPATIBLE_BASE_URL=https://api.example.com/v1`, and `COMPATIBLE_API_KEY=...`. The adapter uses text input and requests up to 4,096 output tokens; its 32,768-token context metadata does not reconfigure the model server. The test suite covers a custom-path endpoint, streaming tool execution, conversation continuation and credential redaction.
+
 ## Configure the model from the UI
 
 1. Open **Bot 設定** in the sidebar.

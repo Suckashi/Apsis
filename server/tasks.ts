@@ -137,6 +137,7 @@ export class TaskService {
         : asError(caught).message;
       for (const key of [
         env.OPENAI_API_KEY,
+        env.COMPATIBLE_API_KEY,
         env.ANTHROPIC_API_KEY,
         env.HERMES_API_KEY,
       ].filter((v): v is string => !!v))

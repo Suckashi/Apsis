@@ -1,4 +1,5 @@
 import { defaultOllamaUrl, ollamaUrl, ollamaModelName } from "./ollama.ts";
+import { compatibleUrl } from "./compatible.ts";
 import type {
   Environment,
   SettingsView,
@@ -18,12 +19,15 @@ import { hermesEndpoint } from "./hermes.ts";
 const keyFields = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
+  "openai-compatible": "COMPATIBLE_API_KEY",
   hermes: "HERMES_API_KEY",
 };
 const allowedFields = [
   "PI_PROVIDER",
   "PI_MODEL",
   "OLLAMA_URL",
+  "COMPATIBLE_BASE_URL",
+  "COMPATIBLE_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "HERMES_URL",
@@ -34,6 +38,7 @@ const defaults = {
   openai: "gpt-4.1-mini",
   anthropic: "claude-sonnet-4-6",
   ollama: "qwen3.5:9b",
+  "openai-compatible": "",
 };
 const models = createModels();
 models.setProvider(openaiProvider());
@@ -72,9 +77,10 @@ function validateInput(section: string, value: unknown): Environment {
     if (
       input.provider !== "openai" &&
       input.provider !== "anthropic" &&
-      input.provider !== "ollama"
+      input.provider !== "ollama" &&
+      input.provider !== "openai-compatible"
     )
-      invalid("請選擇 OpenAI、Anthropic 或 Ollama。");
+      invalid("請選擇支援的模型服務。");
     const model = text(input.model, "模型");
     if (input.provider === "ollama") {
       ollamaModelName(model);
@@ -83,10 +89,13 @@ function validateInput(section: string, value: unknown): Environment {
       );
       if (Object.hasOwn(input, "apiKey"))
         invalid("本機 Ollama 不需要 API key。");
+    } else if (input.provider === "openai-compatible") {
+      patch.COMPATIBLE_BASE_URL = compatibleUrl(input.url);
     } else if (Object.hasOwn(input, "url"))
       invalid("只有 Ollama 支援本機網址設定。");
     if (
       input.provider !== "ollama" &&
+      input.provider !== "openai-compatible" &&
       !catalog[input.provider].some((item) => item.id === model)
     )
       invalid("此模型不在目前 Pi SDK 的支援清單，請從建議模型中選擇。");
@@ -185,9 +194,11 @@ export class Settings {
         provider: config.provider,
         model: config.model,
         ollamaUrl: env.OLLAMA_URL || defaultOllamaUrl,
+        compatibleUrl: env.COMPATIBLE_BASE_URL || "",
         credentials: {
           openai: credential("openai"),
           anthropic: credential("anthropic"),
+          "openai-compatible": credential("openai-compatible"),
         },
       },
       hermes: {
@@ -203,6 +214,14 @@ export class Settings {
     if (!["pi", "hermes"].includes(section)) invalid("不支援的設定區段。");
     const patch = validateInput(section, input);
     const operation = this.tail.then(async () => {
+      // A saved credential belongs to its endpoint; never silently send it elsewhere.
+      if (
+        patch.COMPATIBLE_BASE_URL &&
+        patch.COMPATIBLE_BASE_URL !== this.environment().COMPATIBLE_BASE_URL &&
+        !Object.hasOwn(patch, "COMPATIBLE_API_KEY")
+      ) {
+        patch.COMPATIBLE_API_KEY = "";
+      }
       const next = { ...this.saved, ...patch };
       const temp = join(this.directory, "settings-" + randomUUID() + ".tmp");
       try {
