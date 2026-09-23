@@ -9,6 +9,7 @@ import type {
   Session,
   SessionView,
   AgentDefinition,
+  ConnectionSelection,
 } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import { RunStore } from "./runs.ts";
@@ -48,7 +49,19 @@ export class TaskService {
     mode: Mode = "pi",
     source: Session["source"] = "web",
     agent?: AgentDefinition,
+    selection?: ConnectionSelection,
   ) {
+    const selected =
+      mode === "pi" && !agent
+        ? selection || this.connections?.defaultSelection()
+        : undefined;
+    const resolved = selected
+      ? this.connections?.selection(selected.connectionId, selected.model)
+      : undefined;
+    const provider = resolved
+      ? this.connections?.view().find((row) => row.id === resolved.connectionId)
+          ?.provider
+      : undefined;
     const session: Session = {
       id: randomUUID(),
       title: "新的對話",
@@ -58,6 +71,7 @@ export class TaskService {
       messages: [],
       piMessages: [],
       ...(agent ? { agent: structuredClone(agent) } : {}),
+      ...(resolved ? { ...resolved, provider } : {}),
     };
     await this.store.mutate((s) => s.sessions.unshift(session));
     return session;
@@ -152,8 +166,8 @@ export class TaskService {
       sessionId: id,
       engine: session.mode === "demo" ? "demo" : session.agent?.engine || "pi",
       agentName: session.agent?.name || "Apsis",
-      connectionId: session.agent?.connectionId,
-      model: env.PI_MODEL || "",
+      connectionId: session.agent?.connectionId || session.connectionId,
+      model: session.agent?.model || session.model || env.PI_MODEL || "",
       permissions: grants,
       status: "running",
       createdAt: new Date().toISOString(),
@@ -187,6 +201,12 @@ export class TaskService {
         );
         if (env.PI_PROVIDER !== session.agent.provider)
           throw new Error("連線供應商已變更，請編輯 agent 並建立新對話。");
+        run.model = env.PI_MODEL || "";
+      } else if (session.connectionId) {
+        if (!this.connections) throw new Error("模型連線服務尚未初始化。");
+        env = this.connections.environment(session.connectionId, session.model);
+        if (session.provider && env.PI_PROVIDER !== session.provider)
+          throw new Error("連線供應商已變更，請建立新對話。");
         run.model = env.PI_MODEL || "";
       }
       await this.store.mutate((s) => {

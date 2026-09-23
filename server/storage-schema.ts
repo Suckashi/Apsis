@@ -43,6 +43,19 @@ export const connectionsSchema = z.array(
       name: z.string(),
       provider: z.enum(["openai", "anthropic", "ollama", "openai-compatible"]),
       model: z.string(),
+      models: z.array(z.string()).optional(),
+      vendor: z
+        .enum([
+          "ollama",
+          "openai",
+          "anthropic",
+          "kimi",
+          "deepseek",
+          "openrouter",
+          "qwen",
+          "custom",
+        ])
+        .optional(),
       url: z.string().optional(),
       apiKey: z.string().optional(),
       archived: z.boolean().optional(),
@@ -69,6 +82,11 @@ export const storageSchema = z
           id: z.string(),
           title: z.string(),
           mode: z.enum(["pi", "demo", "hermes", "hybrid"]),
+          connectionId: z.string().optional(),
+          provider: z
+            .enum(["openai", "anthropic", "ollama", "openai-compatible"])
+            .optional(),
+          model: z.string().optional(),
           createdAt: z.string(),
           messages: z.array(
             z

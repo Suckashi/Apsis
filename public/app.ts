@@ -8,6 +8,7 @@ import type {
   Status,
   WorkspaceFile,
   TaskRun,
+  ModelConnection,
 } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import { createSettingsUI } from "./settings.ts";
@@ -19,6 +20,7 @@ import { initCommandPalette, initComposer, initTheme } from "./interaction.ts";
 import { initCodeBlocks } from "./code-blocks.ts";
 import { createAgentsUI } from "./agents.ts";
 import { engineLabels } from "../shared/agents.ts";
+import { connectionModels, providerName } from "./provider-catalog.ts";
 const state: {
   session: SessionView | null;
   sessions: SessionSummary[];
@@ -45,6 +47,93 @@ let currentAction = "";
 let connected = false;
 let wasConnected = false;
 let loginExpired = false;
+let modelConnections: ModelConnection[] = [];
+let defaultModel: { connectionId: string; model: string } | null = null;
+const choiceValue = (connectionId: string, model: string) =>
+  JSON.stringify([connectionId, model]);
+function currentModelChoice(): { connectionId: string; model: string } | null {
+  try {
+    const [connectionId, model] = JSON.parse(
+      $<HTMLSelectElement>("#chat-model").value,
+    );
+    return typeof connectionId === "string" && typeof model === "string"
+      ? { connectionId, model }
+      : null;
+  } catch {
+    return null;
+  }
+}
+function selectedConnection() {
+  const choice = currentModelChoice();
+  return (
+    choice && modelConnections.find((row) => row.id === choice.connectionId)
+  );
+}
+function connectionReady(row: ModelConnection | null | undefined) {
+  return (
+    !!row &&
+    (row.provider === "ollama" ||
+      (row.provider === "openai-compatible" && !!row.url) ||
+      row.credentialConfigured)
+  );
+}
+async function loadModelChoices(preferDefault = false) {
+  const [rows, savedDefault] = await Promise.all([
+    api<ModelConnection[]>("connections"),
+    api<{ connectionId: string; model: string } | null>("connections/default"),
+  ]);
+  modelConnections = rows;
+  defaultModel = savedDefault;
+  const select = $<HTMLSelectElement>("#chat-model");
+  const previous = select.value;
+  select.replaceChildren();
+  for (const row of rows.filter((item) => !item.id.startsWith("legacy-"))) {
+    const group = document.createElement("optgroup");
+    group.label = row.name + " · " + providerName(row);
+    for (const model of connectionModels(row)) {
+      const option = new Option(
+        row.name + " · " + model + (connectionReady(row) ? "" : "（待設定）"),
+        choiceValue(row.id, model),
+      );
+      option.disabled = !connectionReady(row);
+      group.append(option);
+    }
+    select.append(group);
+  }
+  const legacy = document.createElement("optgroup");
+  legacy.label = "原有 Bot 設定";
+  for (const row of rows.filter(
+    (item) => item.id.startsWith("legacy-") && connectionReady(item),
+  ))
+    for (const model of connectionModels(row))
+      legacy.append(
+        new Option(
+          providerName(row) + " · " + model,
+          choiceValue(row.id, model),
+        ),
+      );
+  if (legacy.childElementCount) select.append(legacy);
+  if (!select.options.length) select.append(new Option("先加入模型服務", ""));
+  const sessionChoice =
+    state.session?.connectionId && state.session.model
+      ? choiceValue(state.session.connectionId, state.session.model)
+      : undefined;
+  const savedValue = savedDefault
+    ? choiceValue(savedDefault.connectionId, savedDefault.model)
+    : "";
+  const preferred =
+    sessionChoice ||
+    (preferDefault ? savedValue || previous : previous || savedValue);
+  select.value = Array.from(select.options).some(
+    (option) => option.value === preferred,
+  )
+    ? preferred
+    : savedDefault
+      ? choiceValue(savedDefault.connectionId, savedDefault.model)
+      : select.options[0]?.value || "";
+  if (select.selectedIndex < 0) select.selectedIndex = 0;
+  updateMode();
+}
 const observedSessionTimes = new Map<string, string>();
 const observedMessageTimes = new Map<string, string>();
 function validTimestamp(value: unknown): string | undefined {
@@ -673,21 +762,34 @@ function renderConversation() {
 function updateMode() {
   const mode = $("#mode").value as Mode;
   const agent = state.session?.agent || agentsUI.selected();
+  const choice =
+    state.session?.connectionId && state.session.model
+      ? { connectionId: state.session.connectionId, model: state.session.model }
+      : currentModelChoice();
+  const activeModel =
+    agent?.model ||
+    (mode === "pi" ? choice?.model : undefined) ||
+    state.status.model ||
+    "尚未設定";
   const name = agent?.name || "Apsis";
   if (state.view === "chat") $("#page-name").textContent = name;
   $("#workspace-model").textContent =
-    `${agent?.model || state.status.model || "尚未設定"} · ${agent?.memoryScope === "private" ? "獨立記憶" : "共用記憶"}`;
+    `${activeModel} · ${agent?.memoryScope === "private" ? "獨立記憶" : "共用記憶"}`;
   $("#prompt").setAttribute("aria-label", "傳訊息給 " + name);
   $("#prompt").placeholder = "傳訊息給 " + name;
   $("#messages").setAttribute("aria-label", "與 " + name + " 的訊息");
-  $("#composer-model").textContent =
-    mode === "pi"
-      ? agent?.model || state.status.model || "尚未連接模型"
-      : labels[mode];
+  $("#composer-model").textContent = mode === "pi" ? activeModel : labels[mode];
+  $("#chat-model-field").hidden = !!agent || mode !== "pi";
   const requirement =
     agent && mode === "pi"
       ? agentsUI.requirement(agent)
-      : modeRequirement(mode, state.status);
+      : mode === "pi" && choice
+        ? connectionReady(
+            modelConnections.find((row) => row.id === choice.connectionId),
+          )
+          ? null
+          : "這個模型服務還缺少 API key，請先完成連線設定。"
+        : modeRequirement(mode, state.status);
   $("#mode-setup").hidden = !requirement;
   $("#mode-banner").classList.toggle("needs-setup", Boolean(requirement));
   $("#mode-banner").textContent =
@@ -707,6 +809,7 @@ async function loadSession(id: string) {
   } finally {
     navigating = false;
   }
+  await loadModelChoices(true);
   restoreDraft();
   $("#run-status").textContent = "已載入對話";
   $("#allow-writes").checked = false;
@@ -725,8 +828,17 @@ async function newSession(preserveMode = false) {
     return;
   saveDraft();
   state.session = null;
-  if (!preserveMode) $("#mode").value = state.status.piReady ? "pi" : "demo";
+  if (!preserveMode)
+    $("#mode").value =
+      connectionReady(selectedConnection()) || state.status.piReady
+        ? "pi"
+        : "demo";
   if (!preserveMode) agentsUI.select();
+  if (!preserveMode && defaultModel)
+    $<HTMLSelectElement>("#chat-model").value = choiceValue(
+      defaultModel.connectionId,
+      defaultModel.model,
+    );
   preferences.remove("loom-session");
   restoreDraft();
   $("#run-status").textContent = "新話題，一樣記得你。";
@@ -864,6 +976,8 @@ function syncComposer() {
   $("#background-stop").hidden = !state.session?.running || state.busy;
   $("#mode").disabled = running;
   $<HTMLSelectElement>("#agent-select").disabled = running;
+  $<HTMLSelectElement>("#chat-model").disabled =
+    running || !!(state.session?.agent || agentsUI.selected());
   $("#new-session").disabled = state.busy;
   $("#allow-writes").disabled = running;
   $("#allow-memory").disabled = running;
@@ -897,13 +1011,23 @@ $("#chat-form").addEventListener("submit", async (event) => {
   const prompt = $("#prompt").value.trim();
   if (!prompt) return;
   const chosenAgent = state.session?.agent || agentsUI.selected();
+  const modelChoice =
+    state.session?.connectionId && state.session.model
+      ? { connectionId: state.session.connectionId, model: state.session.model }
+      : currentModelChoice();
   const requirement =
     chosenAgent && $("#mode").value === "pi"
       ? agentsUI.requirement(chosenAgent)
-      : modeRequirement($("#mode").value as Mode, state.status);
+      : $("#mode").value === "pi" && modelChoice
+        ? connectionReady(
+            modelConnections.find((row) => row.id === modelChoice.connectionId),
+          )
+          ? null
+          : "這個模型服務還缺少 API key，請先完成連線設定。"
+        : modeRequirement($("#mode").value as Mode, state.status);
   if (requirement) {
     toast(requirement);
-    showView("settings");
+    showView("connections");
     return;
   }
   const originalDraft = draftKey();
@@ -936,6 +1060,9 @@ $("#chat-form").addEventListener("submit", async (event) => {
         mode: $("#mode").value,
         agentId:
           $("#mode").value === "pi" ? agentsUI.selected()?.id : undefined,
+        ...($("#mode").value === "pi" && !chosenAgent && modelChoice
+          ? modelChoice
+          : {}),
       });
       preferences.set("loom-session", state.session.id);
       renderConversation();
@@ -1182,7 +1309,7 @@ async function refreshFiles() {
         .join("\n")
     : "workspace/ 尚無檔案";
 }
-async function refresh() {
+async function refresh(preferDefault = false) {
   await agentsUI.load(state.session?.agent);
   const [status, sessions, memories, skills] = await Promise.all([
     api<Status>("status"),
@@ -1192,6 +1319,7 @@ async function refresh() {
   ]);
   setConnection(true);
   state.status = status;
+  await loadModelChoices(preferDefault || !restoredInitialView);
   $("#workspace-model").textContent = status.model || "尚未設定模型";
   state.sessions = sessions;
   renderSessions();
@@ -1204,11 +1332,8 @@ async function refresh() {
   $("#context-state").textContent =
     memories.length + " 記憶 · " + skills.length + " 技能";
   $("#pi-config").textContent = status.piReady
-    ? (status.provider === "ollama" ? "本機模型 · " : "已設定 · ") +
-      status.provider +
-      " / " +
-      status.model
-    : "尚未設定模型連線";
+    ? "目前 Apsis 預設 · " + status.provider + " / " + status.model
+    : "目前尚未設定可用的預設模型連線";
   updateMode();
   if (!document.querySelector("#messages .message")) renderWelcome();
   await refreshFiles();
@@ -1218,8 +1343,7 @@ $("#refresh-files").addEventListener("click", () =>
 );
 const settingsUI = createSettingsUI({ api, onSaved: refresh, notify: toast });
 const management = createManagement(api, toast, loadSession, async () => {
-  await agentsUI.load(state.session?.agent);
-  updateMode();
+  await refresh(true);
 });
 const agentsUI = createAgentsUI(api, toast, async (agent) => {
   if (state.busy) {
@@ -1241,6 +1365,16 @@ $<HTMLSelectElement>("#agent-select").addEventListener("change", async () => {
   $("#mode").value = "pi";
   renderWelcome();
   $("#session-title").textContent = selected?.name || "Apsis";
+  updateMode();
+});
+$<HTMLSelectElement>("#chat-model").addEventListener("change", async () => {
+  const selected = $<HTMLSelectElement>("#chat-model").value;
+  if (state.session) {
+    await newSession(true);
+    $<HTMLSelectElement>("#chat-model").value = selected;
+    toast("已選擇模型，新對話會使用這個模型。");
+  }
+  $("#mode").value = "pi";
   updateMode();
 });
 const telegramUI = createTelegramUI(api, toast);

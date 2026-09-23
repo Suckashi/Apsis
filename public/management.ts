@@ -1,6 +1,18 @@
-import type { Api, ModelConnection, TaskRun, Memory } from "../shared/types.ts";
+import type {
+  Api,
+  ModelConnection,
+  TaskRun,
+  Memory,
+  SettingsView,
+} from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import { renderMarkdown } from "./markdown.ts";
+import {
+  connectionModels,
+  providerName,
+  providerPresets,
+  type ProviderPreset,
+} from "./provider-catalog.ts";
 
 const el = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -38,23 +50,201 @@ export function createManagement(
   changed: () => Promise<void>,
 ) {
   let connections: ModelConnection[] = [];
+  let defaultChoice: { connectionId: string; model: string } | null = null;
+  let catalog: SettingsView["models"] | undefined;
   let editing: string | undefined;
+  let preset: ProviderPreset = providerPresets[0];
+  let models: string[] = [];
   const form = document.querySelector<HTMLFormElement>("#connection-form")!;
+  const picker = document.querySelector<HTMLElement>("#connection-picker")!;
   const field = (name: string) =>
     form.elements.namedItem(name) as HTMLInputElement;
-  function edit(row?: ModelConnection) {
+  const byId = <T extends HTMLElement>(id: string) =>
+    document.getElementById(id) as T;
+  function renderModels(selected?: string) {
+    const select = byId<HTMLSelectElement>("connection-model");
+    const value = selected || select.value || models[0];
+    select.replaceChildren(...models.map((model) => new Option(model, model)));
+    select.value = models.includes(value) ? value : models[0] || "";
+    const root = byId<HTMLElement>("connection-model-list");
+    root.replaceChildren();
+    for (const model of models) {
+      const row = el("div", "", "provider-model-row");
+      row.append(el("span", model));
+      const remove = button(
+        "移除",
+        () => {
+          models = models.filter((item) => item !== model);
+          renderModels();
+        },
+        notify,
+      );
+      remove.setAttribute("aria-label", "移除模型 " + model);
+      row.append(remove);
+      root.append(row);
+    }
+    if (!models.length)
+      root.append(
+        el(
+          "p",
+          "還沒有模型。可以先讀取本機模型，或輸入服務提供的模型 ID。",
+          "field-help",
+        ),
+      );
+  }
+  function addModel(value: string) {
+    const model = value.trim();
+    if (!model || model.length > 200 || /[\u0000-\u001f]/u.test(model)) {
+      byId<HTMLElement>("connection-status").textContent =
+        "請輸入有效的模型 ID。";
+      return false;
+    }
+    if (!models.includes(model)) models.push(model);
+    renderModels();
+    byId<HTMLInputElement>("connection-model-add").value = "";
+    byId<HTMLElement>("connection-status").textContent = "";
+    return true;
+  }
+  function renderSuggestions(extra: string[] = []) {
+    const root = byId<HTMLElement>("connection-suggestions");
+    root.replaceChildren();
+    const suggestions = [
+      ...extra,
+      ...preset.examples,
+      ...(catalog?.[preset.provider] || []).map((item) => item.id),
+    ];
+    for (const model of [...new Set(suggestions)]
+      .filter((item) => !models.includes(item))
+      .slice(0, 18)) {
+      const option = button(
+        "＋ " + model,
+        () => {
+          addModel(model);
+          renderSuggestions(extra);
+        },
+        notify,
+      );
+      option.classList.add("provider-suggestion");
+      root.append(option);
+    }
+  }
+  function renderPresets() {
+    const query = byId<HTMLInputElement>("connection-search")
+      .value.trim()
+      .toLowerCase();
+    const root = byId<HTMLElement>("connection-presets");
+    root.replaceChildren();
+    for (const candidate of providerPresets.filter((item) =>
+      (item.name + " " + item.description).toLowerCase().includes(query),
+    )) {
+      const tile = el("button", "", "provider-preset");
+      tile.type = "button";
+      tile.append(
+        el("strong", candidate.name),
+        el("span", candidate.description),
+      );
+      tile.onclick = () => edit(undefined, candidate);
+      root.append(tile);
+    }
+    if (!root.childElementCount)
+      root.append(
+        el("p", "沒有符合的服務；可選「自訂服務」填入端點。", "field-help"),
+      );
+  }
+  function showPicker() {
+    form.hidden = true;
+    picker.hidden = false;
+    byId<HTMLInputElement>("connection-search").value = "";
+    renderPresets();
+    byId<HTMLInputElement>("connection-search").focus();
+  }
+  function edit(row?: ModelConnection, chosen?: ProviderPreset) {
     editing = row?.id;
+    preset =
+      chosen ||
+      providerPresets.find((item) => item.id === row?.vendor) ||
+      providerPresets.find((item) => item.id === row?.provider) ||
+      providerPresets.at(-1)!;
+    picker.hidden = true;
     form.reset();
     form.hidden = false;
-    for (const name of ["name", "provider", "model", "url"] as const)
-      field(name).value = row?.[name] || (name === "provider" ? "ollama" : "");
+    field("name").value = row?.name || preset.name;
+    field("provider").value = preset.provider;
+    field("url").value = row?.url || preset.url || "";
+    byId<HTMLElement>("connection-form-kind").textContent =
+      preset.provider === "openai-compatible"
+        ? "OPENAI COMPATIBLE"
+        : "NATIVE PROVIDER";
+    byId<HTMLElement>("connection-form-title").textContent = row
+      ? "編輯 " + row.name
+      : "連接 " + preset.name;
+    byId<HTMLElement>("connection-form-description").textContent =
+      preset.description;
+    byId<HTMLButtonElement>("connection-change-provider").hidden = !!row;
+    byId<HTMLElement>("connection-url-field").hidden = ![
+      "ollama",
+      "openai-compatible",
+    ].includes(preset.provider);
+    byId<HTMLElement>("connection-key-field").hidden =
+      preset.provider === "ollama";
+    byId<HTMLElement>("connection-discover").hidden =
+      preset.provider !== "ollama";
+    byId<HTMLElement>("connection-url-help").textContent =
+      preset.id === "qwen"
+        ? "預填的是新加坡區域；如果你的 key 屬於其他區域，請改成對應的 Base URL。"
+        : "此服務的 API 端點；更換網址時需重新填入金鑰。";
+    field("clearKey").checked = false;
+    byId<HTMLElement>("connection-clear-key").hidden =
+      !row?.credentialConfigured;
     field("apiKey").placeholder = row?.credentialConfigured
       ? "已設定；留空保留"
-      : "需要時填入 API key";
+      : "貼上此服務的 API key";
+    models = row ? connectionModels(row) : [];
+    renderModels(row?.model);
+    renderSuggestions();
+    byId<HTMLElement>("connection-status").textContent = "";
     field("name").focus();
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  document.querySelector<HTMLButtonElement>("#connection-new")!.onclick = () =>
-    edit();
+  byId<HTMLButtonElement>("connection-new").onclick = () => {
+    editing = undefined;
+    showPicker();
+  };
+  byId<HTMLButtonElement>("connection-picker-close").onclick = () => {
+    picker.hidden = true;
+  };
+  byId<HTMLButtonElement>("connection-change-provider").onclick = showPicker;
+  byId<HTMLInputElement>("connection-search").oninput = renderPresets;
+  byId<HTMLButtonElement>("connection-add-model").onclick = () => {
+    if (addModel(byId<HTMLInputElement>("connection-model-add").value))
+      renderSuggestions();
+  };
+  byId<HTMLInputElement>("connection-model-add").onkeydown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      byId<HTMLButtonElement>("connection-add-model").click();
+    }
+  };
+  byId<HTMLButtonElement>("connection-discover").onclick = async () => {
+    const node = byId<HTMLButtonElement>("connection-discover");
+    const status = byId<HTMLElement>("connection-status");
+    node.disabled = true;
+    status.textContent = "正在讀取 Ollama 模型…";
+    try {
+      const discovered = await api<{ id: string }[]>("ollama/models", {
+        method: "POST",
+        body: JSON.stringify({ url: field("url").value }),
+      });
+      renderSuggestions(discovered.map((item) => item.id));
+      status.textContent = discovered.length
+        ? `找到 ${discovered.length} 個模型，點選即可加入。`
+        : "沒有找到模型；請先在 Ollama 下載模型。";
+    } catch (cause) {
+      status.textContent = asError(cause).message;
+    } finally {
+      node.disabled = false;
+    }
+  };
   document.querySelector<HTMLButtonElement>("#connection-cancel")!.onclick =
     () => {
       form.hidden = true;
@@ -66,12 +256,19 @@ export function createManagement(
     const status = document.querySelector("#connection-status")!;
     status.textContent = "正在儲存…";
     try {
+      const pending = byId<HTMLInputElement>(
+        "connection-model-add",
+      ).value.trim();
+      if (pending && !addModel(pending)) return;
+      if (!models.length) throw new Error("請至少加入一個模型。");
       await api("connections" + (editing ? "/" + editing : ""), {
         method: editing ? "PUT" : "POST",
         body: JSON.stringify({
           name: field("name").value,
-          provider: field("provider").value,
-          model: field("model").value,
+          provider: preset.provider,
+          vendor: preset.id,
+          model: byId<HTMLSelectElement>("connection-model").value,
+          models,
           url: field("url").value,
           apiKey: field("clearKey").checked ? null : field("apiKey").value,
         }),
@@ -80,7 +277,7 @@ export function createManagement(
       form.hidden = true;
       await loadConnections();
       await changed();
-      notify("模型連線已儲存。");
+      notify("模型服務已儲存，可以在聊天或 Agent 中選用。");
     } catch (e) {
       status.textContent = asError(e).message;
     } finally {
@@ -88,30 +285,130 @@ export function createManagement(
     }
   };
   async function loadConnections() {
-    connections = (await api<ModelConnection[]>("connections")).sort(
-      (a, b) =>
-        Number(a.id.startsWith("legacy-")) - Number(b.id.startsWith("legacy-")),
-    );
+    const [rows, selected, settings] = await Promise.all([
+      api<ModelConnection[]>("connections"),
+      api<{ connectionId: string; model: string } | null>(
+        "connections/default",
+      ),
+      api<SettingsView>("settings"),
+    ]);
+    connections = rows;
+    defaultChoice = selected;
+    catalog = settings.models;
     const root = document.querySelector("#connection-cards")!;
+    const legacyRoot = document.querySelector("#connection-legacy-cards")!;
     root.replaceChildren();
-    for (const row of connections) {
-      const card = el("article", "", "agent-card");
-      card.append(
-        el("h2", row.name),
-        el("p", row.model),
+    legacyRoot.replaceChildren();
+    const named = connections.filter((row) => !row.id.startsWith("legacy-"));
+    byId<HTMLElement>("connection-count").textContent =
+      `${named.length} 個服務 · ${named.reduce((count, row) => count + connectionModels(row).length, 0)} 個模型`;
+    if (defaultChoice?.connectionId.startsWith("legacy-")) {
+      const inherited = connections.find(
+        (row) => row.id === defaultChoice?.connectionId,
+      );
+      if (inherited) {
+        const bridge = el("div", "", "provider-bridge");
+        bridge.append(
+          el(
+            "span",
+            `目前使用原有 Bot 設定 · ${providerName(inherited)} / ${defaultChoice.model}`,
+          ),
+        );
+        bridge.append(
+          button(
+            "檢視原有設定",
+            () => {
+              const details = byId<HTMLDetailsElement>("connection-legacy");
+              details.open = true;
+              details.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            },
+            notify,
+          ),
+        );
+        root.append(bridge);
+      }
+    }
+    if (!named.length)
+      root.append(
         el(
-          "small",
-          `${row.provider} · ${row.url || "官方端點"} · ${row.credentialConfigured ? "憑證已就緒" : "未設定金鑰"}`,
+          "p",
+          "還沒有加入服務。按「加入服務」選擇 Ollama、OpenAI 或相容平台。",
+          "provider-empty",
         ),
       );
-      const actions = el("div", "", "agent-card-actions");
-      if (!row.id.startsWith("legacy-")) {
+    for (const row of connections) {
+      const legacy = row.id.startsWith("legacy-");
+      const card = el("article", "", "provider-card");
+      const heading = el("div", "", "provider-card-heading");
+      const identity = el("div");
+      identity.append(
+        el("span", providerName(row), "provider-card-kind"),
+        el("h3", legacy ? providerName(row) : row.name),
+      );
+      const ready =
+        row.credentialConfigured ||
+        row.provider === "ollama" ||
+        (row.provider === "openai-compatible" && !!row.url);
+      const statusLabel =
+        row.credentialConfigured || row.provider === "ollama"
+          ? "已設定"
+          : row.provider === "openai-compatible" && row.url
+            ? "待驗證"
+            : "需 API key";
+      heading.append(
+        identity,
+        el(
+          "span",
+          statusLabel,
+          ready ? "provider-state ready" : "provider-state",
+        ),
+      );
+      card.append(
+        heading,
+        el("p", row.url || "官方 API 端點", "provider-card-url"),
+      );
+      const list = el("div", "", "provider-card-models");
+      for (const model of connectionModels(row)) {
+        const line = el("div", "", "provider-card-model");
+        line.append(el("span", model));
+        if (
+          defaultChoice?.connectionId === row.id &&
+          defaultChoice.model === model
+        )
+          line.append(el("strong", "Apsis 預設", "provider-default-badge"));
+        else if (ready)
+          line.append(
+            button(
+              "設為預設",
+              async () => {
+                await api("connections/default", {
+                  method: "PUT",
+                  body: JSON.stringify({ connectionId: row.id, model }),
+                });
+                await loadConnections();
+                await changed();
+                notify(
+                  "Apsis 預設模型已更新，Web 與 Telegram 新對話會使用它。",
+                );
+              },
+              notify,
+            ),
+          );
+        list.append(line);
+      }
+      card.append(list);
+      const actions = el("div", "", "provider-card-actions");
+      if (legacy) {
+        const link = button("管理原有設定", () => {}, notify);
+        link.dataset.view = "settings";
+        actions.append(link);
+      } else {
+        actions.append(button("編輯服務", () => edit(row), notify));
         actions.append(
-          button("編輯", () => edit(row), notify),
           button(
             "封存",
             async () => {
-              if (!confirm("封存此連線？使用它的既有對話仍需要此連線。"))
+              if (!confirm("封存此服務？使用它的既有對話仍需要此連線。"))
                 return;
               await api("connections/" + row.id, { method: "DELETE" });
               await loadConnections();
@@ -120,10 +417,6 @@ export function createManagement(
             notify,
           ),
         );
-      } else {
-        const link = button("管理原有設定", () => {}, notify);
-        link.dataset.view = "settings";
-        actions.append(link);
       }
       const engine = el("select");
       engine.setAttribute("aria-label", row.name + " 測試引擎");
@@ -133,33 +426,46 @@ export function createManagement(
         ["openai-agents", "OpenAI Agents SDK"],
       ])
         engine.append(new Option(name, id));
+      const testModel = el("select");
+      testModel.setAttribute("aria-label", row.name + " 測試模型");
+      for (const model of connectionModels(row))
+        testModel.append(new Option(model, model));
       const result = el(
         "p",
         row.verification
-          ? `${row.verification.engine} · ${row.verification.message}`
-          : "尚未驗證此模型的串流與工具呼叫。",
+          ? `${row.verification.model} · ${row.verification.engine} · ${row.verification.message}`
+          : "尚未測試連線。",
         "field-help",
       );
       result.setAttribute("role", "status");
       actions.append(
         engine,
+        testModel,
         button(
           "測試模型",
           async () => {
-            result.textContent = "正在實際呼叫模型並驗證工具，最多約 45 秒…";
-            const verification = await api<
-              NonNullable<ModelConnection["verification"]>
-            >("connections/" + row.id + "/test", {
-              method: "POST",
-              body: JSON.stringify({ engine: engine.value }),
-            });
-            result.textContent = `${verification.engine} · ${verification.message}（串流：${verification.streaming ? "通過" : "未通過"}；工具：${verification.tools ? "通過" : "未通過"}）`;
+            result.textContent = "正在連線並檢查串流與工具呼叫，最多約 45 秒…";
+            try {
+              const verification = await api<
+                NonNullable<ModelConnection["verification"]>
+              >("connections/" + row.id + "/test", {
+                method: "POST",
+                body: JSON.stringify({
+                  engine: engine.value,
+                  model: testModel.value,
+                }),
+              });
+              result.textContent = `${verification.model} · ${verification.engine} · ${verification.message}（串流：${verification.streaming ? "通過" : "未通過"}；工具：${verification.tools ? "通過" : "未通過"}）`;
+            } catch (cause) {
+              result.textContent = asError(cause).message;
+              throw cause;
+            }
           },
           notify,
         ),
       );
       card.append(actions, result);
-      root.append(card);
+      (legacy ? legacyRoot : root).append(card);
     }
   }
   let next: number | null = null;

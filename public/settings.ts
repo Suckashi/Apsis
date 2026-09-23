@@ -166,8 +166,11 @@ export function createSettingsUI({
         // Refresh the model settings without touching Telegram drafts.
         saved.pi = next.pi;
         render(section);
-        status(section, "設定已儲存，下一次任務立即生效。");
-        notify("設定已儲存，不需重新啟動。");
+        status(
+          section,
+          "原有模型設定已儲存；使用此連線的對話會在下一次任務套用。",
+        );
+        notify("原有模型設定已儲存。");
         await onSaved().catch((error: unknown) =>
           notify(asError(error).message),
         );

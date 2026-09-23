@@ -46,6 +46,9 @@ export interface ChatMessage {
 export interface Session {
   runtimeState?: { engine: AgentEngine; version: 1; data: unknown };
   agent?: AgentDefinition;
+  connectionId?: string;
+  provider?: Provider;
+  model?: string;
   engineState?: unknown;
   source?: "web" | "telegram";
   id: string;
@@ -124,6 +127,8 @@ export interface ModelConnection {
   name: string;
   provider: Provider;
   model: string;
+  models?: string[];
+  vendor?: string;
   url?: string;
   credentialConfigured: boolean;
   archived?: boolean;
@@ -136,6 +141,10 @@ export interface ModelConnection {
     tools: boolean;
     message: string;
   };
+}
+export interface ConnectionSelection {
+  connectionId: string;
+  model: string;
 }
 export interface Status {
   provider: string;

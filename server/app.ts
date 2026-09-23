@@ -154,13 +154,19 @@ export async function createApp({
         res.writeHead(200, { "Content-Type": type + "; charset=utf-8" });
         return res.end(content);
       }
-      if (req.method === "GET" && path === "/api/status")
+      if (req.method === "GET" && path === "/api/status") {
+        const selected = connections.defaultSelection();
         return json(res, {
-          ...configuration(settings.environment()),
+          ...configuration(
+            selected
+              ? connections.environment(selected.connectionId, selected.model)
+              : settings.environment(),
+          ),
           version: "0.1.0",
           workspace: "workspace/",
           running: running.size,
         });
+      }
       if (req.method === "GET" && path === "/api/settings")
         return json(res, settings.view());
       if (req.method === "GET" && path === "/api/storage/backup") {
@@ -175,6 +181,12 @@ export async function createApp({
         if (req.method === "POST")
           return json(res, await connections.save(await body(req)), 201);
       }
+      if (path === "/api/connections/default") {
+        if (req.method === "GET")
+          return json(res, connections.defaultSelection());
+        if (req.method === "PUT")
+          return json(res, await connections.setDefault(await body(req)));
+      }
       const connectionMatch = path.match(
         /^\/api\/connections\/([a-z0-9-]+)(?:\/(test))?$/,
       );
@@ -185,8 +197,25 @@ export async function createApp({
             res,
             await testConnection(connections, id, await body(req)),
           );
-        if (!action && req.method === "PUT")
-          return json(res, await connections.save(await body(req), id));
+        if (!action && req.method === "PUT") {
+          const input = await body(req);
+          const previous = connections.view().find((row) => row.id === id);
+          if (
+            previous &&
+            typeof input.provider === "string" &&
+            input.provider !== previous.provider &&
+            (store.state.agents?.some(
+              (agent) => agent.connectionId === id && !agent.archived,
+            ) ||
+              store.state.sessions.some(
+                (session) =>
+                  session.connectionId === id ||
+                  session.agent?.connectionId === id,
+              ))
+          )
+            fail("此連線已有 agent 或對話使用，請新增另一個模型服務。", 409);
+          return json(res, await connections.save(input, id));
+        }
         if (!action && req.method === "DELETE") {
           if (
             store.state.agents?.some(
@@ -194,7 +223,11 @@ export async function createApp({
             )
           )
             fail("此連線仍有 agent 使用，請先切換該 agent 的連線。", 409);
-          if (store.state.sessions.some((s) => s.agent?.connectionId === id))
+          if (
+            store.state.sessions.some(
+              (s) => s.agent?.connectionId === id || s.connectionId === id,
+            )
+          )
             fail("既有對話仍使用此連線，請保留連線以便續聊。", 409);
           await connections.archive(id);
           return json(res, { ok: true });
@@ -326,10 +359,22 @@ export async function createApp({
           : undefined;
         if (input.agentId && !agent) fail("找不到 agent。", 404);
         if (agent && mode !== "pi") fail("自建 agent 必須使用真實回覆模式。");
+        if (
+          (input.connectionId !== undefined || input.model !== undefined) &&
+          (mode !== "pi" || agent)
+        )
+          fail("自訂模型只能用於一般真實對話。");
+        if (input.model !== undefined && input.connectionId === undefined)
+          fail("指定模型時請一併指定模型連線。");
+        const selection =
+          input.connectionId === undefined
+            ? undefined
+            : connections.selection(input.connectionId, input.model);
         const session = await tasks.create(
           mode as Session["mode"],
           "web",
           agent,
+          selection,
         );
         return json(res, session, 201);
       }

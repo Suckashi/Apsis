@@ -8,6 +8,7 @@ import type {
 import { agentTools, engineLabels } from "../shared/agents.ts";
 import { $ } from "./dom.ts";
 import { asError } from "../shared/errors.ts";
+import { connectionModels, providerName } from "./provider-catalog.ts";
 
 export function createAgentsUI(
   api: Api,
@@ -16,6 +17,7 @@ export function createAgentsUI(
 ) {
   let agents: AgentDefinition[] = [];
   let connections: ModelConnection[] = [];
+  let defaultSelection: { connectionId: string; model: string } | null = null;
   let skills: Skill[] = [];
   let settings: SettingsView | undefined;
   let editing: AgentDefinition | undefined;
@@ -49,6 +51,9 @@ export function createAgentsUI(
   function hints(changeModel = false) {
     const engine = field("engine").value;
     const provider = field("provider") as HTMLSelectElement;
+    const connection = connections.find(
+      (item) => item.id === field("connection").value,
+    );
     provider.querySelector<HTMLOptionElement>(
       'option[value="anthropic"]',
     )!.disabled = engine === "openai-agents";
@@ -69,8 +74,18 @@ export function createAgentsUI(
           : settings.defaults[provider.value as keyof typeof settings.defaults];
     const list = $("#agent-model-options");
     list.replaceChildren();
-    for (const model of settings?.models[provider.value] || [])
-      list.append(new Option(model.name, model.id));
+    const models = connection
+      ? connectionModels(connection)
+      : (settings?.models[provider.value] || []).map((item) => item.id);
+    const picker = field("model-pick") as HTMLSelectElement;
+    picker.replaceChildren(
+      new Option("自訂模型 ID…", ""),
+      ...models.map((model) => new Option(model, model)),
+    );
+    picker.value = models.includes(field("model").value)
+      ? field("model").value
+      : "";
+    for (const model of models) list.append(new Option(model, model));
   }
   function edit(agent?: AgentDefinition) {
     editing = agent;
@@ -80,12 +95,32 @@ export function createAgentsUI(
       : "建立 Agent";
     field("template").value = "custom";
     const connectionSelect = field("connection") as HTMLSelectElement;
-    connectionSelect.replaceChildren(
-      ...connections.map((c) => new Option(c.name, c.id)),
-    );
+    connectionSelect.replaceChildren();
+    for (const provider of [
+      ...new Set(
+        connections.map((item) =>
+          item.id.startsWith("legacy-") ? "原有 Bot 設定" : providerName(item),
+        ),
+      ),
+    ]) {
+      const group = document.createElement("optgroup");
+      group.label = provider;
+      for (const connection of connections.filter(
+        (item) =>
+          (item.id.startsWith("legacy-")
+            ? "原有 Bot 設定"
+            : providerName(item)) === provider,
+      ))
+        group.append(new Option(connection.name, connection.id));
+      connectionSelect.append(group);
+    }
     connectionSelect.value =
       agent?.connectionId ||
+      defaultSelection?.connectionId ||
       "legacy-" + (agent?.provider || settings?.pi.provider || "ollama");
+    const connection = connections.find(
+      (item) => item.id === connectionSelect.value,
+    );
     field("provider").disabled = true;
     field("name").value = agent?.name || "";
     field("description").value = agent?.description || "";
@@ -94,8 +129,17 @@ export function createAgentsUI(
       "請用使用者的語言回覆，先釐清目標，使用可用工具完成工作並驗證結果。";
     field("engine").value = agent?.engine || "pi";
     field("provider").value =
-      agent?.provider || settings?.pi.provider || "ollama";
-    field("model").value = agent?.model || settings?.pi.model || "qwen3.5:9b";
+      agent?.provider ||
+      connection?.provider ||
+      settings?.pi.provider ||
+      "ollama";
+    field("model").value =
+      agent?.model ||
+      (connection?.id === defaultSelection?.connectionId
+        ? defaultSelection?.model
+        : connection?.model) ||
+      settings?.pi.model ||
+      "qwen3.5:9b";
     field("memory").value = agent?.memoryScope || "private";
     field("memory").disabled = !!agent;
     checkList(
@@ -166,7 +210,7 @@ export function createAgentsUI(
         agent?.description ||
         (agent
           ? "你的專屬工作助手"
-          : "預設助手，使用 Bot 設定中的模型、共用記憶與技能。");
+          : "預設助手，使用聊天選擇的模型、共用記憶與技能。");
       const meta = document.createElement("small");
       meta.textContent = agent
         ? `v${agent.version || 1} · ${connections.find((c) => c.id === agent.connectionId)?.name || agent.provider} · ${agent.model} · ${agent.memoryScope === "private" ? "獨立記憶" : "共用記憶"} · ${agent.tools.length} 個工具`
@@ -200,12 +244,29 @@ export function createAgentsUI(
     }
   }
   async function load(snapshot?: AgentDefinition) {
-    [agents, skills, settings, connections] = await Promise.all([
-      api<AgentDefinition[]>("agents"),
-      api<Skill[]>("skills"),
-      api<SettingsView>("settings"),
-      api<ModelConnection[]>("connections"),
-    ]);
+    [agents, skills, settings, connections, defaultSelection] =
+      await Promise.all([
+        api<AgentDefinition[]>("agents"),
+        api<Skill[]>("skills"),
+        api<SettingsView>("settings"),
+        api<ModelConnection[]>("connections"),
+        api<{ connectionId: string; model: string } | null>(
+          "connections/default",
+        ),
+      ]);
+    connections = connections.filter(
+      (item) =>
+        !item.id.startsWith("legacy-") ||
+        item.provider === "ollama" ||
+        item.credentialConfigured ||
+        (item.provider === "openai-compatible" && !!item.url) ||
+        agents.some((agent) => agent.connectionId === item.id) ||
+        snapshot?.connectionId === item.id,
+    );
+    connections.sort(
+      (a, b) =>
+        Number(a.id.startsWith("legacy-")) - Number(b.id.startsWith("legacy-")),
+    );
     render(snapshot);
   }
   $("#agent-new").onclick = () => edit();
@@ -222,6 +283,19 @@ export function createAgentsUI(
       field("model").value = connection.model;
       hints();
     }
+  };
+  field("model-pick").onchange = () => {
+    if (field("model-pick").value)
+      field("model").value = field("model-pick").value;
+    else field("model").focus();
+  };
+  field("model").oninput = () => {
+    const picker = field("model-pick") as HTMLSelectElement;
+    picker.value = Array.from(picker.options).some(
+      (option) => option.value === field("model").value,
+    )
+      ? field("model").value
+      : "";
   };
   field("template").onchange = () => {
     const templates: Record<string, [string, string, string[]]> = {

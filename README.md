@@ -12,7 +12,7 @@ Start development with `npm run dev`. Python, Docker, Redis, and a separate data
 - Stream model replies and show expandable tool activity in Web conversations.
 - Read workspace files, and optionally modify files or save knowledge with write permission.
 - Keep durable memories, load reusable skills on demand, and search previous conversations.
-- Connect OpenAI, Anthropic, local Ollama, or a custom OpenAI-compatible API.
+- Keep several model providers and models configured at once, then choose one for a conversation or agent.
 - Use a compact messenger interface with dark, light, and system themes, mobile navigation, searchable history, Markdown, and code copying.
 
 The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/designing-grok-bot), while retaining Apsis's identity and capabilities. The application UI currently uses Traditional Chinese; this repository provides documentation in both languages.
@@ -53,7 +53,7 @@ npm run dev
 
 Open [http://localhost:3100](http://localhost:3100).
 
-In **Bot settings (Bot 設定)**, connect a model and save. The next task uses the new settings without restarting. If no model is configured, select **Demo mode (示範模式)** under the input's **Task options (任務選項)** to try scripted streaming responses without an API call.
+Open **Model connections (模型連線)**, choose a provider, enter its credential and one or more model IDs, and save. Set a default connection and model for ordinary Apsis conversations; you can also choose a model in the chat composer before starting a conversation. Changes apply without restarting. If no model is configured, select **Demo mode (示範模式)** under the input's **Task options (任務選項)** to try scripted streaming responses without an API call.
 
 Development starts the server and browser build together. Browser assets are rebuilt on changes, and the backend restarts automatically. Refresh the browser after frontend changes.
 
@@ -67,7 +67,7 @@ Open **My Agents (我的 Agents) → Create Agent (建立 Agent)**. Start from a
 | Deep Agents       | OpenAI, Anthropic, Ollama, custom compatible API | Planning, internal subagents, virtual scratch files and framework summarization          |
 | OpenAI Agents SDK | OpenAI, Ollama, custom compatible API            | SDK agent loop; OpenAI uses Responses, others use Chat Completions; SDK tracing disabled |
 
-All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a named model connection and model ID. Connections have independent URLs and credentials. Existing Bot settings remain available for default Apsis, Telegram and legacy agents.
+All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a named model connection and one of its model IDs. Connections have independent URLs and credentials. Existing Bot settings remain available for Telegram and legacy configurations.
 
 Private memory and history retrieval are scoped to the agent. Shared agents use Apsis's shared memories and shared-conversation search. Agents see selected shared skills and skills they create themselves. Workspace files remain shared; the owner can inspect all knowledge in the management UI. This is not multi-user isolation.
 
@@ -77,7 +77,7 @@ Deep Agents' built-in filesystem uses conversation-local virtual state, never th
 
 There is no visual handoff/workflow editor or cross-engine delegation yet. OpenAI SDK handoffs are not configured by the UI. Deep Agents can delegate internally with inherited tools.
 
-Open **Model connections → Add connection**, save a name, provider, model, URL and key, then select it in an agent. Multiple compatible endpoints coexist without replacing old settings. Changing the provider or URL clears the old key. Connections referenced by agents or existing conversations cannot be archived.
+In **Model connections**, choose a service first, configure its endpoint and credential, then add the exact model IDs available from that service. Choose a default model for the connection. The agent editor groups available connections by provider; select a connection and model for that agent. Multiple compatible endpoints coexist without replacing old settings. Changing the provider or URL clears the old key. Connections referenced by agents or existing conversations cannot be archived.
 
 ## Background tasks and operation history
 
@@ -87,25 +87,28 @@ The server and computer must remain running. Restart marks unfinished runs inter
 
 ## Model connections
 
-| Service                      | Configuration                                                        | Transport                                    |
-| ---------------------------- | -------------------------------------------------------------------- | -------------------------------------------- |
-| OpenAI                       | A supported model ID and an OpenAI API key                           | Pi's OpenAI provider                         |
-| Anthropic                    | A supported model ID and an Anthropic API key                        | Pi's Anthropic provider                      |
-| Ollama                       | A loopback HTTP URL and an installed model                           | OpenAI-compatible Chat Completions           |
-| Custom OpenAI-compatible API | Base URL, model ID, and an optional key for unauthenticated services | Chat Completions with SSE and function tools |
+The provider-first setup offers OpenAI, Anthropic, Ollama, and OpenAI-compatible presets for Kimi, DeepSeek, OpenRouter, and Qwen, plus a custom endpoint. A preset supplies connection details; it does not add a new native protocol. Each saved connection can list several model IDs, with one default model. The composer chooses a configured connection and model for a new ordinary Apsis conversation. Custom agents select their own connection and model. Existing conversations keep their selected model when resumed.
+
+| Service                          | Configuration                                                      | Transport                                    |
+| -------------------------------- | ------------------------------------------------------------------ | -------------------------------------------- |
+| OpenAI                           | Model IDs and an OpenAI API key                                    | Pi's OpenAI provider                         |
+| Anthropic                        | Model IDs and an Anthropic API key                                 | Pi's Anthropic provider                      |
+| Ollama                           | A loopback HTTP URL and installed model IDs                        | OpenAI-compatible Chat Completions           |
+| Kimi, DeepSeek, OpenRouter, Qwen | Preset base URL, exact model IDs, and service API key              | OpenAI-compatible Chat Completions           |
+| Custom OpenAI-compatible API     | Base URL, model IDs, and optional key for unauthenticated services | Chat Completions with SSE and function tools |
 
 ### OpenAI and Anthropic
 
-Select the service in **Bot settings**, choose a model from the supported suggestions, enter its API key, and save. Their credentials are stored independently.
+Choose OpenAI or Anthropic in **Model connections**, enter its API key, add the model IDs you want to use, and save. Their credentials are stored independently. The connection's default model is used when that connection is chosen without another model selection.
 
-Configured means values are present. **Model connections → Test model** verifies streaming, tool execution and returning the tool result through the selected engine. Cloud tests may incur charges. Tests use isolated state without workspace or saved knowledge access. Results apply only to that model/engine combination; editing clears previous results.
+Configured means values are present. **Model connections → Test model** verifies streaming, tool execution and returning the tool result through the selected engine and model. Cloud tests may incur charges. Tests use isolated state without workspace or saved knowledge access. Results apply only to that model/engine combination; editing clears previous results.
 
 ### Local Ollama
 
 1. Start your existing Ollama installation.
-2. Select **Ollama (local)** in Bot settings.
+2. Select **Ollama (local)** in Model connections.
 3. Enter `http://127.0.0.1:11434`, or your local Ollama port.
-4. Use **Load installed models (讀取已安裝模型)**, select a model with tool support, and save.
+4. Use **Load local models (讀取本機模型)**, add the models you want to use, choose a default, and save.
 
 Apsis does not install Ollama or download models. This connector accepts loopback HTTP addresses only and filters cloud models from discovery. API keys are not required. `qwen3.5:9b` has been used for local integration testing.
 
@@ -113,10 +116,10 @@ The Pi adapter requests thinking off and up to 2,048 output tokens. Its context 
 
 ### Custom OpenAI-compatible API
 
-Choose **OpenAI-compatible API — custom (OpenAI 相容 API（自訂）)** and enter:
+Choose a preset for Kimi, DeepSeek, OpenRouter, or Qwen, or choose **Custom service (自訂服務)**, and enter:
 
 - **Base URL:** the service's complete API base path, such as `https://api.example.com/v1`, `https://gateway.example.com/api/v1`, or `http://127.0.0.1:1234/v1`.
-- **Model:** the exact model ID supplied by the service. Custom names are accepted.
+- **Models:** the exact model IDs supplied by the service; choose one as the connection's default. You can type an ID that is not in the suggestions.
 - **API key:** the key for that endpoint. Leave it empty only when the service requires no authentication.
 
 Apsis appends `/chat/completions`. A pasted full Chat Completions URL is also normalized. The service and model must support SSE streaming and function tools. Responses-only and Azure-specific protocols are not implemented by this connector.
@@ -127,9 +130,9 @@ The adapter supports text input and requests up to 4,096 output tokens. Its cont
 
 ### Settings and environment variables
 
-Saved settings apply to the next Web or Telegram task; an already-running task keeps its settings snapshot. Keys are never returned by the settings API or repopulated into password fields. To remove one, select the explicit key-removal option and save.
+Saved named connections apply to new Web conversations and agents. The selected connection and model belong to the conversation, so resuming an existing conversation keeps its choice. An already-running task keeps its settings snapshot. Keys are never returned by the configuration APIs or repopulated into password fields. To remove one, select the explicit key-removal option and save.
 
-UI settings are stored in `.loom/settings.json` and take precedence over environment values. Removing a key also masks the environment fallback. The UI does not edit `.env`; restart the server after changing environment variables manually.
+Named connections and their credentials are stored in `.loom/connections.json`. The legacy Bot settings used by Telegram and existing configurations are stored in `.loom/settings.json` and take precedence over environment values. Removing a legacy key also masks the environment fallback. The UI does not edit `.env`; restart the server after changing environment variables manually.
 
 See [.env.example](.env.example) for configuration examples:
 
@@ -146,6 +149,7 @@ See [.env.example](.env.example) for configuration examples:
 
 - The **＋** beside Apsis opens a new topic. It keeps saved memories and skills and creates a conversation when the first message is sent.
 - The **＋** inside the input opens task options. File, memory and skill writes have independent switches, all off by default.
+- The composer model picker selects a configured connection and model before the first message in a new ordinary Apsis conversation. Agent conversations use the model saved with that agent.
 - **Ctrl/Cmd + K** searches conversation titles and opens quick navigation. **Conversation history (對話紀錄)** expands the saved list.
 - On desktop, Enter sends and Shift+Enter adds a line. On mobile, Enter adds a line; use the send button or Ctrl/Cmd+Enter to send. IME confirmation does not submit.
 - Tool activity can be expanded while a task runs. Stop controls cancel the current local task.
@@ -163,7 +167,7 @@ Raw HTML in replies is not executed. Unsafe link schemes are blocked, and refere
 3. Once connected, generate a pairing code and privately send the displayed `/pair …` command to your bot. Codes expire after ten minutes and can be used once.
 4. Send a task. Its conversation appears in Web history, where you can inspect progress, stop it, or continue chatting.
 
-The bot shares Apsis's configured model, workspace, memories, and skills. Web conversations can also be resumed in a private bot chat using the conversation menu's Telegram resume command.
+The bot uses Apsis's default model selected in **Model connections** for new conversations and shares Apsis's workspace, memories, and skills. Web conversations can also be resumed in a private bot chat using the conversation menu's Telegram resume command; resumed conversations retain their selected connection and model.
 
 Supported commands: `/help`, `/new`, `/stop`, `/status`, and `/resume <conversation-id>` in private chats.
 
@@ -205,12 +209,13 @@ Available tools: `list_files`, `read_file`, `write_file`, `remember`, `update_me
 
 The model saves knowledge only with the corresponding permission. Same-scope facts are deduplicated using normalized text and ranked lexically against the current prompt, including CJK bigrams, before applying the 16,000-character budget. This is not vector retrieval or semantic deduplication. The management UI supports editing, disabling, deleting and merging same-scope items, up to 20 content revisions, and links to source conversations for agent-saved knowledge. Disabled/merged entries are excluded from context. Skills remain on-demand; no background learning worker runs.
 
-| Location              | Contents                                                                      |
-| --------------------- | ----------------------------------------------------------------------------- |
-| `.loom/state.json`    | Agent definitions, conversation snapshots, engine state, memories, and skills |
-| `.loom/settings.json` | Model configuration and API credentials                                       |
-| `.loom/telegram.json` | Bot token, owner pairing, conversation bindings, and update offset            |
-| `workspace/`          | Files accessible to the agent's file tools                                    |
+| Location                 | Contents                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `.loom/state.json`       | Agent definitions, conversation snapshots, engine state, memories, and skills |
+| `.loom/settings.json`    | Model configuration and API credentials                                       |
+| `.loom/connections.json` | Named providers, model IDs, defaults, and their credentials                   |
+| `.loom/telegram.json`    | Bot token, owner pairing, conversation bindings, and update offset            |
+| `workspace/`             | Files accessible to the agent's file tools                                    |
 
 Local data is created on demand and ignored by Git. Settings and tokens are stored as local plaintext; configuration APIs do not expose the secrets. Files use mode 0600 where supported. Conversation writes are serialized and use atomic JSON replacement within one server process.
 

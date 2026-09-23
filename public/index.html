@@ -377,7 +377,7 @@
                         >使用本機 Ollama，或連接你的 API。</small
                       >
                     </div>
-                    <button class="quiet-button" data-view="settings">
+                    <button class="quiet-button" data-view="connections">
                       開始設定<svg
                         class="icon"
                         viewBox="0 0 24 24"
@@ -473,7 +473,7 @@
                           id="mode-setup"
                           type="button"
                           class="text-button"
-                          data-view="settings"
+                          data-view="connections"
                           hidden
                         >
                           前往設定 →
@@ -510,8 +510,12 @@
                 </div>
               </form>
               <div class="composer-foot">
-                <span id="permission-hint">僅讀取工作區</span
-                ><span id="composer-hint">Enter 傳送 · Shift + Enter 換行</span>
+                <span id="permission-hint">僅讀取工作區</span>
+                <label id="chat-model-field" class="chat-model-field"
+                  ><span class="sr-only">聊天模型</span
+                  ><select id="chat-model" aria-label="選擇聊天模型"></select
+                ></label>
+                <span id="composer-hint">Enter 傳送 · Shift + Enter 換行</span>
               </div>
             </div>
           </div>
@@ -675,7 +679,8 @@
                 aria-label="Agents 清單"
               ></div>
               <p class="field-help">
-                預設 Apsis 與 Telegram 新對話沿用 Bot 設定。自建 agent 可從 Web
+                預設 Apsis 與 Telegram
+                新對話使用「模型連線」中選定的預設模型。自建 Agent 可從 Web
                 開始，或以 /resume 在 Telegram 續聊。
               </p>
             </div>
@@ -748,7 +753,9 @@
                   </div>
                   <p id="agent-engine-help" class="field-help"></p>
                 </details>
-                <label for="agent-model">模型 ID</label
+                <label for="agent-model-pick">選擇模型</label>
+                <select id="agent-model-pick"></select>
+                <label for="agent-model">模型 ID（可自訂）</label
                 ><input
                   id="agent-model"
                   required
@@ -795,65 +802,134 @@
         <section id="connections-view" class="view library-view" hidden>
           <div class="settings-heading">
             <div>
-              <div class="eyebrow">MODEL CONNECTIONS</div>
+              <div class="eyebrow">PROVIDERS &amp; MODELS</div>
               <h1>模型連線</h1>
-              <p>為每個 Agent 選擇合適的模型與端點。</p>
+              <p>先連接服務，再加入模型。聊天與 Agent 都能直接選用。</p>
             </div>
-            <button id="connection-new" class="primary">＋ 新增連線</button>
+            <button id="connection-new" class="primary">＋ 加入服務</button>
           </div>
-          <p class="field-help">
-            測試會實際呼叫選取的模型，雲端服務可能計費。測試只使用一次性工具，不讀取你的工作區或記憶。驗證結果僅代表該模型與引擎組合。
-          </p>
+          <div id="connection-picker" class="provider-picker" hidden>
+            <div class="provider-picker-heading">
+              <div>
+                <span class="eyebrow">ADD A PROVIDER</span>
+                <h2>選擇服務</h2>
+              </div>
+              <button
+                id="connection-picker-close"
+                type="button"
+                class="quiet-button"
+              >
+                關閉
+              </button>
+            </div>
+            <label class="sr-only" for="connection-search">搜尋服務</label>
+            <input
+              id="connection-search"
+              type="search"
+              placeholder="搜尋 Ollama、Kimi、OpenAI…"
+            />
+            <div id="connection-presets" class="provider-preset-grid"></div>
+          </div>
           <form
             id="connection-form"
             class="settings-card connection-form"
             hidden
           >
-            <h2>連線設定</h2>
-            <label for="connection-name">名稱</label
+            <div class="provider-form-heading">
+              <div>
+                <span id="connection-form-kind" class="eyebrow">PROVIDER</span>
+                <h2 id="connection-form-title">連線設定</h2>
+                <p id="connection-form-description" class="field-help"></p>
+              </div>
+              <button
+                id="connection-change-provider"
+                type="button"
+                class="quiet-button"
+              >
+                更換服務
+              </button>
+            </div>
+            <label for="connection-name">顯示名稱</label
             ><input
               id="connection-name"
               name="name"
               required
               maxlength="100"
-              placeholder="例如：本機 Qwen"
+              placeholder="例如：我的 Kimi"
             />
-            <label for="connection-provider">供應商</label
+            <label for="connection-provider" class="sr-only">連線協定</label
             ><select id="connection-provider" name="provider">
               <option value="ollama">Ollama</option>
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic</option>
               <option value="openai-compatible">OpenAI 相容端點</option>
             </select>
-            <label for="connection-url">端點網址</label
-            ><input
-              id="connection-url"
-              name="url"
-              placeholder="Ollama：http://127.0.0.1:11434"
-            />
+            <div id="connection-url-field">
+              <label for="connection-url">Base URL</label
+              ><input
+                id="connection-url"
+                name="url"
+                placeholder="https://api.example.com/v1"
+              />
+              <p id="connection-url-help" class="field-help"></p>
+            </div>
+            <div id="connection-key-field">
+              <label for="connection-key">API key</label
+              ><input
+                id="connection-key"
+                name="apiKey"
+                type="password"
+                autocomplete="new-password"
+                placeholder="貼上此服務的 API key"
+              /><label id="connection-clear-key" class="write-toggle" hidden
+                ><input
+                  name="clearKey"
+                  type="checkbox"
+                />移除已儲存的金鑰</label
+              >
+              <p class="field-help">金鑰只儲存在伺服器，這個頁面不會回顯。</p>
+            </div>
+            <div class="provider-model-heading">
+              <div>
+                <h3>可用模型</h3>
+                <p class="field-help">
+                  輸入模型 ID 並加入；一個服務可以保存多個模型。
+                </p>
+              </div>
+              <button
+                id="connection-discover"
+                type="button"
+                class="quiet-button"
+                hidden
+              >
+                讀取本機模型
+              </button>
+            </div>
+            <div id="connection-suggestions" class="provider-suggestions"></div>
+            <div class="provider-model-add">
+              <label class="sr-only" for="connection-model-add">模型 ID</label>
+              <input
+                id="connection-model-add"
+                maxlength="200"
+                placeholder="輸入模型 ID"
+                autocomplete="off"
+              />
+              <button
+                id="connection-add-model"
+                type="button"
+                class="quiet-button"
+              >
+                加入模型
+              </button>
+            </div>
+            <div id="connection-model-list" class="provider-model-list"></div>
+            <label for="connection-model">此服務的預設模型</label
+            ><select id="connection-model" name="model" required></select>
             <p class="field-help">
-              OpenAI 與 Anthropic 使用官方端點；自訂網址請選 OpenAI 相容端點。
+              更換端點時請重新填入 API key。雲端服務的模型測試可能計費。
             </p>
-            <label for="connection-model">預設模型 ID</label
-            ><input
-              id="connection-model"
-              name="model"
-              required
-              maxlength="200"
-              placeholder="qwen3.5:9b"
-            />
-            <label for="connection-key">API key</label
-            ><input
-              id="connection-key"
-              name="apiKey"
-              type="password"
-              autocomplete="new-password"
-            /><label class="write-toggle"
-              ><input name="clearKey" type="checkbox" />移除已儲存的金鑰</label
-            >
-            <p class="field-help">更換端點或供應商時需重新填入金鑰。</p>
             <div class="agent-card-actions">
-              <button type="submit" class="primary">儲存連線</button
+              <button type="submit" class="primary">儲存服務</button
               ><button
                 id="connection-cancel"
                 type="button"
@@ -864,7 +940,22 @@
             </div>
             <p id="connection-status" role="status"></p>
           </form>
-          <div id="connection-cards" class="agent-cards"></div>
+          <div class="provider-list-heading">
+            <div>
+              <span class="eyebrow">CONNECTED PROVIDERS</span>
+              <h2>已加入的服務</h2>
+            </div>
+            <span id="connection-count" class="field-help"></span>
+          </div>
+          <div id="connection-cards" class="provider-list"></div>
+          <details id="connection-legacy" class="provider-legacy">
+            <summary>原有 Bot 設定</summary>
+            <p class="field-help">
+              舊版設定仍可用於既有對話；選為 Apsis 預設時，也會用於 Web 與
+              Telegram 新對話。
+            </p>
+            <div id="connection-legacy-cards" class="provider-list"></div>
+          </details>
         </section>
         <section id="runs-view" class="view library-view" hidden>
           <div class="settings-heading">
@@ -892,11 +983,11 @@
               <span class="eyebrow">YOUR APSIS</span>
               <h1>Bot 設定</h1>
             </div>
-            <span class="settings-label">本機儲存 · 即時生效</span>
+            <span class="settings-label">本機儲存</span>
           </div>
           <p class="view-description">
-            選擇雲端服務或本機
-            Ollama，找到適合你的使用方式。設定儲存後即刻生效。
+            模型請到「模型連線」新增並選擇預設。這裡保留原有模型設定與 Telegram
+            管理；若預設選的是原有連線，下方模型修改會影響之後的新對話。
           </p>
           <div class="settings-grid">
             <form id="pi-settings-form" class="settings-card connection-form">
@@ -906,8 +997,8 @@
                     <use href="#i-logo"></use></svg
                 ></span>
                 <div>
-                  <h2>Apsis 模型</h2>
-                  <p>選擇 Apsis 思考與工作的模型</p>
+                  <h2>原有模型設定</h2>
+                  <p>供既有連線、舊對話與環境變數使用</p>
                 </div>
                 <span class="setting-number">01</span>
               </div>
