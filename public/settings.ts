@@ -4,7 +4,7 @@ import type {
   SettingsView,
   Provider,
 } from "../shared/types.ts";
-type Section = "pi" | "hermes";
+type Section = "pi";
 import { asError } from "../shared/errors.ts";
 import { $ } from "./dom.ts";
 
@@ -75,29 +75,17 @@ export function createSettingsUI({
       piFields(saved.pi.provider, saved.pi.model);
       $<HTMLInputElement>("#ollama-url").value = saved.pi.ollamaUrl;
       $<HTMLInputElement>("#compatible-url").value = saved.pi.compatibleUrl;
-    } else {
-      $("#hermes-url").value = saved.hermes.url;
-      $("#hermes-model").value = saved.hermes.model;
-      $("#hermes-api-key").value = "";
-      $("#hermes-api-key").disabled = false;
-      $("#hermes-clear-key").checked = false;
-      $("#hermes-key-help").textContent = credentialHint(
-        saved.hermes.credential,
-      );
-      $("#hermes-api-key").placeholder = saved.hermes.credential.configured
-        ? "留空保留目前金鑰"
-        : "貼上 gateway API key";
     }
   }
   async function load() {
     if (loading || active.size) return;
     loading = true;
-    for (const section of ["pi", "hermes"] as const)
+    for (const section of ["pi"] as const)
       $<HTMLFieldSetElement>("#" + section + "-settings-fields").disabled =
         true;
     try {
       saved = await api<SettingsView>("settings");
-      for (const section of ["pi", "hermes"] as const) {
+      for (const section of ["pi"] as const) {
         render(section);
         status(section, "");
         $<HTMLFieldSetElement>("#" + section + "-settings-fields").disabled =
@@ -105,7 +93,7 @@ export function createSettingsUI({
       }
     } catch (caught) {
       const error = asError(caught);
-      for (const section of ["pi", "hermes"] as const) {
+      for (const section of ["pi"] as const) {
         status(section, "無法載入設定，請重新載入。", true);
         $<HTMLFieldSetElement>("#" + section + "-settings-fields").disabled =
           !saved;
@@ -134,7 +122,7 @@ export function createSettingsUI({
       ? "網址已變更，請填入新服務的金鑰；留空儲存會移除舊金鑰。免驗證服務可留空。"
       : credentialHint(saved.pi.credentials["openai-compatible"]);
   });
-  for (const section of ["pi", "hermes"] as const) {
+  for (const section of ["pi"] as const) {
     const form = $("#" + section + "-settings-form");
     form.addEventListener("input", () => status(section, "變更尚未儲存。"));
     $<HTMLInputElement>("#" + section + "-clear-key").addEventListener(
@@ -154,16 +142,10 @@ export function createSettingsUI({
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!saved || active.has(section) || loading) return;
-      const input: Record<string, string | null> =
-        section === "pi"
-          ? {
-              provider: $("#pi-provider").value,
-              model: $("#pi-model").value.trim(),
-            }
-          : {
-              url: $("#hermes-url").value.trim(),
-              model: $("#hermes-model").value.trim(),
-            };
+      const input: Record<string, string | null> = {
+        provider: $("#pi-provider").value,
+        model: $("#pi-model").value.trim(),
+      };
       const local = section === "pi" && input.provider === "ollama";
       if (local) input.url = $<HTMLInputElement>("#ollama-url").value.trim();
       if (section === "pi" && input.provider === "openai-compatible")
@@ -181,9 +163,8 @@ export function createSettingsUI({
           method: "POST",
           body: JSON.stringify(input),
         });
-        // Keep the other form's unsaved draft untouched.
-        if (section === "pi") saved.pi = next.pi;
-        else saved.hermes = next.hermes;
+        // Refresh the model settings without touching Telegram drafts.
+        saved.pi = next.pi;
         render(section);
         status(section, "設定已儲存，下一次任務立即生效。");
         notify("設定已儲存，不需重新啟動。");

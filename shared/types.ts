@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 export type Provider = "openai" | "anthropic" | "ollama" | "openai-compatible";
-export type Mode = "demo" | "pi" | "hybrid" | "hermes";
+export type Mode = "demo" | "pi";
 export type Environment = Record<string, string | undefined>;
 export interface Memory {
   id: string;
@@ -51,7 +51,6 @@ export interface Status {
   provider: string;
   model: string;
   piReady: boolean;
-  hermesReady: boolean;
   version?: string;
   workspace?: string;
   running?: number;
@@ -68,7 +67,6 @@ export interface SettingsView {
     ollamaUrl: string;
     compatibleUrl: string;
   };
-  hermes: { url: string; model: string; credential: CredentialState };
   models: Record<string, { id: string; name: string }[]>;
   defaults: Record<Provider, string>;
 }

@@ -15,10 +15,6 @@ interface Elements {
   "#pi-model": HTMLInputElement;
   "#pi-api-key": HTMLInputElement;
   "#pi-clear-key": HTMLInputElement;
-  "#hermes-url": HTMLInputElement;
-  "#hermes-model": HTMLInputElement;
-  "#hermes-api-key": HTMLInputElement;
-  "#hermes-clear-key": HTMLInputElement;
 }
 export function $<S extends keyof Elements>(selector: S): Elements[S];
 export function $<T extends HTMLElement = HTMLElement>(selector: string): T;

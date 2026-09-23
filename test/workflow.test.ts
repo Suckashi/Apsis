@@ -3,20 +3,10 @@ import test from "node:test";
 import { modeRequirement } from "../public/workflow.ts";
 import { exportConversation } from "../shared/export.ts";
 
-test("mode setup and permission gates distinguish demo, Pi, delegation, and remote execution", () => {
-  assert.equal(modeRequirement("demo", {}, false), null);
-  assert.match(modeRequirement("pi", {}, false)!, /模型/);
-  assert.equal(modeRequirement("pi", { piReady: true }, false), null);
-  assert.match(modeRequirement("hybrid", { piReady: true }, true)!, /Hermes/);
-  assert.equal(
-    modeRequirement("hybrid", { piReady: true, hermesReady: true }, false),
-    null,
-  );
-  assert.match(
-    modeRequirement("hermes", { hermesReady: true }, false)!,
-    /遠端/,
-  );
-  assert.equal(modeRequirement("hermes", { hermesReady: true }, true), null);
+test("mode setup distinguishes demo from configured Pi execution", () => {
+  assert.equal(modeRequirement("demo", {}), null);
+  assert.match(modeRequirement("pi", {})!, /模型/);
+  assert.equal(modeRequirement("pi", { piReady: true }), null);
 });
 
 test("conversation export preserves content and failure status, without internal model transcripts", () => {

@@ -35,13 +35,17 @@ export class Store {
         ],
       };
     }
+    const legacyMode = (mode: string) => mode === "hermes" || mode === "hybrid";
     if (
+      this.state.sessions.some((s) => legacyMode(s.mode)) ||
       this.state.sessions.some((s) =>
         s.messages.some((m) => m.status === "pending"),
       )
     ) {
       await this.mutate((state) => {
         for (const session of state.sessions) {
+          // Keep the transcript and ID; future turns use the configured Pi model.
+          if (legacyMode(session.mode)) session.mode = "pi";
           if (!session.messages.some((m) => m.status === "pending")) continue;
           for (const message of session.messages)
             if (message.status === "pending") message.status = "failed";

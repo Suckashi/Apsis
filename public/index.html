@@ -416,17 +416,11 @@
                         ><select id="mode" aria-label="回覆模式" disabled>
                           <option value="demo">示範模式</option>
                           <option value="pi">Talaria</option>
-                          <option value="hybrid" hidden>
-                            外部 Hermes 協作（進階）
-                          </option>
-                          <option value="hermes" hidden>
-                            外部 Hermes（進階）
-                          </option>
                         </select></label
                       ><label class="write-option"
                         ><input type="checkbox" id="allow-writes" /><span
                           >允許修改與保存<small
-                            >可修改檔案、保存記憶與技能，或使用遠端工具。</small
+                            >可修改檔案、保存記憶與技能。</small
                           ></span
                         ></label
                       >
@@ -853,76 +847,6 @@
                 ><small id="telegram-expiry" class="field-help"></small>
               </div>
             </form>
-            <details class="legacy-connection">
-              <summary>進階：連接既有外部 Hermes 服務</summary>
-              <p class="field-help">
-                Talaria 已內建記憶與技能，不需要部署 Hermes。此整合保留給既有
-                gateway 使用者。
-              </p>
-              <form
-                id="hermes-settings-form"
-                class="settings-card connection-form"
-              >
-                <div class="connection-title">
-                  <span class="engine-icon hermes">H</span>
-                  <div>
-                    <h2>外部 Hermes</h2>
-                    <p>連接既有 gateway（選用）</p>
-                  </div>
-                  <span class="setting-number">02</span>
-                </div>
-                <fieldset id="hermes-settings-fields" disabled>
-                  <label for="hermes-url">Gateway 網址</label>
-                  <input
-                    id="hermes-url"
-                    name="url"
-                    type="url"
-                    required
-                    maxlength="2048"
-                    placeholder="http://127.0.0.1:8642"
-                    aria-describedby="hermes-url-help"
-                  />
-                  <small id="hermes-url-help" class="field-help"
-                    >填入你已啟動的 Hermes API server 網址。</small
-                  >
-                  <label for="hermes-model">模型名稱</label>
-                  <input
-                    id="hermes-model"
-                    name="model"
-                    required
-                    maxlength="256"
-                    placeholder="hermes-agent"
-                    autocomplete="off"
-                  />
-                  <label for="hermes-api-key">Gateway API key</label>
-                  <input
-                    id="hermes-api-key"
-                    name="apiKey"
-                    type="password"
-                    maxlength="4096"
-                    autocomplete="new-password"
-                    spellcheck="false"
-                    placeholder="貼上 gateway API key"
-                    aria-describedby="hermes-key-help"
-                  />
-                  <small id="hermes-key-help" class="field-help"></small>
-                  <label class="remove-key"
-                    ><input id="hermes-clear-key" type="checkbox" />移除 gateway
-                    金鑰</label
-                  >
-                  <button type="submit" class="primary settings-save">
-                    儲存 Hermes 設定 <span>→</span>
-                  </button>
-                </fieldset>
-                <p
-                  id="hermes-save-status"
-                  class="save-status"
-                  role="status"
-                  aria-live="polite"
-                ></p>
-                <div id="hermes-config" class="config-status"></div>
-              </form>
-            </details>
           </div>
           <div class="setup-note">
             <strong>設定一次模型，Web 和 Telegram 都能使用。</strong>

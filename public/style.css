@@ -1854,23 +1854,6 @@ body[data-bot-state="offline"] #run-status {
   width: 22px;
   height: 22px;
 }
-.legacy-connection {
-  grid-column: 1/-1;
-  font-size: 12px;
-  color: var(--muted);
-  border-top: 1px solid var(--line);
-  padding: 17px 0;
-}
-.legacy-connection > summary {
-  padding: 8px 0;
-  min-height: 36px;
-}
-.legacy-connection > .field-help {
-  margin: 10px 0 18px;
-}
-.legacy-connection .settings-card {
-  max-width: 480px;
-}
 .setup-note {
   font-size: 12px;
   line-height: 1.9;

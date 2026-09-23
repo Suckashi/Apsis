@@ -14,13 +14,11 @@ import { createModels } from "@earendil-works/pi-ai";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { configuration } from "./agent.ts";
-import { hermesEndpoint } from "./hermes.ts";
 
 const keyFields = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   "openai-compatible": "COMPATIBLE_API_KEY",
-  hermes: "HERMES_API_KEY",
 };
 const allowedFields = [
   "PI_PROVIDER",
@@ -30,10 +28,9 @@ const allowedFields = [
   "COMPATIBLE_API_KEY",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
-  "HERMES_URL",
-  "HERMES_API_KEY",
-  "HERMES_MODEL",
 ];
+// Retired keys are accepted only when reading older files, then ignored.
+const retiredFields = ["HERMES_URL", "HERMES_API_KEY", "HERMES_MODEL"];
 const defaults = {
   openai: "gpt-4.1-mini",
   anthropic: "claude-sonnet-4-6",
@@ -66,10 +63,7 @@ function validateInput(section: string, value: unknown): Environment {
   const input = value as Record<string, unknown>;
   if (!input || typeof input !== "object" || Array.isArray(input))
     invalid("設定必須為 JSON 物件。");
-  const allowed =
-    section === "pi"
-      ? ["provider", "model", "apiKey", "url"]
-      : ["url", "model", "apiKey"];
+  const allowed = ["provider", "model", "apiKey", "url"];
   if (Object.keys(input).some((key) => !allowed.includes(key)))
     invalid("設定包含不支援的欄位。");
   const patch: Environment = {};
@@ -92,7 +86,7 @@ function validateInput(section: string, value: unknown): Environment {
     } else if (input.provider === "openai-compatible") {
       patch.COMPATIBLE_BASE_URL = compatibleUrl(input.url);
     } else if (Object.hasOwn(input, "url"))
-      invalid("只有 Ollama 支援本機網址設定。");
+      invalid("此模型服務不支援自訂網址，請選擇 OpenAI 相容 API。");
     if (
       input.provider !== "ollama" &&
       input.provider !== "openai-compatible" &&
@@ -101,23 +95,9 @@ function validateInput(section: string, value: unknown): Environment {
       invalid("此模型不在目前 Pi SDK 的支援清單，請從建議模型中選擇。");
     patch.PI_PROVIDER = input.provider;
     patch.PI_MODEL = model;
-  } else {
-    const url = text(input.url, "Hermes 網址", 2048);
-    try {
-      hermesEndpoint(url);
-    } catch {
-      invalid("請輸入不含帳密或查詢參數的 HTTP(S) gateway 網址。");
-    }
-    patch.HERMES_URL = url.replace(/\/$/, "");
-    patch.HERMES_MODEL = text(input.model, "Hermes 模型");
   }
   if (Object.hasOwn(input, "apiKey")) {
-    const field =
-      keyFields[
-        section === "pi"
-          ? (input.provider as Exclude<Provider, "ollama">)
-          : "hermes"
-      ];
+    const field = keyFields[input.provider as Exclude<Provider, "ollama">];
     if (input.apiKey === null)
       patch[field] = ""; // Explicitly disable, including an environment fallback.
     else if (input.apiKey !== "") {
@@ -159,11 +139,13 @@ export class Settings {
         Array.isArray(data) ||
         Object.entries(data).some(
           ([key, value]) =>
-            !allowedFields.includes(key) || typeof value !== "string",
+            (!allowedFields.includes(key) && !retiredFields.includes(key)) ||
+            typeof value !== "string",
         )
       )
         throw new Error("Local settings file is invalid.");
       this.saved = data;
+      for (const field of retiredFields) delete this.saved[field];
     } catch (caught) {
       const error = asError(caught);
       if (error.code !== "ENOENT") throw error;
@@ -177,7 +159,7 @@ export class Settings {
     const env = this.environment();
     const config = configuration(env);
     const credential = (
-      provider: Exclude<Provider, "ollama"> | "hermes",
+      provider: Exclude<Provider, "ollama">,
     ): CredentialState => {
       const field = keyFields[provider];
       return {
@@ -201,17 +183,12 @@ export class Settings {
           "openai-compatible": credential("openai-compatible"),
         },
       },
-      hermes: {
-        url: env.HERMES_URL || "http://127.0.0.1:8642",
-        model: env.HERMES_MODEL || "hermes-agent",
-        credential: credential("hermes"),
-      },
       models: catalog,
       defaults,
     };
   }
   async update(section: string, input: unknown) {
-    if (!["pi", "hermes"].includes(section)) invalid("不支援的設定區段。");
+    if (section !== "pi") invalid("不支援的設定區段。");
     const patch = validateInput(section, input);
     const operation = this.tail.then(async () => {
       // A saved credential belongs to its endpoint; never silently send it elsewhere.

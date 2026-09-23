@@ -9,7 +9,6 @@ import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import { createServer } from "node:http";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { Settings } from "../server/settings.ts";
 import { createApp } from "../server/app.ts";
@@ -45,29 +44,23 @@ test("settings preserve, replace and explicitly remove keys without exposing or 
     assert.equal((await stat(settings.file)).mode & 0o777, 0o600);
 });
 
-test("independent provider and gateway settings survive concurrent saves and reopening", async () => {
+test("independent provider settings survive concurrent saves and reopening", async () => {
   const dir = await temporary();
   const settings = await new Settings(dir, {}).init();
   await Promise.all([
     settings.update("pi", pi({ apiKey: "openai-secret" })),
-    settings.update("hermes", {
-      url: "http://127.0.0.1:8642/v1",
-      model: "hermes-agent",
-      apiKey: "gateway-secret",
+    settings.update("pi", {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      apiKey: "anthropic-secret",
     }),
   ]);
-  await settings.update("pi", {
-    provider: "anthropic",
-    model: "claude-sonnet-4-6",
-    apiKey: "anthropic-secret",
-  });
   await settings.update("pi", pi());
   const reopened = await new Settings(dir, {}).init();
   assert.equal(reopened.environment().OPENAI_API_KEY, "openai-secret");
   assert.equal(reopened.environment().ANTHROPIC_API_KEY, "anthropic-secret");
-  assert.equal(reopened.environment().HERMES_API_KEY, "gateway-secret");
   const safe = JSON.stringify(reopened.view());
-  for (const secret of ["openai-secret", "anthropic-secret", "gateway-secret"])
+  for (const secret of ["openai-secret", "anthropic-secret"])
     assert.ok(!safe.includes(secret));
 });
 
@@ -87,24 +80,7 @@ test("invalid settings are rejected atomically without changing saved credential
   ]) {
     await assert.rejects(settings.update("pi", input), { status: 400 });
   }
-  for (const url of [
-    "file:///etc/passwd",
-    "http://user:password@localhost",
-    "http://localhost?key=secret",
-    "http://localhost/#secret",
-    "not-a-url",
-  ]) {
-    await assert.rejects(
-      settings.update("hermes", {
-        url,
-        model: "hermes-agent",
-        apiKey: "new-secret",
-      }),
-      { status: 400 },
-    );
-  }
   assert.equal(settings.environment().OPENAI_API_KEY, "keep-secret");
-  assert.equal(settings.environment().HERMES_API_KEY, undefined);
 });
 
 async function appFixture(t: TestContext, options: AppOptions = {}) {
@@ -208,46 +184,6 @@ test("settings API protects secrets, applies changes per run and redacts provide
   assert.equal((await fetch(base + "/.loom/settings.json")).status, 404);
   const history = await readFile(join(dir, "data", "state.json"), "utf8");
   assert.ok(!history.includes("second-secret"));
-});
-
-test("saving Hermes settings enables a real HTTP gateway request immediately", async (t) => {
-  let calls = 0;
-  const gateway = createServer(async (req, res) => {
-    calls++;
-    assert.equal(req.url, "/v1/chat/completions");
-    assert.equal(req.headers.authorization, "Bearer gateway-fixture");
-    let raw = "";
-    for await (const chunk of req) raw += chunk;
-    assert.equal(JSON.parse(raw).model, "hermes-agent");
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        choices: [{ message: { content: "Gateway connected" } }],
-      }),
-    );
-  });
-  gateway.listen(0, "127.0.0.1");
-  await once(gateway, "listening");
-  t.after(() => gateway.close());
-  const { base, post } = await appFixture(t);
-  await post("/api/settings/hermes", {
-    url: "http://127.0.0.1:" + (gateway.address() as AddressInfo).port,
-    model: "hermes-agent",
-    apiKey: "gateway-fixture",
-  });
-  assert.equal(
-    (await (await fetch(base + "/api/status")).json()).hermesReady,
-    true,
-  );
-  const session = await (
-    await post("/api/sessions", { mode: "hermes" })
-  ).json();
-  const response = await post("/api/sessions/" + session.id + "/chat", {
-    prompt: "Hello",
-    allowWrites: true,
-  });
-  assert.match(await response.text(), /Gateway connected/);
-  assert.equal(calls, 1);
 });
 
 test("Pi SDK forwards the supplied local credential to model transport", async () => {

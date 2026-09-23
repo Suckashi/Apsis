@@ -24,7 +24,7 @@ const assets: Record<string, [string, string]> = {
   "/style.css": ["style.css", "text/css"],
   "/favicon.svg": ["favicon.svg", "image/svg+xml"],
 };
-const modes = ["demo", "pi", "hybrid", "hermes"];
+const modes = ["demo", "pi"];
 function fail(message: string, status = 400): never {
   throw Object.assign(new Error(message), { status });
 }
@@ -155,7 +155,7 @@ export async function createApp({
           }
         }
       }
-      const settingsMatch = path.match(/^\/api\/settings\/(pi|hermes)$/);
+      const settingsMatch = path.match(/^\/api\/settings\/(pi)$/);
       if (req.method === "POST" && settingsMatch)
         return json(
           res,

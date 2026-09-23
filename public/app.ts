@@ -32,8 +32,6 @@ const state: {
 const labels: Record<string, string> = {
   demo: "示範模式",
   pi: "Talaria",
-  hybrid: "外部 Hermes 協作",
-  hermes: "外部 Hermes",
 };
 let navigating = false;
 let activeReply: HTMLElement | undefined;
@@ -575,24 +573,16 @@ function renderConversation() {
 }
 function updateMode() {
   const mode = $("#mode").value as Mode;
-  for (const option of $("#mode").options) {
-    if (option.value === "hybrid" || option.value === "hermes")
-      option.hidden = !state.status.hermesReady && option.value !== mode;
-  }
   $("#composer-model").textContent =
     mode === "pi" ? state.status.model || "尚未連接模型" : labels[mode];
-  const requirement = modeRequirement(mode, state.status, true);
+  const requirement = modeRequirement(mode, state.status);
   $("#mode-setup").hidden = !requirement;
   $("#mode-banner").classList.toggle("needs-setup", Boolean(requirement));
   $("#mode-banner").textContent =
     requirement ||
     (mode === "demo"
       ? "示範模式 · 不會呼叫 AI，也不會消耗 API 額度"
-      : mode === "hybrid"
-        ? "Pi 主導任務，必要時委派 Hermes；修改與遠端工具需由你開啟。"
-        : mode === "hermes"
-          ? "Hermes 在 gateway 主機執行，完成後回傳結果。"
-          : "Talaria · 自動選用工具與技能，與 bot 共用記憶；預設僅讀取工作區。");
+      : "Talaria · 自動選用工具與技能，與 bot 共用記憶；預設僅讀取工作區。");
 }
 async function loadSession(id: string) {
   if (state.busy || navigating) return;
@@ -676,7 +666,6 @@ function activityLabel(text: string) {
     list_skills: "查看技能",
     read_skill: "讀取技能指引",
     search_history: "搜尋過去的對話",
-    delegate_to_hermes: "交給外部 Hermes 協作",
   };
   const started = /^執行 (\w+)$/.exec(text);
   if (started && tools[started[1]!]) return "正在" + tools[started[1]!] + "…";
@@ -781,19 +770,10 @@ $("#chat-form").addEventListener("submit", async (event) => {
   }
   const prompt = $("#prompt").value.trim();
   if (!prompt) return;
-  const requirement = modeRequirement(
-    $("#mode").value as Mode,
-    state.status,
-    $("#allow-writes").checked,
-  );
+  const requirement = modeRequirement($("#mode").value as Mode, state.status);
   if (requirement) {
     toast(requirement);
-    if (modeRequirement($("#mode").value as Mode, state.status, true))
-      showView("settings");
-    else {
-      $<HTMLDetailsElement>("#task-options").open = true;
-      $("#allow-writes").focus();
-    }
+    showView("settings");
     return;
   }
   const originalDraft = draftKey();
@@ -1098,9 +1078,6 @@ async function refresh() {
       " / " +
       status.model
     : "尚未設定模型連線";
-  $("#hermes-config").textContent = status.hermesReady
-    ? "已設定 gateway · 實際連線於執行時確認"
-    : "選用功能 · 尚未連接 gateway";
   updateMode();
   if (!document.querySelector("#messages .message")) renderWelcome();
   await refreshFiles();

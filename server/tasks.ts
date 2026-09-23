@@ -139,7 +139,6 @@ export class TaskService {
         env.OPENAI_API_KEY,
         env.COMPATIBLE_API_KEY,
         env.ANTHROPIC_API_KEY,
-        env.HERMES_API_KEY,
       ].filter((v): v is string => !!v))
         message = message.replaceAll(key, "[redacted]");
       await this.store.mutate((s) => {

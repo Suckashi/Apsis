@@ -10,7 +10,6 @@ import { once } from "node:events";
 import { Store } from "../server/store.ts";
 import { Workspace } from "../server/workspace.ts";
 import { createApp } from "../server/app.ts";
-import { askHermes, hermesEndpoint } from "../server/hermes.ts";
 import { createTools, runPi } from "../server/agent.ts";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 const temporary = () => mkdtemp(join(tmpdir(), "loom-test-"));
@@ -57,39 +56,7 @@ test("workspace confines paths, blocks hidden files and symlinks", async () => {
     ["src"],
   );
 });
-test("Hermes connector sends documented protocol and hides gateway error bodies", async () => {
-  assert.equal(
-    hermesEndpoint("http://localhost:8642/v1/").href,
-    "http://localhost:8642/v1/chat/completions",
-  );
-  assert.throws(() => hermesEndpoint("file:///tmp/private"));
-  const result = await askHermes({
-    url: "http://localhost:8642",
-    key: "test-key",
-    messages: [{ role: "user", content: "hi" }],
-    fetchImpl: async (url, options) => {
-      assert.equal(url.pathname, "/v1/chat/completions");
-      assert.equal(options.headers.Authorization, "Bearer test-key");
-      const body = JSON.parse(options.body);
-      assert.equal(body.stream, false);
-      assert.equal(body.model, "hermes-agent");
-      return Response.json({
-        choices: [{ message: { content: "Hermes result" } }],
-      });
-    },
-  });
-  assert.equal(result, "Hermes result");
-  await assert.rejects(
-    askHermes({
-      url: "http://localhost:8642",
-      key: "key",
-      messages: [],
-      fetchImpl: async () => new Response("SECRET", { status: 401 }),
-    }),
-    /HTTP 401/,
-  );
-});
-test("write and Hermes tools enforce explicit run permission", async () => {
+test("write and memory tools enforce explicit run permission", async () => {
   const dir = await temporary();
   const store = await new Store(join(dir, "data")).init();
   const workspace = await new Workspace(join(dir, "workspace")).init();
@@ -97,13 +64,12 @@ test("write and Hermes tools enforce explicit run permission", async () => {
     store,
     workspace,
     allowWrites: false,
-    hybrid: true,
   });
   for (const [name, args] of [
     ["write_file", { path: "test", content: "x" }],
     ["remember", { content: "x" }],
     ["save_skill", { name: "x", content: "x" }],
-    ["delegate_to_hermes", { task: "x" }],
+    ["update_memory", { id: "x", content: "x" }],
   ]) {
     await assert.rejects(
       tools.find((t) => t.name === name)!.execute("id", args),
@@ -182,7 +148,6 @@ test("real Pi SDK executes file tools, injects memory, resumes transcript, strea
     store,
     workspace,
     allowWrites: true,
-    hybrid: false,
     emit: (e) => events.push(e),
     signal: new AbortController().signal,
     runtime: {
@@ -371,74 +336,4 @@ test("stop and session concurrency protect in-flight work", async (t) => {
   const saved = await (await fetch(base + path)).json();
   assert.equal(saved.messages[1].status, "error");
   assert.equal(saved.running, false);
-});
-
-test("Pi hybrid tool delegates over HTTP to Hermes and consumes its result", async (t) => {
-  const { createServer } = await import("node:http");
-  let gatewayCalls = 0;
-  const gateway = createServer(async (req, res) => {
-    assert.equal(req.url, "/v1/chat/completions");
-    assert.equal(req.headers.authorization, "Bearer fixture-key");
-    let raw = "";
-    for await (const chunk of req) raw += chunk;
-    assert.equal(JSON.parse(raw).messages[0].content, "Research the task");
-    gatewayCalls++;
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        choices: [{ message: { content: "Hermes evidence" } }],
-      }),
-    );
-  });
-  gateway.listen(0, "127.0.0.1");
-  await once(gateway, "listening");
-  t.after(() => gateway.close());
-  const dir = await temporary();
-  const store = await new Store(join(dir, "data")).init();
-  const workspace = await new Workspace(join(dir, "workspace")).init();
-  let call = 0;
-  const result = await runPi({
-    prompt: "Delegate",
-    session: {},
-    store,
-    workspace,
-    allowWrites: true,
-    hybrid: true,
-    emit() {},
-    signal: new AbortController().signal,
-    env: {
-      HERMES_URL: "http://127.0.0.1:" + (gateway.address() as AddressInfo).port,
-      HERMES_API_KEY: "fixture-key",
-    },
-    runtime: {
-      model,
-      streamFn: (_model, context) => {
-        if (call++ === 0)
-          return streamMessage(
-            message(
-              [
-                {
-                  type: "toolCall",
-                  id: "hermes-1",
-                  name: "delegate_to_hermes",
-                  arguments: { task: "Research the task" },
-                },
-              ],
-              "toolUse",
-            ),
-          );
-        const toolResponse = context.messages.find(
-          (m) => m.role === "toolResult",
-        );
-        assert.ok(toolResponse);
-        assert.equal(toolResponse.isError, false);
-        assert.ok(JSON.stringify(toolResponse).includes("Hermes evidence"));
-        return streamMessage(
-          message([{ type: "text", text: "Combined answer." }]),
-        );
-      },
-    },
-  });
-  assert.equal(gatewayCalls, 1);
-  assert.equal(result.text, "Combined answer.");
 });

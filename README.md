@@ -1,6 +1,6 @@
 # Talaria
 
-A local-first assistant with **Web and Telegram bot entry points**, powered by Pi's Node.js runtime and a TypeScript architecture inspired by Hermes' persistent memory, on-demand skills, and messaging adapters. No separate Hermes installation is required.
+A local-first assistant with **Web and Telegram bot entry points**, powered by Pi's Node.js runtime and a TypeScript architecture inspired by Hermes' memory handling and on-demand skills. No separate Hermes installation is required.
 
 以 Node.js 啟動的 AI 夥伴。Web 介面、API、agent 編排與資料保存都使用 TypeScript；開發本專案不用安裝 Python、Docker、Redis 或資料庫。
 
@@ -52,14 +52,12 @@ Quick Tunnels are intended for development, have no uptime guarantee, and do not
 
 ## What works
 
-| Mode                          | What runs                                                   | Configuration                        |
-| ----------------------------- | ----------------------------------------------------------- | ------------------------------------ |
-| Demo / 示範                   | Local scripted streaming response                           | None                                 |
-| Talaria                       | Pi SDK agent loop, memory, on-demand skills and local tools | OpenAI/Anthropic key or local Ollama |
-| External Hermes collaboration | Optional legacy gateway delegation                          | Model + Hermes gateway               |
-| External Hermes               | Optional legacy direct gateway conversation                 | Hermes gateway                       |
+| Mode        | What runs                                                   | Configuration                                        |
+| ----------- | ----------------------------------------------------------- | ---------------------------------------------------- |
+| Demo / 示範 | Local scripted streaming response                           | None                                                 |
+| Talaria     | Pi SDK agent loop, memory, on-demand skills and local tools | OpenAI, Anthropic, Ollama or a custom compatible API |
 
-Talaria includes `list_files`, `read_file`, `write_file`, `remember`, `update_memory`, `save_skill`, `list_skills`, `read_skill`, and `search_history`. The shared task service handles execution, history, progress and cancellation for both Web and Telegram. Existing internal mode IDs (`pi`, `hybrid`, `hermes`) remain compatible with saved conversations. Advanced gateway settings are collapsed in the UI; they are not required for Talaria or Telegram.
+Talaria includes `list_files`, `read_file`, `write_file`, `remember`, `update_memory`, `save_skill`, `list_skills`, `read_skill`, and `search_history`. The shared task service handles execution, history, progress and cancellation for both Web and Telegram. Pi is the only live agent runtime. Hermes informs the memory architecture; Talaria does not connect to or run a Hermes gateway. Older gateway-mode conversations retain their IDs, messages and Pi transcripts and are migrated to `pi`; obsolete gateway settings are ignored and removed from the settings file on the next save.
 
 ## Telegram Bot / Web 與 bot 一起用
 
@@ -128,38 +126,13 @@ Settings are stored in `.loom/settings.json`, separate from conversation history
 
 Existing `.env` settings still work as a fallback. UI-saved fields take priority. Removing a key explicitly masks the environment key; entering a new key enables it again. The UI does not modify `.env`. If you edit environment variables manually, restart the server.
 
-## Connect a real Hermes Agent (optional)
-
-Hermes is an independent upstream application. **Talaria does not reimplement or bundle the Python Hermes runtime.** Your Node.js development environment stays independent; point the connector at a local or remote Hermes installation.
-
-On the Hermes host, configure its `~/.hermes/.env`:
-
-```dotenv
-API_SERVER_ENABLED=true
-API_SERVER_KEY=your-gateway-secret
-```
-
-Then run `hermes gateway` there. In Talaria, expand **Bot 設定 → 進階：連接既有外部 Hermes 服務**, enter the gateway URL, model name and gateway API key, then click **儲存 Hermes 設定**. Changes apply to the next task. For environment-based configuration, these fields remain supported:
-
-```dotenv
-HERMES_URL=http://127.0.0.1:8642
-HERMES_API_KEY=your-gateway-secret
-HERMES_MODEL=hermes-agent
-```
-
-Both a gateway root URL and a URL ending in `/v1` are accepted. Under **任務選項**, select **外部 Hermes 協作（進階）** or **外部 Hermes（進階）** and explicitly enable **允許修改與保存**. The gateway may execute tools on its own host, using its own files, permissions, memory and skills. Its workspace is **not** automatically synchronized with Talaria's local workspace.
-
-The connector uses the [documented Hermes Chat Completions API](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/) with Bearer authentication. Direct Hermes mode sends successful conversation turns each time; delegated Pi tasks are self-contained. Hermes results currently arrive when the remote call finishes; Pi's own text streams live.
-
-**Stop behavior:** stopping cancels the local request and Pi loop. Aborting an HTTP request does not guarantee an already-running Hermes task has stopped remotely; check the gateway for remote work. This version does not implement the Hermes Runs cancellation/approval protocol.
-
 ## Memory, skills and files
 
 - `.loom/state.json` stores conversations, Pi transcripts, memories and skills using serialized atomic file replacement.
 - `workspace/` is the only directory accessible through Pi file tools. Put the files you want the agent to work on there.
 - These local data paths are created on first start and ignored by Git.
 - Complete memory entries fit within a 16,000-character prompt budget. Skills use brief index entries (first 50 in the prompt), with `list_skills` for discovery and `read_skill` for the full procedure on demand. `update_memory` replaces outdated facts with write permission. `search_history` returns bounded excerpts of completed Web/bot messages.
-- These are **Talaria's own Node.js implementations**, inspired by durable agent workflows; they are not a port of Hermes' memory/skill engine. Hermes continues to use its own capabilities on the gateway.
+- These are **Talaria's own TypeScript implementations**, following Hermes-inspired separation of durable facts, reusable procedures and searchable conversation history. Pi receives this context and executes the tools. This is not a complete port of Hermes' memory engine.
 - Pi can save new memories and skills when the model decides it is useful and writes are enabled. There is no automatic offline learning worker.
 - File tools are UTF-8 oriented, limit content to 256 KB, reject hidden paths, traversal and symlinks, and offer no shell execution.
 
@@ -167,7 +140,7 @@ The connector uses the [documented Hermes Chat Completions API](https://hermes-a
 
 This first version is a **single-user local development product**. The server binds to `127.0.0.1`, validates Host/Origin headers, requires a custom header for mutations, and applies a restrictive Content Security Policy. Keep this app bound to loopback. Optional remote previews must use the authenticated sharing gateway described above; do not point a tunnel directly at port 3100.
 
-Writes and remote Hermes tools are off by default and enabled per run from the UI. This is not an OS sandbox: another local process can still modify files or race file operations. Only use trusted local workspaces. The project does not yet include multi-user login, terminal execution, schedules, MCP management, or cloud deployment.
+File writes and memory/skill modifications are off by default and enabled per run from the UI. This is not an OS sandbox: another local process can still modify files or race file operations. Only use trusted local workspaces. The project does not yet include multi-user login, terminal execution, schedules, MCP management, or cloud deployment.
 
 Each run is capped at five minutes and Pi at twelve model turns. Errors and cancellation are visible and stored. Single-process storage prevents concurrent lost updates; do not run multiple server processes against the same data directory. Conversation histories are not automatically compacted; start a new session when a model's context limit is reached.
 
@@ -183,7 +156,6 @@ Telegram long polling + pairing ┤
                          ├─ context: memories + skill index
                          ├─ Pi SDK → model + permission-gated tools
                          └─ atomic JSON store
-Legacy external Hermes connector remains optional.
 ```
 
 ```text
@@ -192,7 +164,6 @@ server/agent.ts   Pi orchestration, demo mode and tool definitions
 server/tasks.ts   Shared Web/bot task lifecycle and session service
 server/context.ts  Memory and on-demand skill context
 server/telegram.ts  Telegram transport, pairing, polling and delivery
-server/hermes.ts  Hermes HTTP integration
 server/app.ts     HTTP API, streaming and local access checks
 server/store.ts   Persistence
 server/workspace.ts  Restricted local file operations
@@ -208,13 +179,12 @@ Add a definition to `createTools()` in `server/agent.ts`. Give it a JSON schema 
 
 ### Testing
 
-The tests run the actual Pi SDK with a deterministic mock model transport to verify tool execution, transcript continuation and memory injection. They also cover persistence, file boundaries, permissions, Hermes request shape, streamed HTTP conversations, cancellation, credentials, Telegram owner pairing/revocation, group gating, duplicate updates, shared Web/bot history, live progress, restart recovery and on-demand skills. Telegram tests use an injected transport and never message a real account. **A live Telegram account/token, cloud-provider credentials or Hermes gateway are not exercised by the offline suite.**
+The tests run the actual Pi SDK with a deterministic mock model transport to verify tool execution, transcript continuation and memory injection. They also cover persistence, file boundaries, permissions, legacy-data migration, streamed HTTP conversations, cancellation, credentials, Telegram owner pairing/revocation, group gating, duplicate updates, shared Web/bot history, live progress, restart recovery and on-demand skills. Telegram tests use an injected transport and never message a real account. **A live Telegram account/token, or cloud-provider credentials are not exercised by the offline suite.**
 
 ## Upstream projects
 
 - [Pi Agent Harness](https://github.com/earendil-works/pi) — official agent runtime and model abstraction (MIT).
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent) — architecture inspiration; an external gateway connector is retained as an optional advanced integration.
-- [Hermes API documentation](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/).
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) — memory and skill architecture reference, implemented locally in TypeScript.
 
 Talaria is an independent integration and is not affiliated with either upstream project.
 

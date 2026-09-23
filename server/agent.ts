@@ -23,7 +23,6 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { askHermes } from "./hermes.ts";
 import { buildContext, skillIndex } from "./context.ts";
 
 type ToolHandler = (
@@ -82,7 +81,6 @@ export function configuration(env: Environment = process.env): Status {
             ? env.ANTHROPIC_API_KEY
             : provider === "openai" && env.OPENAI_API_KEY,
     ),
-    hermesReady: Boolean(env.HERMES_URL && env.HERMES_API_KEY),
   };
 }
 
@@ -90,7 +88,6 @@ export interface ToolOptions {
   store: Store;
   workspace: Workspace;
   allowWrites: boolean;
-  hybrid?: boolean;
   env?: Environment;
 }
 export interface PiOptions extends ToolOptions {
@@ -105,13 +102,7 @@ export interface RunOptions extends PiOptions {
   session: Session;
 }
 
-export function createTools({
-  store,
-  workspace,
-  allowWrites,
-  hybrid,
-  env = process.env,
-}: ToolOptions) {
+export function createTools({ store, workspace, allowWrites }: ToolOptions) {
   const writable =
     (fn: ToolHandler): ToolHandler =>
     async (...args) => {
@@ -248,23 +239,6 @@ export function createTools({
       }),
     ),
   ];
-  if (hybrid)
-    tools.push(
-      tool(
-        "delegate_to_hermes",
-        "Delegate a self-contained task to the configured Hermes agent. Hermes may execute tools on its own host. Only delegate when the user permits modifications.",
-        ["task"],
-        writable((a, signal) =>
-          askHermes({
-            url: env.HERMES_URL,
-            key: env.HERMES_API_KEY,
-            model: env.HERMES_MODEL,
-            messages: [{ role: "user", content: a.task }],
-            signal,
-          }),
-        ),
-      ),
-    );
   return tools;
 }
 
@@ -274,7 +248,6 @@ export async function runPi({
   store,
   workspace,
   allowWrites,
-  hybrid,
   emit,
   signal,
   env = process.env,
@@ -311,14 +284,14 @@ export async function runPi({
       );
     streamFn = models.streamSimple.bind(models);
   }
-  const context = buildContext(store.state, allowWrites, hybrid);
+  const context = buildContext(store.state, allowWrites);
   let turns = 0;
   const agent = new Agent({
     initialState: {
       systemPrompt: context,
       model,
       messages: session.piMessages || [],
-      tools: createTools({ store, workspace, allowWrites, hybrid, env }),
+      tools: createTools({ store, workspace, allowWrites }),
     },
     streamFn,
     getApiKey: () =>
@@ -383,7 +356,7 @@ export async function runPi({
 }
 
 export async function runAgent(options: RunOptions): Promise<RunResult> {
-  const { mode, prompt, session, emit, signal, env = process.env } = options;
+  const { mode, prompt, emit, signal } = options;
   if (mode === "demo") {
     emit({
       type: "activity",
@@ -397,30 +370,6 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     }
     return { text };
   }
-  if (mode === "hermes") {
-    if (!options.allowWrites)
-      throw new Error(
-        "Hermes 可在遠端執行工具；請先在任務選項開啟「允許修改與保存」。",
-      );
-    emit({
-      type: "activity",
-      text: "等待 Hermes gateway 執行；結果將完整回傳。",
-    });
-    const messages = session.messages
-      .filter((m) => m.status === "complete")
-      .map((m) => ({ role: m.role, content: m.content }));
-    messages.push({ role: "user", content: prompt });
-    const text = await askHermes({
-      url: env.HERMES_URL,
-      key: env.HERMES_API_KEY,
-      model: env.HERMES_MODEL,
-      messages,
-      signal,
-    });
-    emit({ type: "delta", text });
-    return { text };
-  }
-  if (mode === "hybrid" && !configuration(env).hermesReady)
-    throw new Error("協作模式需要先設定 Hermes gateway。");
-  return runPi({ ...options, hybrid: mode === "hybrid" });
+  if (mode !== "pi") throw new Error("不支援的回覆模式。");
+  return runPi(options);
 }
