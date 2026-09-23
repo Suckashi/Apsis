@@ -276,7 +276,14 @@ document.addEventListener("click", (event) => {
   ))
     if (!detail.contains(event.target as Node)) detail.open = false;
 });
-$("#allow-writes").addEventListener("change", updatePermissions);
+$("#allow-writes").addEventListener("change", () => {
+  if (!$("#allow-writes").checked) $("#allow-shell").checked = false;
+  updatePermissions();
+});
+$("#allow-shell").addEventListener("change", () => {
+  if ($("#allow-shell").checked) $("#allow-writes").checked = true;
+  updatePermissions();
+});
 $("#allow-memory").addEventListener("change", updatePermissions);
 $("#allow-skills").addEventListener("change", updatePermissions);
 function updatePermissions() {
@@ -284,6 +291,7 @@ function updatePermissions() {
     [$("#allow-writes").checked, "檔案"],
     [$("#allow-memory").checked, "記憶"],
     [$("#allow-skills").checked, "技能"],
+    [$("#allow-shell").checked, "主機命令"],
   ]
     .filter(([checked]) => checked)
     .map(([, name]) => name);
@@ -844,6 +852,7 @@ async function loadSession(id: string) {
   $("#allow-writes").checked = false;
   $("#allow-memory").checked = false;
   $("#allow-skills").checked = false;
+  $("#allow-shell").checked = false;
   updatePermissions();
   currentAction = "";
   preferences.set("loom-session", id);
@@ -870,6 +879,7 @@ async function newSession(preserveMode = false) {
   $("#allow-writes").checked = false;
   $("#allow-memory").checked = false;
   $("#allow-skills").checked = false;
+  $("#allow-shell").checked = false;
   updatePermissions();
   currentAction = "";
   renderConversation();
@@ -904,6 +914,8 @@ function activityLabel(text: string) {
     list_files: "查看工作區檔案",
     read_file: "讀取檔案",
     write_file: "修改檔案",
+    edit_file: "精準修改檔案",
+    shell: "執行命令",
     remember: "保存記憶",
     update_memory: "更新記憶",
     save_skill: "保存技能",
@@ -991,6 +1003,7 @@ function syncComposer() {
   $("#allow-writes").disabled = running;
   $("#allow-memory").disabled = running;
   $("#allow-skills").disabled = running;
+  $("#allow-shell").disabled = running;
 }
 function busy(value: boolean) {
   state.busy = value;
@@ -1045,6 +1058,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
       files: $("#allow-writes").checked,
       memory: $("#allow-memory").checked,
       skills: $("#allow-skills").checked,
+      shell: $("#allow-shell").checked,
     };
     if (!state.session) {
       state.session = await post<SessionView>("sessions", {

@@ -30,7 +30,9 @@ Tool availability and per-run permission are separate checks. Granting memory wr
 
 Memory retrieval filters by agent scope and enabled/merged status, then ranks normalized lexical matches including CJK bigrams within a 16,000-character budget. Deduplication compares normalized text within the same scope. It is not semantic deduplication. Manual merge is restricted to matching scopes and retains the disabled source entry. Revisions retain at most 20 previous contents. No external embedding database is required.
 
-Deep Agents virtual files are conversation scratch state. Only `workspace_*` tools access actual workspace files. Its planning and internal delegation are framework capabilities, not a general host shell or separate trust boundary.
+Deep Agents virtual files are conversation scratch state. `workspace_*` tools access actual workspace files. The shared shell tool requires explicit per-run shell and file grants; it executes on the host, starting in the workspace, without filesystem confinement. Its planning and internal delegation are framework capabilities, not a separate trust boundary.
+
+The default Pi adapter embeds `pi-coding-agent` with host-owned resources, in-memory settings and credentials, and an explicit tool allowlist. Apsis persists SDK session headers and entries (including compaction) inside its runtime envelope. Old Pi message arrays are imported on first continuation. Precise edits reuse the SDK edit tool through the existing workspace path checks. Shell uses the SDK PowerShell/Bash tool with a bounded timeout, cancellation and a filtered environment; this is not an OS sandbox. Telegram write permission does not grant shell access.
 
 ## Persistence decision
 

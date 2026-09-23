@@ -286,11 +286,13 @@ export function createAgentsUI(
       ],
       coding: [
         "程式碼助手",
-        "先閱讀相關檔案，解釋程式結構，提出具體改動；取得本回合檔案權限後才修改檔案，不聲稱執行不存在的測試或 shell。",
+        "先閱讀相關檔案，解釋程式結構，提出具體改動；取得本回合檔案權限後才修改檔案，取得命令執行權限後可執行測試，依工具結果回報。",
         [
           "list_files",
           "read_file",
           "write_file",
+          "edit_file",
+          "shell",
           "search_history",
           "list_skills",
           "read_skill",

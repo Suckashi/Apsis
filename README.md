@@ -8,6 +8,10 @@ Start development with `npm run dev`. Python, Docker, Redis, and a separate data
 
 ## What Apsis does
 
+Ordinary conversation works without creating an agent or granting writes. The default runtime embeds `@earendil-works/pi-coding-agent` 0.87.0 for sessions, context compaction, precise edits and cancellable shell tools. Existing conversations can continue.
+
+Enable file writes for precise `edit_file` replacements. **Allow commands (允許執行命令)** in task options also enables file writes. Commands use PowerShell on Windows and Bash elsewhere, starting in the workspace but able to access the host outside it. Shell is off by default and unavailable to Telegram; commands default to 60 seconds (120 maximum) and stop with the task. Custom agents must also select the shell tool; existing conversation snapshots retain their tools. Apsis supplies the SDK's tools, credentials and resources without loading global Pi configuration or extensions.
+
 - Create custom agents with separate instructions, model choices, tools, skills and private or shared memory; chat through Web or resume through paired Telegram.
 - Stream model replies and show expandable tool activity in Web conversations.
 - Read workspace files, and optionally modify files or save knowledge with write permission.
@@ -19,14 +23,15 @@ The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/desig
 
 ## Architecture and responsibilities
 
-| Component                       | Responsibility                                                                               |
-| ------------------------------- | -------------------------------------------------------------------------------------------- |
-| `@earendil-works/pi-ai`         | Model providers, model abstraction, and streamed model responses.                            |
-| `@earendil-works/pi-agent-core` | The agent loop: ask the model, execute tools, return tool results, and continue.             |
-| Apsis                           | Web and Telegram interfaces, task lifecycle, permissions, local storage, memory, and skills. |
-| Hermes Agent                    | A reference for memory handling and on-demand skills, implemented locally in TypeScript.     |
+| Component                         | Responsibility                                                                               |
+| --------------------------------- | -------------------------------------------------------------------------------------------- |
+| `@earendil-works/pi-ai`           | Model providers, model abstraction, and streamed model responses.                            |
+| `@earendil-works/pi-agent-core`   | The agent loop: ask the model, execute tools, return tool results, and continue.             |
+| `@earendil-works/pi-coding-agent` | Pi sessions, context compaction, precise edits and cancellable shell tools.                  |
+| Apsis                             | Web and Telegram interfaces, task lifecycle, permissions, local storage, memory, and skills. |
+| Hermes Agent                      | A reference for memory handling and on-demand skills, implemented locally in TypeScript.     |
 
-Both Pi packages are pinned to `0.87.0`. Pi remains the default runtime; custom agents can also use `deepagents` or `@openai/agents`. Engine adapters share Apsis's tools, permissions and long-term memory. Apsis neither installs Hermes Agent nor connects to a Hermes Gateway. The memory implementation follows selected architectural ideas; it is not a complete port of Hermes.
+All three Pi packages are pinned to `0.87.0`. Pi remains the default runtime; custom agents can also use `deepagents` or `@openai/agents`. Engine adapters share Apsis's tools, permissions and long-term memory. Apsis neither installs Hermes Agent nor connects to a Hermes Gateway. The memory implementation follows selected architectural ideas; it is not a complete port of Hermes.
 
 ```text
 Web browser ── HTTP / run polling ──┐
@@ -73,7 +78,7 @@ Private memory and history retrieval are scoped to the agent. Shared agents use 
 
 Memory scope is fixed after creation. Edits affect new conversations only; existing conversations retain a configuration snapshot. Archiving preserves memory and existing conversations. Telegram `/new` uses default Apsis; `/resume` retains a custom conversation's agent.
 
-Deep Agents' built-in filesystem uses conversation-local virtual state, never the host filesystem. Real files use `workspace_list_files`, `workspace_read_file`, and `workspace_write_file`, with Apsis's permissions. Virtual notes and todos persist on successful completion. Real writes and long-term knowledge require both tool selection and per-task write permission. No shell backend is enabled.
+Deep Agents' built-in filesystem uses conversation-local virtual state, never the host filesystem. Real files use `workspace_list_files`, `workspace_read_file`, and `workspace_write_file`, with Apsis's permissions. Virtual notes and todos persist on successful completion. Real writes and long-term knowledge require both tool selection and per-task write permission. The virtual filesystem has no shell backend; the separately granted shared shell tool runs on the host.
 
 There is no visual handoff/workflow editor or cross-engine delegation yet. OpenAI SDK handoffs are not configured by the UI. Deep Agents can delegate internally with inherited tools.
 
@@ -231,9 +236,9 @@ Older Hermes/hybrid conversations migrate to Pi mode while preserving their IDs,
 
 - One local owner and one Telegram bot, with multiple custom agents; no multi-user isolation or hosted computers.
 - The server binds to `127.0.0.1`, checks Host/Origin, requires a custom header for API mutations, and sets a restrictive Content Security Policy. Use the authenticated sharing proxy for remote access.
-- File tools stay inside `workspace/`, reject hidden paths, traversal, and symlinks, and limit file content to 256,000 bytes. They provide no terminal execution and are not an OS sandbox.
+- File tools stay inside `workspace/`, reject hidden paths, traversal, and symlinks, and limit file content to 256,000 bytes. The separately granted shell tool runs on the host and is not confined to the workspace.
 - Each task is limited to five minutes. Pi and OpenAI SDK allow twelve turns; Deep Agents has a 48-step graph recursion limit. Interrupted tasks are marked failed on restart rather than resumed automatically.
-- Pi and OpenAI SDK conversations are not automatically compacted. Deep Agents provides framework summarization; model-specific context tuning remains future work.
+- Pi coding-agent automatically compacts context and persists session entries in Apsis storage. OpenAI SDK conversations are not automatically compacted. Deep Agents provides framework summarization; model-specific context tuning remains future work.
 - The JSON store loads all state and rewrites it on each mutation. Use one server process per data directory.
 - Scheduling, browser/computer control, MCP management, and media input are not implemented.
 

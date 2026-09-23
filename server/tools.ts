@@ -1,4 +1,5 @@
 import { Type, type TSchema } from "typebox";
+import { codingTools } from "./coding-tools.ts";
 import { randomUUID } from "node:crypto";
 import { skillIndex } from "./context.ts";
 import { scopedState } from "./agents.ts";
@@ -98,6 +99,7 @@ export function createTools({
       return fn(...args);
     };
   const tools = [
+    ...codingTools({ store, workspace, allowWrites, permissions }),
     tool(
       "list_skills",
       "List reusable skill names, IDs and brief descriptions. Pass a query or empty string to list all.",
@@ -249,7 +251,7 @@ export function createTools({
       const values = args as Record<string, unknown> | null;
       const target =
         values &&
-        (["path", "id", "name"]
+        (["path", "id", "name", "command"]
           .map((k) => values[k])
           .find((v) => typeof v === "string") as string | undefined);
       const operation: ToolOperation = {
@@ -259,6 +261,8 @@ export function createTools({
         startedAt: new Date().toISOString(),
         mutating: [
           "write_file",
+          "edit_file",
+          "shell",
           "remember",
           "update_memory",
           "save_skill",
@@ -280,7 +284,7 @@ export function createTools({
       } catch (error) {
         await recordOperation?.({
           ...operation,
-          status: executed ? "unknown" : "failed",
+          status: executed || t.name === "shell" ? "unknown" : "failed",
           endedAt: new Date().toISOString(),
           error: (error as Error).message,
         });

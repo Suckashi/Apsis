@@ -1,5 +1,9 @@
 # Apsis
 
+一般聊天不必建立 Agent，也不用開啟寫入權限。預設引擎已接入 `@earendil-works/pi-coding-agent` 0.87.0，支援對話延續、上下文壓縮、精準修改與可取消的命令工具，舊對話可繼續使用。
+
+開啟修改檔案後，可用 `edit_file` 精準替換文字。在任務選項開啟「允許執行命令」也會開啟修改檔案；Windows 使用 PowerShell，其他系統使用 Bash。命令從工作區開始，但可存取主機其他位置，不是沙箱。Shell 預設關閉，Telegram 尚未開放；單次命令預設 60 秒、最高 120 秒，可隨任務停止。自建 Agent 還需勾選 shell 工具，既有對話保留建立時的工具設定。SDK 使用 Apsis 提供的模型、工具與知識，不載入 Pi 全域設定或擴充。
+
 [English](README.md) | **繁體中文**
 
 Apsis 是優先在本機運作的個人 AI 工作區，提供 Web 介面與 Telegram Bot。專案使用 **TypeScript 與 Node.js**，可選擇 Pi、Deep Agents 與 OpenAI Agents SDK 執行任務，並參考 Hermes Agent 架構實作本機記憶與技能管理。
@@ -19,14 +23,15 @@ Web 版面參考 [xAI 的 Grok Bot 官方設計](https://x.ai/news/designing-gro
 
 ## 架構與分工
 
-| 元件                            | 負責內容                                                                    |
-| ------------------------------- | --------------------------------------------------------------------------- |
-| `@earendil-works/pi-ai`         | 模型供應商連接、統一模型介面與串流回覆。                                    |
-| `@earendil-works/pi-agent-core` | Agent 執行循環：詢問模型、執行工具、回傳工具結果，再繼續完成任務。          |
-| Apsis                           | Web 與 Telegram 入口、任務生命週期、權限、本機資料保存、記憶與技能。        |
-| Hermes Agent                    | 作為記憶處理與技能按需載入的架構參考，由 Apsis 使用 TypeScript 在本機實作。 |
+| 元件                              | 負責內容                                                                    |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| `@earendil-works/pi-ai`           | 模型供應商連接、統一模型介面與串流回覆。                                    |
+| `@earendil-works/pi-agent-core`   | Agent 執行循環：詢問模型、執行工具、回傳工具結果，再繼續完成任務。          |
+| `@earendil-works/pi-coding-agent` | Pi 對話管理、上下文壓縮、精準編輯與可取消的命令工具。                       |
+| Apsis                             | Web 與 Telegram 入口、任務生命週期、權限、本機資料保存、記憶與技能。        |
+| Hermes Agent                      | 作為記憶處理與技能按需載入的架構參考，由 Apsis 使用 TypeScript 在本機實作。 |
 
-兩個 Pi 套件固定使用 `0.87.0`。Pi 仍是預設引擎，自建 agent 也可使用 `deepagents` 或 `@openai/agents`，共用 Apsis 的工具、權限與長期記憶。Apsis 不安裝 Hermes Agent，也不連接 Hermes Gateway；記憶實作採用部分架構概念，並非完整移植 Hermes。
+三個 Pi 套件固定使用 `0.87.0`。Pi 仍是預設引擎，自建 agent 也可使用 `deepagents` 或 `@openai/agents`，共用 Apsis 的工具、權限與長期記憶。Apsis 不安裝 Hermes Agent，也不連接 Hermes Gateway；記憶實作採用部分架構概念，並非完整移植 Hermes。
 
 ```text
 Web 瀏覽器 ── HTTP / run polling ──┐
@@ -73,7 +78,7 @@ npm run dev
 
 建立後固定記憶範圍。編輯只影響之後建立的對話，既有對話保留設定快照。封存會保留記憶與既有對話。Telegram `/new` 使用預設 Apsis，`/resume` 則沿用自建對話的 agent。
 
-Deep Agents 內建檔案系統使用對話內的虛擬狀態，不存取主機檔案。真實檔案使用 `workspace_list_files`、`workspace_read_file` 與 `workspace_write_file`，沿用 Apsis 權限。虛擬筆記與待辦會在成功完成時保存。真實寫入與長期知識保存仍需勾選工具及開啟本次寫入權限，不啟用 shell backend。
+Deep Agents 內建檔案系統使用對話內的虛擬狀態，不存取主機檔案。真實檔案使用 `workspace_list_files`、`workspace_read_file` 與 `workspace_write_file`，沿用 Apsis 權限。虛擬筆記與待辦會在成功完成時保存。真實寫入與長期知識保存仍需勾選工具及開啟本次寫入權限，虛擬檔案系統不啟用 shell backend；另行授權的共用 shell 工具會在主機執行。
 
 目前沒有視覺化工作流程／交接編輯器或跨引擎協作。UI 尚未設定 OpenAI SDK handoffs；Deep Agents 可透過繼承工具權限的內部子任務進行委派。
 
@@ -231,9 +236,9 @@ Windows 也可將官方執行檔放在 `.tools/cloudflared.exe`，專案會自�
 
 - 單一本機擁有者與單一 Telegram Bot，可建立多個 agent；尚未支援多使用者隔離或雲端電腦。
 - 伺服器綁定 `127.0.0.1`，檢查 Host／Origin，修改 API 需要指定標頭，並使用限制性 Content Security Policy。遠端存取請使用具登入保護的分享代理。
-- 檔案工具限於 `workspace/`，拒絕隱藏路徑、路徑穿越與符號連結，單檔內容上限為 256,000 bytes。不提供終端機執行，也不構成作業系統層級的沙箱。
+- 檔案工具限於 `workspace/`，拒絕隱藏路徑、路徑穿越與符號連結，單檔內容上限為 256,000 bytes。另行授權的 shell 工具在主機執行，可存取工作區之外，不是沙箱。
 - 每次任務上限為五分鐘。Pi 與 OpenAI SDK 為十二回合，Deep Agents 的圖執行遞迴上限為 48 步。重啟後，中斷任務標記失敗，不會自動恢復。
-- Pi 與 OpenAI SDK 尚未自動壓縮對話；Deep Agents 使用框架摘要，依模型調整上下文預算仍待完善。
+- Pi coding-agent 自動壓縮上下文，完整對話狀態由 Apsis 保存；OpenAI SDK 尚未自動壓縮對話；Deep Agents 使用框架摘要，依模型調整上下文預算仍待完善。
 - JSON 儲存會載入完整狀態，每次變更也會重新寫入；同一資料目錄請只使用一個伺服器程序。
 - 尚未實作排程、瀏覽器／電腦控制、MCP 管理或多媒體輸入。
 

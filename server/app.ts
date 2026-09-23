@@ -435,6 +435,9 @@ export async function createApp({
             input.permissions as import("../shared/types.ts").RunPermissions;
           if (
             !permissions ||
+            (permissions.shell !== undefined &&
+              typeof permissions.shell !== "boolean") ||
+            (permissions.shell === true && permissions.files !== true) ||
             ["files", "memory", "skills"].some(
               (k) =>
                 typeof (permissions as unknown as Record<string, unknown>)[

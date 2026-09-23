@@ -57,7 +57,9 @@ export async function runDeep(options: RunOptions) {
         }
       },
       {
-        name: ["read_file", "write_file", "list_files"].includes(t.name)
+        name: ["read_file", "write_file", "edit_file", "list_files"].includes(
+          t.name,
+        )
           ? "workspace_" + t.name
           : t.name,
         description: t.description,
@@ -77,7 +79,7 @@ export async function runDeep(options: RunOptions) {
         options.prompt,
         options.permissions,
       ) +
-      "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. Only workspace_* tools access real workspace files; use these when the user asks about their files. Never claim scratch writes modified the workspace. Long-term memory is managed only by Apsis remember/update_memory tools.",
+      "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. workspace_* tools access real workspace files; use these when the user asks about their files. The separately granted shell tool executes on the host. Never claim scratch writes modified the workspace. Long-term memory is managed only by Apsis remember/update_memory tools.",
   });
   const previous = options.session.engineState as DeepState | undefined;
   const previousMessages = previous

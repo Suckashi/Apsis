@@ -64,7 +64,7 @@ test("agent CRUD validates capabilities, snapshots conversations and archives wi
   for (const change of [
     { engine: "invalid" },
     { engine: "openai-agents", provider: "anthropic" },
-    { tools: ["shell"] },
+    { tools: ["unsupported-tool"] },
     { skillIds: ["missing"] },
     { model: "qwen:cloud" },
   ])
@@ -301,6 +301,12 @@ for (const engine of ["pi", "deepagents", "openai-agents"] as const)
       /workspace_write_file|remember/,
     );
     const reopened = await new Store(join(dir, "data")).init();
+    if (engine === "pi")
+      assert.equal(
+        (reopened.state.sessions[0].runtimeState?.data as { kind: string })
+          .kind,
+        "pi-coding-agent",
+      );
     app.store.state = reopened.state;
     await run("Repeat your last answer from history");
     assert.equal(calls, 3);
@@ -311,7 +317,7 @@ for (const engine of ["pi", "deepagents", "openai-agents"] as const)
     assert.equal(app.store.state.sessions[0].messages.length, 4);
   });
 
-for (const engine of ["deepagents", "openai-agents"] as const)
+for (const engine of ["pi", "deepagents", "openai-agents"] as const)
   test(`${engine} cancellation stops streaming and leaves no resumable partial engine state`, async (t) => {
     let received!: () => void;
     const started = new Promise<void>((resolve) => {

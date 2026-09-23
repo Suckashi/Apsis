@@ -9,8 +9,16 @@ import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import type { Session, RunResult, RunEvent } from "../shared/types.ts";
-import { Agent } from "@earendil-works/pi-agent-core";
-import { createModels } from "@earendil-works/pi-ai";
+import {
+  createAgentSession,
+  SessionManager,
+  SettingsManager,
+  ModelRuntime,
+  createExtensionRuntime,
+  type ResourceLoader,
+  type FileEntry,
+} from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 
@@ -22,7 +30,7 @@ export { configuration } from "./configuration.ts";
 
 export interface PiOptions extends ToolOptions {
   prompt: string;
-  session: { piMessages?: AgentMessage[] };
+  session: { piMessages?: AgentMessage[]; engineState?: unknown };
   emit: (event: RunEvent) => void;
   signal: AbortSignal;
   runtime?: { model: Model<Api>; streamFn: StreamFn };
@@ -45,17 +53,18 @@ export async function runPi({
   probe,
 }: PiOptions): Promise<RunResult> {
   const config = configuration(env);
-  let models;
+  const models = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+    refreshOnCreate: false,
+  });
   let model: Model<Api> | undefined;
   let streamFn: StreamFn;
   if (runtime) ({ model, streamFn } = runtime);
   else {
     if (!config.piReady)
-      throw new Error(
-        "Pi 尚未設定。請前往「連線設定」儲存 API key，或選擇示範模式。",
-      );
-    models = createModels();
-    models.setProvider(
+      throw new Error("Pi 尚未設定。請前往「連線設定」儲存 API key。");
+    models.registerNativeProvider(
       config.provider === "ollama"
         ? ollamaProvider(config.model, env.OLLAMA_URL || defaultOllamaUrl)
         : config.provider === "openai-compatible"
@@ -84,41 +93,90 @@ export async function runPi({
   );
   const usage = { inputTokens: 0, outputTokens: 0 };
   let turns = 0;
-  const agent = new Agent({
-    initialState: {
-      systemPrompt: context,
-      model,
-      messages: session.piMessages || [],
-      tools: createTools({
-        store,
-        workspace,
-        allowWrites,
-        agent: profile,
-        permissions,
-        source,
-        recordOperation,
-        probe,
-      }),
-    },
-    streamFn,
-    getApiKey: () =>
-      config.provider === "ollama"
-        ? "ollama"
-        : config.provider === "openai-compatible"
-          ? env.COMPATIBLE_API_KEY || "not-required"
-          : config.provider === "anthropic"
-            ? env.ANTHROPIC_API_KEY
-            : env.OPENAI_API_KEY,
-    toolExecution: "sequential",
-    finishTurn: () => {
-      if (++turns >= 12) {
-        emit({ type: "activity", text: "已達單次 12 回合上限。" });
-        return { action: "end" };
-      }
-    },
+  const apiKey =
+    config.provider === "ollama"
+      ? "ollama"
+      : config.provider === "openai-compatible"
+        ? env.COMPATIBLE_API_KEY || "not-required"
+        : config.provider === "anthropic"
+          ? env.ANTHROPIC_API_KEY
+          : env.OPENAI_API_KEY;
+  if (apiKey) await models.setRuntimeApiKey(model.provider, apiKey);
+  const saved = session.engineState as
+    | { kind?: string; entries?: FileEntry[] }
+    | undefined;
+  const entries =
+    saved?.kind === "pi-coding-agent" && Array.isArray(saved.entries)
+      ? saved.entries
+      : undefined;
+  const manager = SessionManager.inMemory(workspace.root, undefined, entries);
+  if (!entries)
+    for (const message of session.piMessages || []) {
+      if (
+        message.role === "user" ||
+        message.role === "assistant" ||
+        message.role === "toolResult"
+      )
+        manager.appendMessage(message);
+    }
+  const extensionRuntime = createExtensionRuntime();
+  const resources: ResourceLoader = {
+    getExtensions: () => ({
+      extensions: [],
+      errors: [],
+      runtime: extensionRuntime,
+    }),
+    getSkills: () => ({ skills: [], diagnostics: [] }),
+    getPrompts: () => ({ prompts: [], diagnostics: [] }),
+    getThemes: () => ({ themes: [], diagnostics: [] }),
+    getAgentsFiles: () => ({ agentsFiles: [] }),
+    getSystemPrompt: () => context,
+    getSystemPromptSource: () => undefined,
+    getAppendSystemPrompt: () => [],
+    getAppendSystemPromptSources: () => [],
+    extendResources() {},
+    async reload() {},
+  };
+  const customTools = createTools({
+    store,
+    workspace,
+    allowWrites,
+    agent: profile,
+    permissions,
+    source,
+    recordOperation,
+    probe,
   });
+  const { session: coding } = await createAgentSession({
+    cwd: workspace.root,
+    modelRuntime: models,
+    model,
+    thinkingLevel: "off",
+    sessionManager: manager,
+    settingsManager: SettingsManager.inMemory({
+      compaction: { enabled: !runtime },
+      retry: { enabled: false },
+      cacheWarming: "off",
+    }),
+    resourceLoader: resources,
+    tools: customTools.map((tool) => tool.name),
+    customTools,
+  });
+  const agent = coding.agent;
+  if (runtime) {
+    models.hasConfiguredAuth = () => true;
+    agent.streamFunction = (model, context, options) =>
+      streamFn(model, context, { ...options, apiKey });
+  }
+  agent.toolExecution = "sequential";
+  agent.finishTurn = () => {
+    if (++turns >= 12) {
+      emit({ type: "activity", text: "已達單次 12 回合上限。" });
+      return { action: "end" };
+    }
+  };
   let text = "";
-  agent.subscribe((event) => {
+  coding.subscribe((event) => {
     if (event.type === "message_end" && event.message.role === "assistant") {
       usage.inputTokens +=
         event.message.usage.input +
@@ -147,11 +205,13 @@ export async function runPi({
         tool: event.toolName,
       });
   });
-  const abort = () => agent.abort();
+  const abort = () => {
+    void coding.abort();
+  };
   signal.addEventListener("abort", abort, { once: true });
   try {
     signal.throwIfAborted();
-    await agent.prompt(prompt);
+    await coding.prompt(prompt, { expandPromptTemplates: false });
     if (signal.aborted) throw new Error("已停止執行。");
     const last = agent.state.messages.findLast((m) => m.role === "assistant");
     if (last?.stopReason === "error" || last?.stopReason === "aborted")
@@ -164,9 +224,14 @@ export async function runPi({
       text,
       usage,
       piMessages: agent.state.messages.filter((m) => m.role !== "system"),
+      engineState: {
+        kind: "pi-coding-agent",
+        entries: [manager.getHeader()!, ...manager.getEntries()],
+      },
     };
   } finally {
     signal.removeEventListener("abort", abort);
+    coding.dispose();
   }
 }
 
@@ -190,7 +255,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
   if (options.session.runtimeState) {
     if (options.session.runtimeState.engine !== engine)
       throw new Error("對話引擎與保存狀態不符，請建立新對話。");
-    if (engine === "pi")
+    if (engine === "pi" && Array.isArray(options.session.runtimeState.data))
       options.session.piMessages = options.session.runtimeState
         .data as Session["piMessages"];
     else options.session.engineState = options.session.runtimeState.data;
@@ -202,7 +267,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     runtimeState: {
       engine,
       version: 1,
-      data: engine === "pi" ? result.piMessages : result.engineState,
+      data: result.engineState ?? result.piMessages,
     },
   };
 }

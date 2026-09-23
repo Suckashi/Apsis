@@ -10,6 +10,7 @@ interface Elements {
   "#allow-writes": HTMLInputElement;
   "#allow-memory": HTMLInputElement;
   "#allow-skills": HTMLInputElement;
+  "#allow-shell": HTMLInputElement;
   "#memory-content": HTMLTextAreaElement;
   "#skill-name": HTMLInputElement;
   "#skill-content": HTMLTextAreaElement;

@@ -91,6 +91,7 @@ export interface RunResult {
   piMessages?: AgentMessage[];
 }
 export interface RunPermissions {
+  shell?: boolean;
   files: boolean;
   memory: boolean;
   skills: boolean;

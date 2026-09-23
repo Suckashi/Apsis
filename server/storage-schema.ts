@@ -7,6 +7,7 @@ export const runSchema = z
     agentName: z.string(),
     model: z.string(),
     permissions: z.object({
+      shell: z.boolean().optional(),
       files: z.boolean(),
       memory: z.boolean(),
       skills: z.boolean(),
