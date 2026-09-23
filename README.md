@@ -53,13 +53,13 @@ npm run dev
 
 Open [http://localhost:3100](http://localhost:3100).
 
-Open **Model connections (模型連線)**, choose a provider, enter its credential and one or more model IDs, and save. Set a default connection and model for ordinary Apsis conversations; you can also choose a model in the chat composer before starting a conversation. Changes apply without restarting. If no model is configured, select **Demo mode (示範模式)** under the input's **Task options (任務選項)** to try scripted streaming responses without an API call.
+Click the **Settings** gear, open **Model connections (模型連線)** in the dialog, choose a provider, enter its credential and one or more model IDs, and save. Set a default connection and model for ordinary Apsis conversations; you can also choose a model in the chat composer before starting a conversation. Changes apply without restarting. If no model is configured, select **Demo mode (示範模式)** under the input's **Task options (任務選項)** to try scripted streaming responses without an API call.
 
 Development starts the server and browser build together. Browser assets are rebuilt on changes, and the backend restarts automatically. Refresh the browser after frontend changes.
 
 ## Creating agents
 
-Open **My Agents (我的 Agents) → Create Agent (建立 Agent)**. Start from a research, code-reading or writing template, then configure instructions, a named connection, model ID, tools, skills and memory scope. Engine selection lives under Advanced settings. Save, then select **Start conversation (開始對話)** to try it. An agent can also be selected in the input's task options.
+Open **Settings → My Agents (我的 Agents) → Create Agent (建立 Agent)**. Start from a research, code-reading or writing template, then configure instructions, a named connection, model ID, tools, skills and memory scope. Engine selection lives under Advanced settings. Save, then select **Start conversation (開始對話)** to try it. An agent can also be selected in the input's task options.
 
 | Engine            | Model connections                                | Runtime behavior                                                                         |
 | ----------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
@@ -147,6 +147,7 @@ See [.env.example](.env.example) for configuration examples:
 
 ## Using the Web interface
 
+- The **Settings** gear opens one dialog with sections for model connections, agents, memory, skills, and Bot settings. Switch sections inside the dialog; **Task history (任務紀錄)** remains a separate view.
 - The **＋** beside Apsis opens a new topic. It keeps saved memories and skills and creates a conversation when the first message is sent.
 - The **＋** inside the input opens task options. File, memory and skill writes have independent switches, all off by default.
 - The composer model picker selects a configured connection and model before the first message in a new ordinary Apsis conversation. Agent conversations use the model saved with that agent.
@@ -163,7 +164,7 @@ Raw HTML in replies is not executed. Unsafe link schemes are blocked, and refere
 ## Telegram
 
 1. Create a dedicated bot with [Telegram's BotFather](https://t.me/BotFather).
-2. In **Bot settings → Telegram Bot**, enter the token, enable the bot, and save.
+2. In **Settings → Bot settings → Telegram Bot**, enter the token, enable the bot, and save.
 3. Once connected, generate a pairing code and privately send the displayed `/pair …` command to your bot. Codes expire after ten minutes and can be used once.
 4. Send a task. Its conversation appears in Web history, where you can inspect progress, stop it, or continue chatting.
 

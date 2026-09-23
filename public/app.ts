@@ -455,6 +455,40 @@ async function api<T = unknown>(
 }
 const post = <T = unknown>(path: string, data: unknown) =>
   api<T>(path, { method: "POST", body: JSON.stringify(data) });
+const settingsViews = [
+  "connections",
+  "agents",
+  "memories",
+  "skills",
+  "settings",
+] as const;
+const settingsDialog = $<HTMLDialogElement>("#settings-dialog");
+const settingsPanels = $("#settings-panels");
+const settingsTabs = $(".settings-tabs");
+const compactSettings = matchMedia("(max-width: 780px)");
+function syncSettingsOrientation() {
+  settingsTabs.setAttribute(
+    "aria-orientation",
+    compactSettings.matches ? "horizontal" : "vertical",
+  );
+}
+compactSettings.addEventListener("change", syncSettingsOrientation);
+syncSettingsOrientation();
+const settingsTitles: Record<string, string> = {
+  connections: "模型連線",
+  agents: "我的 Agents",
+  memories: "記憶",
+  skills: "技能",
+  settings: "Bot 設定",
+};
+let mainView: "chat" | "runs" = "chat";
+let settingsOpener: HTMLElement | null = null;
+for (const view of settingsViews) {
+  const panel = $("#" + view + "-view");
+  panel.setAttribute("role", "tabpanel");
+  panel.setAttribute("aria-labelledby", "settings-tab-" + view);
+  settingsPanels.append(panel);
+}
 function showView(view: string) {
   if (state.busy && view !== "chat") {
     toast("可按「背景執行」後切換頁面，或等待目前任務完成。");
@@ -472,36 +506,66 @@ function showView(view: string) {
     ].includes(view)
   )
     return;
+  const isSettings = settingsViews.includes(
+    view as (typeof settingsViews)[number],
+  );
+  const previousView = state.view;
+  if (!isSettings) mainView = view as "chat" | "runs";
+  if (isSettings && !settingsDialog.open) {
+    settingsOpener =
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+        ? document.activeElement
+        : $("#open-settings");
+  }
   state.view = view;
   setSidebar(false);
   setWorkspace(false);
-  $("#toggle-workspace").hidden = view !== "chat";
-  $("#chat-actions").hidden = view !== "chat";
+  $("#toggle-workspace").hidden = mainView !== "chat";
+  $("#chat-actions").hidden = mainView !== "chat";
   history.replaceState(null, "", "#" + view);
-  document.querySelectorAll<HTMLElement>(".view").forEach((el) => {
-    el.hidden = el.id !== view + "-view";
+  document.querySelectorAll<HTMLElement>("main > .view").forEach((el) => {
+    el.hidden = el.id !== mainView + "-view";
   });
+  for (const panelView of settingsViews) {
+    const panel = $("#" + panelView + "-view");
+    panel.hidden = panelView !== view;
+  }
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-settings-tab]")
+    .forEach((tab) => {
+      const selected = tab.dataset.settingsTab === view;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    });
+  $("#open-settings").setAttribute("aria-expanded", String(isSettings));
+  $("#open-settings").classList.toggle("active", isSettings);
   document
     .querySelectorAll<HTMLElement>(".nav")
-    .forEach((el) => el.classList.toggle("active", el.dataset.view === view));
+    .forEach((el) =>
+      el.classList.toggle("active", el.dataset.view === mainView),
+    );
   document
     .querySelectorAll(".nav")
     .forEach((el) =>
       el.setAttribute(
         "aria-current",
-        (el as HTMLElement).dataset.view === view ? "page" : "false",
+        (el as HTMLElement).dataset.view === mainView ? "page" : "false",
       ),
     );
-  $("#page-name").textContent =
-    {
-      chat: "Apsis",
-      memories: "長期記憶",
-      skills: "技能庫",
-      settings: "Bot 設定",
-      agents: "我的 Agents",
-      runs: "任務紀錄",
-      connections: "模型連線",
-    }[view as "chat" | "memories" | "skills" | "settings" | "agents"] ?? "";
+  $("#page-name").textContent = {
+    chat: "Apsis",
+    runs: "任務紀錄",
+  }[mainView];
+  if (isSettings) {
+    $("#settings-title").textContent = settingsTitles[view];
+    if (!settingsDialog.open) {
+      settingsDialog.showModal();
+      settingsDialog.append($("#toast"));
+      $<HTMLButtonElement>("#settings-tab-" + view).focus();
+    }
+    if (previousView !== view) settingsPanels.scrollTop = 0;
+  } else if (settingsDialog.open) settingsDialog.close();
   if (view === "agents")
     void agentsUI
       .load(state.session?.agent)
@@ -515,6 +579,65 @@ function showView(view: string) {
     updateMode();
   }
 }
+$("#settings-close").addEventListener("click", () => settingsDialog.close());
+settingsDialog.addEventListener("click", (event) => {
+  const box = settingsDialog.getBoundingClientRect();
+  if (
+    event.target === settingsDialog &&
+    (event.clientX < box.left ||
+      event.clientX > box.right ||
+      event.clientY < box.top ||
+      event.clientY > box.bottom)
+  )
+    settingsDialog.close();
+});
+settingsDialog.addEventListener("close", () => {
+  if (settingsDialog.open) return;
+  document.body.append($("#toast"));
+  if (!settingsViews.includes(state.view as (typeof settingsViews)[number])) {
+    settingsOpener = null;
+    return;
+  }
+  showView(mainView);
+  const focusTarget =
+    settingsOpener?.isConnected &&
+    settingsOpener.getClientRects().length &&
+    !settingsOpener.closest("[inert]")
+      ? settingsOpener
+      : $("#open-settings");
+  focusTarget.focus({ preventScroll: true });
+  settingsOpener = null;
+});
+$(".settings-tabs").addEventListener("keydown", (event: KeyboardEvent) => {
+  if (
+    ![
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+    ].includes(event.key)
+  )
+    return;
+  const tabs = Array.from(
+    document.querySelectorAll<HTMLButtonElement>("[data-settings-tab]"),
+  );
+  const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
+  if (current < 0) return;
+  event.preventDefault();
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (current +
+            (["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : -1) +
+            tabs.length) %
+          tabs.length;
+  showView(tabs[next]!.dataset.settingsTab!);
+  if (state.view === tabs[next]!.dataset.settingsTab) tabs[next]!.focus();
+});
 document.addEventListener("click", (event) => {
   const button = (event.target as Element).closest<HTMLElement>("[data-view]");
   if (button) showView(button.dataset.view || "chat");
@@ -1204,6 +1327,7 @@ $("#stop").addEventListener("click", async () => {
 document.addEventListener("keydown", (event) => {
   if (
     !document.querySelector<HTMLDialogElement>("#command-dialog")?.open &&
+    !settingsDialog.open &&
     event.key.toLowerCase() === "n" &&
     !event.ctrlKey &&
     !event.metaKey &&

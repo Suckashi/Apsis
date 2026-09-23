@@ -195,34 +195,11 @@
           <input id="session-search" type="hidden" />
           <div id="sessions" class="sessions" aria-label="對話清單"></div>
         </div>
-        <nav class="sidebar-nav" aria-label="Bot 管理">
+        <nav class="sidebar-nav" aria-label="工作區導覽">
           <button class="nav" data-view="runs">
             <svg class="icon" aria-hidden="true">
               <use href="#i-skill"></use></svg
             ><span>任務紀錄</span>
-          </button>
-          <button class="nav" data-view="connections">
-            <svg class="icon" aria-hidden="true">
-              <use href="#i-settings"></use></svg
-            ><span>模型連線</span>
-          </button>
-          <button class="nav" data-view="agents">
-            <svg class="icon" aria-hidden="true">
-              <use href="#i-skill"></use></svg
-            ><span>我的 Agents</span>
-          </button>
-          <button class="nav" data-view="memories">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <use href="#i-memory"></use></svg
-            ><span>記憶</span><b id="memory-count">0</b></button
-          ><button class="nav" data-view="skills">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <use href="#i-skill"></use></svg
-            ><span>技能</span><b id="skill-count">0</b></button
-          ><button class="nav" data-view="settings">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <use href="#i-settings"></use></svg
-            ><span>Bot 設定</span>
           </button>
         </nav>
         <div class="sidebar-bottom">
@@ -296,6 +273,21 @@
             </div>
           </div>
           <div class="topbar-actions">
+            <button
+              id="open-settings"
+              class="icon-button"
+              type="button"
+              data-view="connections"
+              aria-label="開啟設定"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="settings-dialog"
+              title="設定"
+            >
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <use href="#i-settings"></use>
+              </svg>
+            </button>
             <button
               id="toggle-workspace"
               class="quiet-button"
@@ -973,11 +965,6 @@
           <button id="runs-more" class="quiet-button" hidden>載入更多</button>
         </section>
         <section id="settings-view" class="view library-view" hidden>
-          <p>
-            <a href="/api/storage/backup" download
-              >下載對話、Agent 與知識備份</a
-            >
-          </p>
           <div class="settings-heading">
             <div>
               <span class="eyebrow">YOUR APSIS</span>
@@ -988,6 +975,11 @@
           <p class="view-description">
             模型請到「模型連線」新增並選擇預設。這裡保留原有模型設定與 Telegram
             管理；若預設選的是原有連線，下方模型修改會影響之後的新對話。
+          </p>
+          <p>
+            <a href="/api/storage/backup" download
+              >下載對話、Agent 與知識備份</a
+            >
           </p>
           <div class="settings-grid">
             <form id="pi-settings-form" class="settings-card connection-form">
@@ -1230,6 +1222,101 @@
         </section>
       </main>
     </div>
+    <dialog
+      id="settings-dialog"
+      class="settings-dialog"
+      aria-labelledby="settings-title"
+    >
+      <div class="settings-shell">
+        <aside class="settings-rail">
+          <div class="settings-rail-brand">Apsis / 設定</div>
+          <nav class="settings-tabs" role="tablist" aria-label="設定分類">
+            <button
+              id="settings-tab-connections"
+              class="settings-tab"
+              type="button"
+              role="tab"
+              data-view="connections"
+              data-settings-tab="connections"
+              aria-controls="connections-view"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-settings"></use></svg
+              ><span>模型連線</span>
+            </button>
+            <button
+              id="settings-tab-agents"
+              class="settings-tab"
+              type="button"
+              role="tab"
+              data-view="agents"
+              data-settings-tab="agents"
+              aria-controls="agents-view"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-bot"></use></svg
+              ><span>我的 Agents</span>
+            </button>
+            <button
+              id="settings-tab-memories"
+              class="settings-tab"
+              type="button"
+              role="tab"
+              data-view="memories"
+              data-settings-tab="memories"
+              aria-controls="memories-view"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-memory"></use></svg
+              ><span>記憶</span><b id="memory-count">0</b>
+            </button>
+            <button
+              id="settings-tab-skills"
+              class="settings-tab"
+              type="button"
+              role="tab"
+              data-view="skills"
+              data-settings-tab="skills"
+              aria-controls="skills-view"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-skill"></use></svg
+              ><span>技能</span><b id="skill-count">0</b>
+            </button>
+            <button
+              id="settings-tab-settings"
+              class="settings-tab"
+              type="button"
+              role="tab"
+              data-view="settings"
+              data-settings-tab="settings"
+              aria-controls="settings-view"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-settings"></use></svg
+              ><span>Bot 設定</span>
+            </button>
+          </nav>
+        </aside>
+        <div class="settings-main">
+          <header class="settings-dialog-header">
+            <h2 id="settings-title">模型連線</h2>
+            <button
+              id="settings-close"
+              class="icon-button"
+              type="button"
+              aria-label="關閉設定"
+              title="關閉設定"
+            >
+              <svg class="icon" aria-hidden="true">
+                <use href="#i-close"></use>
+              </svg>
+            </button>
+          </header>
+          <div id="settings-panels" class="settings-panels"></div>
+        </div>
+      </div>
+    </dialog>
     <dialog
       id="command-dialog"
       class="command-dialog"

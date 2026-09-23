@@ -270,6 +270,8 @@ export function initCommandPalette(
       !event.isComposing
     ) {
       event.preventDefault();
+      if (document.querySelector<HTMLDialogElement>("#settings-dialog")?.open)
+        return;
       open();
     }
   });
