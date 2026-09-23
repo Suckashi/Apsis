@@ -11,6 +11,9 @@ import type {
   AgentDefinition,
 } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
+import { RunStore } from "./runs.ts";
+import type { Connections } from "./connections.ts";
+import type { RunPermissions, TaskRun } from "../shared/types.ts";
 
 export type AgentRunner = typeof runAgent;
 export class TaskService {
@@ -18,9 +21,16 @@ export class TaskService {
   workspace: Workspace;
   settings: Settings;
   runner: AgentRunner;
+  runs: RunStore;
+  connections?: Connections;
   running = new Map<
     string,
-    { controller: AbortController; text: string; activity: string[] }
+    {
+      controller: AbortController;
+      text: string;
+      activity: string[];
+      runId: string;
+    }
   >();
   constructor(
     store: Store,
@@ -32,6 +42,7 @@ export class TaskService {
     this.workspace = workspace;
     this.settings = settings;
     this.runner = runner;
+    this.runs = new RunStore(store.directory);
   }
   async create(
     mode: Mode = "pi",
@@ -55,11 +66,12 @@ export class TaskService {
     const session = this.store.state.sessions.find((s) => s.id === id);
     if (!session)
       throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
-    const { piMessages, engineState, ...view } = session;
+    const { piMessages, engineState, runtimeState, ...view } = session;
     const live = this.running.get(id);
     return {
       ...view,
       running: !!live,
+      activeRunId: live?.runId,
       ...(live
         ? { live: { text: live.text, activity: [...live.activity] } }
         : {}),
@@ -71,12 +83,35 @@ export class TaskService {
   stopAll() {
     for (const id of this.running.keys()) this.stop(id);
   }
+  async start(id: string, prompt: string, permissions: RunPermissions) {
+    if (this.running.has(id))
+      throw Object.assign(new Error("此對話正在執行，請等待完成或停止。"), {
+        status: 409,
+      });
+    const completion = this.run(
+      id,
+      prompt,
+      false,
+      () => {},
+      undefined,
+      permissions,
+    );
+    void completion.catch(() => {});
+    const live = this.running.get(id);
+    if (!live) {
+      await completion;
+      throw new Error("任務未能啟動。");
+    }
+    await this.runs.flush(live.runId);
+    return this.runs.records.get(live.runId)!;
+  }
   async run(
     id: string,
     prompt: string,
     allowWrites: boolean,
     onEvent: (event: RunEvent) => void = () => {},
     signal?: AbortSignal,
+    permissions?: RunPermissions,
   ) {
     const session = structuredClone(
       this.store.state.sessions.find((s) => s.id === id),
@@ -90,29 +125,76 @@ export class TaskService {
     if (!prompt.trim() || prompt.length > 16000)
       throw Object.assign(new Error("訊息需為 1–16000 字。"), { status: 400 });
     const controller = new AbortController();
-    const live = { controller, text: "", activity: [] as string[] };
+    const runId = randomUUID();
+    const grants = permissions || {
+      files: allowWrites,
+      memory: allowWrites,
+      skills: allowWrites,
+    };
+    const live = { controller, text: "", activity: [] as string[], runId };
     this.running.set(id, live);
     const abort = () => controller.abort();
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
-    const timer = setTimeout(abort, 300000);
-    const env = this.settings.environment();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      abort();
+    }, 300000);
+    let env = this.settings.environment();
     if (session.agent) {
       env.PI_PROVIDER = session.agent.provider;
       env.PI_MODEL = session.agent.model;
     }
     const userId = randomUUID();
+    const run: TaskRun = {
+      id: runId,
+      sessionId: id,
+      engine: session.mode === "demo" ? "demo" : session.agent?.engine || "pi",
+      agentName: session.agent?.name || "Talaria",
+      connectionId: session.agent?.connectionId,
+      model: env.PI_MODEL || "",
+      permissions: grants,
+      status: "running",
+      createdAt: new Date().toISOString(),
+      text: "",
+      activity: live.activity,
+      operations: [],
+    };
+    // Queue the initial durable record synchronously, before returning a task ID.
+    const initialSave = this.runs.save(run);
+    const redact = (value: string) =>
+      [env.OPENAI_API_KEY, env.COMPATIBLE_API_KEY, env.ANTHROPIC_API_KEY]
+        .filter((v): v is string => !!v)
+        .reduce((text, key) => text.replaceAll(key, "[redacted]"), value);
     const emit = (event: RunEvent) => {
       if (event.type === "delta") live.text += event.text;
       if (event.type === "activity") live.activity.push(event.text);
-      onEvent(event);
+      run.text = live.text;
+      try {
+        onEvent(event);
+      } catch {
+        /* A subscriber cannot terminate a server-owned task. */
+      }
     };
     try {
+      await initialSave;
+      if (session.agent?.connectionId) {
+        if (!this.connections) throw new Error("模型連線服務尚未初始化。");
+        env = this.connections.environment(
+          session.agent.connectionId,
+          session.agent.model,
+        );
+        if (env.PI_PROVIDER !== session.agent.provider)
+          throw new Error("連線供應商已變更，請編輯 agent 並建立新對話。");
+        run.model = env.PI_MODEL || "";
+      }
       await this.store.mutate((s) => {
         const row = s.sessions.find((x) => x.id === id)!;
         if (!row.messages.length) row.title = prompt.slice(0, 44);
         row.messages.push({
           id: userId,
+          runId,
           role: "user",
           content: prompt,
           status: "pending",
@@ -131,6 +213,18 @@ export class TaskService {
         signal: controller.signal,
         env,
         agent: session.agent,
+        permissions: grants,
+        source: { sessionId: id, runId },
+        recordOperation: async (operation) => {
+          const index = run.operations.findIndex((o) => o.id === operation.id);
+          const safe = {
+            ...operation,
+            error: operation.error ? redact(operation.error) : undefined,
+          };
+          if (index < 0) run.operations.push(safe);
+          else run.operations[index] = safe;
+          await this.runs.save(run);
+        },
       } satisfies RunOptions);
       controller.signal.throwIfAborted();
       await this.store.mutate((s) => {
@@ -140,18 +234,32 @@ export class TaskService {
           id: randomUUID(),
           role: "assistant",
           content: result.text,
+          runId,
           status: "complete",
           activity: live.activity,
         });
-        if (result.piMessages) row.piMessages = result.piMessages;
-        if (result.engineState !== undefined)
-          row.engineState = result.engineState;
+        if (result.runtimeState) {
+          row.runtimeState = result.runtimeState;
+          row.piMessages = [];
+          delete row.engineState;
+        } else {
+          if (result.piMessages) row.piMessages = result.piMessages;
+          if (result.engineState !== undefined)
+            row.engineState = result.engineState;
+        }
       });
+      run.text = result.text;
+      run.status = "completed";
+      run.endedAt = new Date().toISOString();
+      run.usage = result.usage;
+      await this.runs.save(run);
       emit({ type: "done" });
       return result.text;
     } catch (caught) {
       let message = controller.signal.aborted
-        ? "已停止執行。"
+        ? timedOut
+          ? "任務超過五分鐘，已停止。"
+          : "已停止執行。"
         : asError(caught).message;
       for (const key of [
         env.OPENAI_API_KEY,
@@ -167,11 +275,17 @@ export class TaskService {
           id: randomUUID(),
           role: "assistant",
           content: live.text ? live.text + "\n\n" + message : message,
+          runId,
           status: "error",
           activity: live.activity,
         });
       });
       emit({ type: "error", text: message });
+      run.status =
+        controller.signal.aborted && !timedOut ? "cancelled" : "failed";
+      run.error = message;
+      run.endedAt = new Date().toISOString();
+      await this.runs.save(run);
       throw new Error(message);
     } finally {
       clearTimeout(timer);

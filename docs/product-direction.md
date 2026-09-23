@@ -25,12 +25,16 @@ Telegram 使用一次性配對碼綁定單一擁有者。只有配對帳號可�
 - Telegram Token 設定、連線檢查、一次性配對、解除綁定、指定群組授權。
 - /new、/stop、/status、/resume，以及 Web 中的 Telegram 對話同步、背景任務停止和續聊指令。
 - 技能索引與按需讀取、持久記憶更新、跨 Web／bot 的歷史查找。
-- 外部 Hermes 設定收進進階選項，舊模式與既有對話仍相容。
+- Hermes Gateway 已移除；舊模式遷移至 Pi 並保留既有對話。
+- 自建 Agent 支援 Pi、Deep Agents 與 OpenAI Agents SDK，搭配命名模型連線、角色範本與私有／共用記憶。
+- Web 任務獨立於瀏覽器連線，提供持久化操作紀錄、背景執行與明確停止。
+- 檔案、記憶與技能權限分開；知識可查閱來源、編輯、合併、停用與查看修訂。
+- 儲存格式版本驗證、遷移備份與每個任務的獨立紀錄。詳見 [架構說明](architecture.md)。
 - 程序重啟後標記中斷任務，不自動重試有副作用的工作。
 
 ## 目前限制
 
-第一版是單一擁有者、文字訊息的 Telegram adapter，完成後以純文字傳回結果；Web 保留 Markdown 與即時進度。沒有接 Discord、X、附件、語音、排程或自動背景學習。長對話尚無自動摘要壓縮。配對與 API 流程有模擬整合測試；真正 Telegram 帳號的端到端驗證仍需要使用者在 Web 填入自己的 Bot Token。
+第一版是單一擁有者、文字訊息的 Telegram adapter，完成後以純文字傳回結果；Web 保留 Markdown 與即時進度。沒有接 Discord、X、附件、語音、排程或自動背景學習。Deep Agents 提供框架摘要；Pi 與 OpenAI SDK 尚未自動摘要。配對與 API 流程有模擬整合測試；真正 Telegram 帳號的端到端驗證仍需要使用者在 Web 填入自己的 Bot Token。
 
 ## 架構參考
 

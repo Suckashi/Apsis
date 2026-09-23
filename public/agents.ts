@@ -2,6 +2,7 @@ import type {
   AgentDefinition,
   Api,
   SettingsView,
+  ModelConnection,
   Skill,
 } from "../shared/types.ts";
 import { agentTools, engineLabels } from "../shared/agents.ts";
@@ -14,6 +15,7 @@ export function createAgentsUI(
   start: (agent?: AgentDefinition) => Promise<void>,
 ) {
   let agents: AgentDefinition[] = [];
+  let connections: ModelConnection[] = [];
   let skills: Skill[] = [];
   let settings: SettingsView | undefined;
   let editing: AgentDefinition | undefined;
@@ -51,8 +53,8 @@ export function createAgentsUI(
       'option[value="anthropic"]',
     )!.disabled = engine === "openai-agents";
     if (engine === "openai-agents" && provider.value === "anthropic") {
-      provider.value = "openai";
-      changeModel = true;
+      $("#agent-form-status").textContent =
+        "OpenAI Agents SDK 不支援 Anthropic 原生連線，請改用 Pi 或 Deep Agents。";
     }
     $("#agent-engine-help").textContent =
       engine === "deepagents"
@@ -76,6 +78,15 @@ export function createAgentsUI(
     $("#agent-editor-title").textContent = agent
       ? "編輯 " + agent.name
       : "建立 Agent";
+    field("template").value = "custom";
+    const connectionSelect = field("connection") as HTMLSelectElement;
+    connectionSelect.replaceChildren(
+      ...connections.map((c) => new Option(c.name, c.id)),
+    );
+    connectionSelect.value =
+      agent?.connectionId ||
+      "legacy-" + (agent?.provider || settings?.pi.provider || "ollama");
+    field("provider").disabled = true;
     field("name").value = agent?.name || "";
     field("description").value = agent?.description || "";
     field("instructions").value =
@@ -122,6 +133,24 @@ export function createAgentsUI(
     if (snapshot && !agents.some((a) => a.id === snapshot.id))
       select.append(new Option(snapshot.name + " · 對話快照", snapshot.id));
     select.value = value;
+    const roster = $("#agent-roster");
+    const rosterKey = JSON.stringify(agents.map((a) => [a.id, a.name]));
+    if (roster.dataset.key !== rosterKey) {
+      roster.dataset.key = rosterKey;
+      roster.replaceChildren();
+      for (const [id, name] of [
+        ["all", "全部對話"],
+        ["", "Talaria"],
+        ...agents.map((a) => [a.id, a.name]),
+      ]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.agentId = id;
+        button.className = "quiet-button";
+        button.textContent = name;
+        roster.append(button);
+      }
+    }
     const root = $("#agent-cards");
     root.replaceChildren();
     for (const agent of [undefined, ...agents]) {
@@ -140,7 +169,7 @@ export function createAgentsUI(
           : "預設助手，使用 Bot 設定中的模型、共用記憶與技能。");
       const meta = document.createElement("small");
       meta.textContent = agent
-        ? `${agent.model} · ${agent.memoryScope === "private" ? "獨立記憶" : "共用記憶"} · ${agent.tools.length} 個工具`
+        ? `v${agent.version || 1} · ${connections.find((c) => c.id === agent.connectionId)?.name || agent.provider} · ${agent.model} · ${agent.memoryScope === "private" ? "獨立記憶" : "共用記憶"} · ${agent.tools.length} 個工具`
         : "與現有對話及 Telegram 相容";
       const actions = document.createElement("div");
       actions.className = "agent-card-actions";
@@ -171,10 +200,11 @@ export function createAgentsUI(
     }
   }
   async function load(snapshot?: AgentDefinition) {
-    [agents, skills, settings] = await Promise.all([
+    [agents, skills, settings, connections] = await Promise.all([
       api<AgentDefinition[]>("agents"),
       api<Skill[]>("skills"),
       api<SettingsView>("settings"),
+      api<ModelConnection[]>("connections"),
     ]);
     render(snapshot);
   }
@@ -182,6 +212,64 @@ export function createAgentsUI(
   $("#agent-cancel").onclick = () => {
     form.hidden = true;
     $("#agent-new").focus();
+  };
+  field("connection").onchange = () => {
+    const connection = connections.find(
+      (c) => c.id === field("connection").value,
+    );
+    if (connection) {
+      field("provider").value = connection.provider;
+      field("model").value = connection.model;
+      hints();
+    }
+  };
+  field("template").onchange = () => {
+    const templates: Record<string, [string, string, string[]]> = {
+      research: [
+        "研究助理",
+        "先確認研究問題，閱讀工作區與相關歷史，區分事實與推論。整理來源、比較與待釐清問題；沒有搜尋工具時不要聲稱已查閱網路。",
+        [
+          "list_files",
+          "read_file",
+          "search_history",
+          "remember",
+          "update_memory",
+          "list_skills",
+          "read_skill",
+        ],
+      ],
+      coding: [
+        "程式碼助手",
+        "先閱讀相關檔案，解釋程式結構，提出具體改動；取得本回合檔案權限後才修改檔案，不聲稱執行不存在的測試或 shell。",
+        [
+          "list_files",
+          "read_file",
+          "write_file",
+          "search_history",
+          "list_skills",
+          "read_skill",
+        ],
+      ],
+      writing: [
+        "寫作助手",
+        "確認讀者、用途與語氣，先整理大綱再撰稿，根據回饋迭代並保存經允許的偏好。",
+        [
+          "read_file",
+          "list_files",
+          "remember",
+          "update_memory",
+          "save_skill",
+          "list_skills",
+          "read_skill",
+        ],
+      ],
+    };
+    const template = templates[field("template").value];
+    if (template) {
+      field("name").value = template[0];
+      field("instructions").value = template[1];
+      checkList("#agent-tools", Object.entries(agentTools), template[2]);
+    }
   };
   field("engine").onchange = () => hints();
   field("provider").onchange = () => hints(true);
@@ -205,6 +293,7 @@ export function createAgentsUI(
             instructions: field("instructions").value,
             engine: field("engine").value,
             provider: field("provider").value,
+            connectionId: field("connection").value,
             model: field("model").value,
             memoryScope: field("memory").value,
             tools: checked("#agent-tools"),
@@ -225,6 +314,9 @@ export function createAgentsUI(
   };
   return {
     load,
+    selectById(id: string) {
+      this.select(agents.find((a) => a.id === id));
+    },
     selected: () => agents.find((a) => a.id === select.value),
     select(agent?: AgentDefinition) {
       conversationSnapshot = agent;
@@ -232,6 +324,17 @@ export function createAgentsUI(
       select.value = agent?.id || "";
     },
     requirement(agent: AgentDefinition) {
+      if (agent.connectionId) {
+        const c = connections.find((c) => c.id === agent.connectionId);
+        if (!c) return "此 Agent 的模型連線已不可用，請至模型連線管理。";
+        if (c.provider !== agent.provider)
+          return "模型連線供應商已變更，請更新 Agent 並開啟新對話。";
+        return c.provider === "ollama" ||
+          (c.provider === "openai-compatible" && c.url) ||
+          c.credentialConfigured
+          ? ""
+          : "請在模型連線填入 API key。";
+      }
       if (agent.provider === "ollama") return "";
       if (agent.provider === "openai-compatible")
         return settings?.pi.compatibleUrl

@@ -1,6 +1,7 @@
 import type { StoreState } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile, copyFile } from "node:fs/promises";
+import { storageSchema } from "./storage-schema.ts";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -18,10 +19,16 @@ export class Store {
     this.file = join(this.directory, "state.json");
     try {
       this.state = JSON.parse(await readFile(this.file, "utf8"));
+      const parsed = storageSchema.safeParse(this.state);
+      if (!parsed.success)
+        throw new Error(
+          "本機資料格式不符，已停止載入以保留原檔。請檢查 state.json 與 state.json.bak。",
+        );
     } catch (caught) {
       const error = asError(caught);
       if (error.code !== "ENOENT") throw error;
       this.state = {
+        schemaVersion: 1,
         sessions: [],
         memories: [],
         skills: [
@@ -36,6 +43,18 @@ export class Store {
       };
     }
     const legacyMode = (mode: string) => mode === "hermes" || mode === "hybrid";
+    if (!this.state.schemaVersion) {
+      await copyFile(
+        this.file,
+        join(this.directory, "state.pre-v1.json"),
+        1,
+      ).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "EEXIST") throw error;
+      });
+      await this.mutate((s) => {
+        s.schemaVersion = 1;
+      });
+    }
     if (
       this.state.sessions.some((s) => legacyMode(s.mode)) ||
       this.state.sessions.some((s) =>
@@ -65,8 +84,15 @@ export class Store {
     const operation = this.tail.then(async () => {
       const next = structuredClone(this.state);
       const result = fn(next);
+      if (!storageSchema.safeParse(next).success)
+        throw new Error("拒絕保存不合法的資料格式。");
       const temp = join(this.directory, `state-${randomUUID()}.tmp`);
       await writeFile(temp, JSON.stringify(next, null, 2), { mode: 0o600 });
+      await copyFile(this.file, this.file + ".bak").catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        },
+      );
       await rename(temp, this.file);
       this.state = next;
       return result;

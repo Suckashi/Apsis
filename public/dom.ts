@@ -8,6 +8,8 @@ interface Elements {
   "#stop": HTMLButtonElement;
   "#new-session": HTMLButtonElement;
   "#allow-writes": HTMLInputElement;
+  "#allow-memory": HTMLInputElement;
+  "#allow-skills": HTMLInputElement;
   "#memory-content": HTMLTextAreaElement;
   "#skill-name": HTMLInputElement;
   "#skill-content": HTMLTextAreaElement;

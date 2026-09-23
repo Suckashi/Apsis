@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { createModels } from "@earendil-works/pi-ai";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { configuration } from "./agent.ts";
+import { configuration } from "./configuration.ts";
 
 const keyFields = {
   openai: "OPENAI_API_KEY",

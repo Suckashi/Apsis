@@ -4,6 +4,8 @@ export type Provider = "openai" | "anthropic" | "ollama" | "openai-compatible";
 export type Mode = "demo" | "pi";
 export type AgentEngine = "pi" | "deepagents" | "openai-agents";
 export interface AgentDefinition {
+  connectionId?: string;
+  version?: number;
   id: string;
   name: string;
   description: string;
@@ -20,6 +22,11 @@ export interface AgentDefinition {
 }
 export type Environment = Record<string, string | undefined>;
 export interface Memory {
+  enabled?: boolean;
+  updatedAt?: string;
+  source?: { sessionId?: string; runId?: string; kind: "agent" | "manual" };
+  revisions?: { content: string; at: string }[];
+  mergedInto?: string;
   agentId?: string;
   id: string;
   content: string;
@@ -29,6 +36,7 @@ export interface Skill extends Memory {
   name: string;
 }
 export interface ChatMessage {
+  runId?: string;
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -36,6 +44,7 @@ export interface ChatMessage {
   activity?: string[];
 }
 export interface Session {
+  runtimeState?: { engine: AgentEngine; version: 1; data: unknown };
   agent?: AgentDefinition;
   engineState?: unknown;
   source?: "web" | "telegram";
@@ -46,18 +55,23 @@ export interface Session {
   messages: ChatMessage[];
   piMessages: AgentMessage[];
 }
-export type SessionView = Omit<Session, "piMessages" | "engineState"> & {
+export type SessionView = Omit<
+  Session,
+  "piMessages" | "engineState" | "runtimeState"
+> & {
+  activeRunId?: string;
   running?: boolean;
   live?: { text: string; activity: string[] };
 };
 export type SessionSummary = Omit<
   Session,
-  "piMessages" | "engineState" | "messages"
+  "piMessages" | "engineState" | "runtimeState" | "messages"
 > & {
   count: number;
   running: boolean;
 };
 export interface StoreState {
+  schemaVersion?: number;
   agents?: AgentDefinition[];
   sessions: Session[];
   memories: Memory[];
@@ -67,9 +81,61 @@ export type RunEvent =
   | { type: "delta" | "activity" | "error"; text: string; tool?: string }
   | { type: "done" };
 export interface RunResult {
+  runtimeState?: Session["runtimeState"];
+  usage?: { inputTokens: number; outputTokens: number };
   engineState?: unknown;
   text: string;
   piMessages?: AgentMessage[];
+}
+export interface RunPermissions {
+  files: boolean;
+  memory: boolean;
+  skills: boolean;
+}
+export interface ToolOperation {
+  id: string;
+  name: string;
+  status: "started" | "succeeded" | "failed" | "unknown";
+  startedAt: string;
+  endedAt?: string;
+  target?: string;
+  mutating: boolean;
+  error?: string;
+}
+export interface TaskRun {
+  id: string;
+  sessionId: string;
+  engine: AgentEngine | "demo";
+  agentName: string;
+  connectionId?: string;
+  model: string;
+  permissions: RunPermissions;
+  status: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  createdAt: string;
+  endedAt?: string;
+  text: string;
+  activity: string[];
+  operations: ToolOperation[];
+  error?: string;
+  usage?: RunResult["usage"];
+}
+export interface ModelConnection {
+  id: string;
+  name: string;
+  provider: Provider;
+  model: string;
+  url?: string;
+  credentialConfigured: boolean;
+  archived?: boolean;
+  verification?: {
+    engine: AgentEngine;
+    model: string;
+    at: string;
+    ok: boolean;
+    streaming: boolean;
+    tools: boolean;
+    message: string;
+  };
 }
 export interface Status {
   provider: string;

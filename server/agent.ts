@@ -1,281 +1,31 @@
+import { createTools } from "./tools.ts";
+import type { ToolOptions, RunOptions } from "./runtime.ts";
+export { createTools } from "./tools.ts";
+export { agentContext } from "./context.ts";
+export type { RunOptions, ToolOptions } from "./runtime.ts";
 import { ollamaProvider, defaultOllamaUrl } from "./ollama.ts";
 import { compatibleProvider } from "./compatible.ts";
-import type {
-  AgentMessage,
-  AgentTool,
-  AgentToolResult,
-  StreamFn,
-} from "@earendil-works/pi-agent-core";
+import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
-import type {
-  Environment,
-  Status,
-  Session,
-  RunEvent,
-  RunResult,
-  AgentDefinition,
-} from "../shared/types.ts";
-import type { Store } from "./store.ts";
-import type { Workspace } from "./workspace.ts";
+
+import type { Session, RunResult, RunEvent } from "../shared/types.ts";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { createModels } from "@earendil-works/pi-ai";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { randomUUID } from "node:crypto";
+
 import { setTimeout as delay } from "node:timers/promises";
-import { buildContext, skillIndex } from "./context.ts";
-import { scopedState } from "./agents.ts";
+import { agentContext } from "./context.ts";
 
-type ToolHandler = (
-  args: Record<string, string>,
-  signal?: AbortSignal,
-) => unknown | Promise<unknown>;
-const schema = (properties: string[]) =>
-  Type.Object(
-    Object.fromEntries(properties.map((name) => [name, Type.String()])),
-    { additionalProperties: false },
-  );
-const result = (value: unknown): AgentToolResult => ({
-  content: [
-    {
-      type: "text",
-      text:
-        typeof value === "string" ? value : (JSON.stringify(value) ?? "null"),
-    },
-  ],
-  details: {},
-});
-const tool = (
-  name: string,
-  description: string,
-  fields: string[],
-  run: ToolHandler,
-): AgentTool => ({
-  name,
-  label: name,
-  description,
-  parameters: schema(fields),
-  execute: async (_id, args, signal) => {
-    signal?.throwIfAborted();
-    if (
-      !args ||
-      typeof args !== "object" ||
-      fields.some(
-        (field) => typeof (args as Record<string, unknown>)[field] !== "string",
-      )
-    )
-      throw new Error("工具參數格式錯誤。");
-    return result(await run(args as Record<string, string>, signal));
-  },
-});
+import { configuration } from "./configuration.ts";
+export { configuration } from "./configuration.ts";
 
-export function configuration(env: Environment = process.env): Status {
-  const provider = env.PI_PROVIDER || "openai";
-  const model =
-    env.PI_MODEL ||
-    (provider === "ollama"
-      ? "qwen3.5:9b"
-      : provider === "anthropic"
-        ? "claude-sonnet-4-6"
-        : provider === "openai-compatible"
-          ? ""
-          : "gpt-4.1-mini");
-  return {
-    provider,
-    model,
-    piReady: Boolean(
-      provider === "ollama"
-        ? true
-        : provider === "openai-compatible"
-          ? env.COMPATIBLE_BASE_URL && env.PI_MODEL
-          : provider === "anthropic"
-            ? env.ANTHROPIC_API_KEY
-            : provider === "openai" && env.OPENAI_API_KEY,
-    ),
-  };
-}
-
-export interface ToolOptions {
-  agent?: AgentDefinition;
-  store: Store;
-  workspace: Workspace;
-  allowWrites: boolean;
-  env?: Environment;
-}
 export interface PiOptions extends ToolOptions {
   prompt: string;
   session: { piMessages?: AgentMessage[] };
   emit: (event: RunEvent) => void;
   signal: AbortSignal;
   runtime?: { model: Model<Api>; streamFn: StreamFn };
-}
-export interface RunOptions extends PiOptions {
-  mode: Session["mode"];
-  session: Session;
-}
-
-export function createTools({
-  store,
-  workspace,
-  allowWrites,
-  agent,
-}: ToolOptions) {
-  const view = () => scopedState(store.state, agent);
-  const writable =
-    (fn: ToolHandler): ToolHandler =>
-    async (...args) => {
-      if (!allowWrites) throw new Error("使用者尚未開啟「允許修改」。");
-      return fn(...args);
-    };
-  const tools = [
-    tool(
-      "list_skills",
-      "List reusable skill names, IDs and brief descriptions. Pass a query or empty string to list all.",
-      ["query"],
-      (a) =>
-        skillIndex(view())
-          .filter((s) =>
-            (s.name + " " + s.description)
-              .toLocaleLowerCase()
-              .includes(a.query.toLocaleLowerCase()),
-          )
-          .slice(0, 100),
-    ),
-    tool(
-      "read_skill",
-      "Load the complete procedure for a skill ID from list_skills.",
-      ["id"],
-      (a) => {
-        const skill = view().skills.find((s) => s.id === a.id);
-        if (!skill) throw new Error("找不到技能。");
-        return skill;
-      },
-    ),
-    tool(
-      "search_history",
-      "Find matching completed messages in the owner's past Web and bot conversations. Query must be at least two characters.",
-      ["query"],
-      (a) => {
-        const query = a.query.trim().toLocaleLowerCase();
-        if (query.length < 2 || query.length > 200)
-          throw new Error("查詢需為 2–200 字。");
-        return view()
-          .sessions.flatMap((s) =>
-            s.messages
-              .filter(
-                (m) =>
-                  m.status === "complete" &&
-                  m.content.toLocaleLowerCase().includes(query),
-              )
-              .map((m) => ({
-                sessionId: s.id,
-                title: s.title,
-                role: m.role,
-                excerpt: m.content.slice(
-                  Math.max(
-                    0,
-                    m.content.toLocaleLowerCase().indexOf(query) - 160,
-                  ),
-                  Math.max(
-                    0,
-                    m.content.toLocaleLowerCase().indexOf(query) - 160,
-                  ) + 1000,
-                ),
-              })),
-          )
-          .slice(0, 10);
-      },
-    ),
-    tool(
-      "update_memory",
-      "Replace an outdated memory by ID. Requires write permission. Never store credentials.",
-      ["id", "content"],
-      writable(async (a) => {
-        if (!a.content.trim() || a.content.length > 4000)
-          throw new Error("記憶需為 1–4000 字。");
-        await store.mutate((s) => {
-          const memory = scopedState(s, agent).memories.find(
-            (m) => m.id === a.id,
-          );
-          if (!memory) throw new Error("找不到記憶。");
-          memory.content = a.content;
-        });
-        return "記憶已更新。";
-      }),
-    ),
-    tool(
-      "list_files",
-      "List files in the local workspace. Use an empty path for the root.",
-      ["path"],
-      (a) => workspace.list(a.path),
-    ),
-    tool("read_file", "Read a UTF-8 file in the workspace.", ["path"], (a) =>
-      workspace.read(a.path),
-    ),
-    tool(
-      "write_file",
-      "Create or replace a workspace file. Requires user-enabled writes.",
-      ["path", "content"],
-      writable((a) => workspace.write(a.path, a.content)),
-    ),
-    tool(
-      "remember",
-      "Save a useful user preference or durable project fact. Never store credentials.",
-      ["content"],
-      writable(async (a) => {
-        if (!a.content.trim() || a.content.length > 4000)
-          throw new Error("記憶長度必須為 1–4000 字。");
-        await store.mutate((s) =>
-          s.memories.push({
-            ...(agent?.memoryScope === "private" ? { agentId: agent.id } : {}),
-            id: randomUUID(),
-            content: a.content,
-            createdAt: new Date().toISOString(),
-          }),
-        );
-        return "已儲存記憶。";
-      }),
-    ),
-    tool(
-      "save_skill",
-      "Save a reusable procedure after a successful task. Never include secrets.",
-      ["name", "content"],
-      writable(async (a) => {
-        if (
-          !a.name.trim() ||
-          a.name.length > 100 ||
-          !a.content.trim() ||
-          a.content.length > 12000
-        )
-          throw new Error("技能名稱或內容長度不符。");
-        await store.mutate((s) =>
-          s.skills.push({
-            ...(agent ? { agentId: agent.id } : {}),
-            id: randomUUID(),
-            name: a.name,
-            content: a.content,
-            createdAt: new Date().toISOString(),
-          }),
-        );
-        return "已儲存技能。";
-      }),
-    ),
-  ];
-  return agent ? tools.filter((t) => agent.tools.includes(t.name)) : tools;
-}
-
-export function agentContext(
-  store: Store,
-  allowWrites: boolean,
-  agent?: AgentDefinition,
-) {
-  return (
-    buildContext(scopedState(store.state, agent), allowWrites) +
-    (agent
-      ? `\nAgent name: ${agent.name}\nRole instructions:\n${agent.instructions}`
-      : "")
-  );
 }
 
 export async function runPi({
@@ -289,6 +39,10 @@ export async function runPi({
   env = process.env,
   runtime,
   agent: profile,
+  permissions,
+  source,
+  recordOperation,
+  probe,
 }: PiOptions): Promise<RunResult> {
   const config = configuration(env);
   let models;
@@ -321,14 +75,30 @@ export async function runPi({
       );
     streamFn = models.streamSimple.bind(models);
   }
-  const context = agentContext(store, allowWrites, profile);
+  const context = agentContext(
+    store,
+    allowWrites,
+    profile,
+    prompt,
+    permissions,
+  );
+  const usage = { inputTokens: 0, outputTokens: 0 };
   let turns = 0;
   const agent = new Agent({
     initialState: {
       systemPrompt: context,
       model,
       messages: session.piMessages || [],
-      tools: createTools({ store, workspace, allowWrites, agent: profile }),
+      tools: createTools({
+        store,
+        workspace,
+        allowWrites,
+        agent: profile,
+        permissions,
+        source,
+        recordOperation,
+        probe,
+      }),
     },
     streamFn,
     getApiKey: () =>
@@ -349,6 +119,13 @@ export async function runPi({
   });
   let text = "";
   agent.subscribe((event) => {
+    if (event.type === "message_end" && event.message.role === "assistant") {
+      usage.inputTokens +=
+        event.message.usage.input +
+        event.message.usage.cacheRead +
+        event.message.usage.cacheWrite;
+      usage.outputTokens += event.message.usage.output;
+    }
     if (
       event.type === "message_update" &&
       event.assistantMessageEvent.type === "text_delta"
@@ -385,6 +162,7 @@ export async function runPi({
     }
     return {
       text,
+      usage,
       piMessages: agent.state.messages.filter((m) => m.role !== "system"),
     };
   } finally {
@@ -399,7 +177,7 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
       type: "activity",
       text: "示範流程：讀取本機記憶與技能（未呼叫 AI）",
     });
-    const text = `這是本機示範回覆，不是真實 AI 生成。\n\n你提出的任務：${prompt}\n\n## 我們可以一起做的事\n\n- 閱讀工作區檔案，理解你的專案。\n- 保存重要偏好與可重用的技能，讓下次對話接得上。\n- 在 Web 或已配對的 Telegram Bot 交辦任務。\n\n到「Bot 設定」連接模型，再從「任務選項」選擇 Talaria，就能開始真實對話。需要修改檔案或保存記憶時，請先開啟「允許修改與保存」。`;
+    const text = `這是本機示範回覆，不是真實 AI 生成。\n\n你提出的任務：${prompt}\n\n## 我們可以一起做的事\n\n- 閱讀工作區檔案，理解你的專案。\n- 保存重要偏好與可重用的技能，讓下次對話接得上。\n- 在 Web 或已配對的 Telegram Bot 交辦任務。\n\n到「Bot 設定」連接模型，再從「任務選項」選擇 Talaria，就能開始真實對話。需要修改檔案或保存記憶時，請先開啟「對應的檔案／記憶／技能寫入權限」。`;
     for (const chunk of text.match(/.{1,14}|\n/gu) || []) {
       signal.throwIfAborted();
       emit({ type: "delta", text: chunk });
@@ -408,9 +186,23 @@ export async function runAgent(options: RunOptions): Promise<RunResult> {
     return { text };
   }
   if (mode !== "pi") throw new Error("不支援的回覆模式。");
-  if (options.agent?.engine === "openai-agents")
-    return (await import("./engines/openai.ts")).runOpenAI(options);
-  if (options.agent?.engine === "deepagents")
-    return (await import("./engines/deep.ts")).runDeep(options);
-  return runPi(options);
+  const engine = options.agent?.engine || "pi";
+  if (options.session.runtimeState) {
+    if (options.session.runtimeState.engine !== engine)
+      throw new Error("對話引擎與保存狀態不符，請建立新對話。");
+    if (engine === "pi")
+      options.session.piMessages = options.session.runtimeState
+        .data as Session["piMessages"];
+    else options.session.engineState = options.session.runtimeState.data;
+  }
+  const adapter = (await import("./engines/index.ts")).engines[engine];
+  const result = await adapter.run(options);
+  return {
+    ...result,
+    runtimeState: {
+      engine,
+      version: 1,
+      data: engine === "pi" ? result.piMessages : result.engineState,
+    },
+  };
 }

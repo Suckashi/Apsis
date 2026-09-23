@@ -29,7 +29,7 @@ The Web layout follows [xAI's Grok Bot design reference](https://x.ai/news/desig
 Both Pi packages are pinned to `0.87.0`. Pi remains the default runtime; custom agents can also use `deepagents` or `@openai/agents`. Engine adapters share Talaria's tools, permissions and long-term memory. Talaria neither installs Hermes Agent nor connects to a Hermes Gateway. The memory implementation follows selected architectural ideas; it is not a complete port of Hermes.
 
 ```text
-Web browser ── HTTP / NDJSON ──┐
+Web browser ── HTTP / run polling ──┐
 Telegram ─── long polling ────┤
                               ▼
                       Shared task service
@@ -59,7 +59,7 @@ Development starts the server and browser build together. Browser assets are reb
 
 ## Creating agents
 
-Open **My Agents (我的 Agents) → Create Agent (建立 Agent)**. Set its name, instructions, engine, provider, model ID, tools, selected skills, and memory scope. Save, then select **Start conversation (開始對話)** to try it. An agent can also be selected in the input's task options.
+Open **My Agents (我的 Agents) → Create Agent (建立 Agent)**. Start from a research, code-reading or writing template, then configure instructions, a named connection, model ID, tools, skills and memory scope. Engine selection lives under Advanced settings. Save, then select **Start conversation (開始對話)** to try it. An agent can also be selected in the input's task options.
 
 | Engine            | Model connections                                | Runtime behavior                                                                         |
 | ----------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
@@ -67,7 +67,7 @@ Open **My Agents (我的 Agents) → Create Agent (建立 Agent)**. Set its name
 | Deep Agents       | OpenAI, Anthropic, Ollama, custom compatible API | Planning, internal subagents, virtual scratch files and framework summarization          |
 | OpenAI Agents SDK | OpenAI, Ollama, custom compatible API            | SDK agent loop; OpenAI uses Responses, others use Chat Completions; SDK tracing disabled |
 
-All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a provider and model; credentials and endpoint URLs are shared through Bot settings.
+All engines run in Node.js. No Python service, LangSmith deployment, or database server is required. Dependencies increase, but engine modules load on demand. Models must support tools and streaming. Each agent selects a named model connection and model ID. Connections have independent URLs and credentials. Existing Bot settings remain available for default Talaria, Telegram and legacy agents.
 
 Private memory and history retrieval are scoped to the agent. Shared agents use Talaria's shared memories and shared-conversation search. Agents see selected shared skills and skills they create themselves. Workspace files remain shared; the owner can inspect all knowledge in the management UI. This is not multi-user isolation.
 
@@ -76,6 +76,14 @@ Memory scope is fixed after creation. Edits affect new conversations only; exist
 Deep Agents' built-in filesystem uses conversation-local virtual state, never the host filesystem. Real files use `workspace_list_files`, `workspace_read_file`, and `workspace_write_file`, with Talaria's permissions. Virtual notes and todos persist on successful completion. Real writes and long-term knowledge require both tool selection and per-task write permission. No shell backend is enabled.
 
 There is no visual handoff/workflow editor or cross-engine delegation yet. OpenAI SDK handoffs are not configured by the UI. Deep Agents can delegate internally with inherited tools.
+
+Open **Model connections → Add connection**, save a name, provider, model, URL and key, then select it in an agent. Multiple compatible endpoints coexist without replacing old settings. Changing the provider or URL clears the old key. Connections referenced by agents or existing conversations cannot be archived.
+
+## Background tasks and operation history
+
+Tasks belong to the server. Select **Run in background (背景執行)** to navigate away and work elsewhere; closing the tab or losing the network does not cancel a task. **Task history (任務紀錄)** shows status, output, tool names, targets, operation outcomes and provider-reported token usage, with 50 runs per page. Stop an active run or open its conversation from its card.
+
+The server and computer must remain running. Restart marks unfinished runs interrupted and started-but-unconfirmed operations unknown, without automatic replay. A new message creates a new run; inspect previous side effects first. Deep Agents usage covers available main-flow message statistics, not a complete subagent bill. No estimated prices are shown.
 
 ## Model connections
 
@@ -90,7 +98,7 @@ There is no visual handoff/workflow editor or cross-engine delegation yet. OpenA
 
 Select the service in **Bot settings**, choose a model from the supported suggestions, enter its API key, and save. Their credentials are stored independently.
 
-Configuration status means the settings are present; it does not prove successful authentication or generation. A chat task exercises the actual model connection.
+Configured means values are present. **Model connections → Test model** verifies streaming, tool execution and returning the tool result through the selected engine. Cloud tests may incur charges. Tests use isolated state without workspace or saved knowledge access. Results apply only to that model/engine combination; editing clears previous results.
 
 ### Local Ollama
 
@@ -137,12 +145,12 @@ See [.env.example](.env.example) for configuration examples:
 ## Using the Web interface
 
 - The **＋** beside Talaria opens a new topic. It keeps saved memories and skills and creates a conversation when the first message is sent.
-- The **＋** inside the input opens task options. File writes and saving memories or skills require **Allow modifications and saving (允許修改與保存)**.
+- The **＋** inside the input opens task options. File, memory and skill writes have independent switches, all off by default.
 - **Ctrl/Cmd + K** searches conversation titles and opens quick navigation. **Conversation history (對話紀錄)** expands the saved list.
 - On desktop, Enter sends and Shift+Enter adds a line. On mobile, Enter adds a line; use the send button or Ctrl/Cmd+Enter to send. IME confirmation does not submit.
 - Tool activity can be expanded while a task runs. Stop controls cancel the current local task.
 - Replies render Markdown, tables, and code blocks. Code copying preserves whitespace. Use **Export Markdown (匯出 Markdown)** in the conversation menu to download visible messages.
-- Drafts are saved per conversation in this browser. Failed tasks restore the prompt for editing without automatic resubmission.
+- Drafts are saved per conversation in this browser. After submission, connection failures direct you to task history; prompts are never automatically resubmitted.
 - Scrolling up preserves your reading position; **Latest messages (最新訊息)** resumes following the output.
 - The workspace panel opens alongside chat on wide desktops and as a drawer on mobile.
 
@@ -179,7 +187,7 @@ On Windows, the project also detects the official executable at `.tools/cloudfla
 
 The command reuses an existing Talaria server or starts one, then creates a password-protected proxy and a temporary Cloudflare URL. It prints the URL and random password and saves them in Git-ignored `.loom/share-connection.json`. Do not commit or share that file publicly.
 
-Remote login grants **full owner access**, including model settings, conversations, and task execution. All application pages and APIs require authentication. Sessions use an HttpOnly, Secure, SameSite cookie and expire after eight hours; remote logout ends the session. The proxy checks the assigned hostname and request origin and limits failed logins. Model streaming reaches the browser through fetch and NDJSON.
+Remote login grants **full owner access**, including model settings, conversations, and task execution. All application pages and APIs require authentication. Sessions use an HttpOnly, Secure, SameSite cookie and expire after eight hours; remote logout ends the session. The proxy checks the assigned hostname and request origin and limits failed logins. The Web UI polls progress and reply text by run ID; the legacy NDJSON API remains available.
 
 This uses Talaria's password authentication. A fixed domain and Cloudflare Access are separate setup work and are not provided by this command. Cloudflare carries the remote traffic; your computer must stay awake and online.
 
@@ -195,7 +203,7 @@ Ctrl+C closes sharing. An existing development server stays running; one started
 
 Available tools: `list_files`, `read_file`, `write_file`, `remember`, `update_memory`, `save_skill`, `list_skills`, `read_skill`, and `search_history`.
 
-The model decides when to save knowledge, subject to write permission. There is no background learning worker, automatic memory deduplication, or relevance ranking. Memory entries that do not fit the prompt budget are skipped in stored order. Skill descriptions are text prefixes, not generated summaries.
+The model saves knowledge only with the corresponding permission. Same-scope facts are deduplicated using normalized text and ranked lexically against the current prompt, including CJK bigrams, before applying the 16,000-character budget. This is not vector retrieval or semantic deduplication. The management UI supports editing, disabling, deleting and merging same-scope items, up to 20 content revisions, and links to source conversations for agent-saved knowledge. Disabled/merged entries are excluded from context. Skills remain on-demand; no background learning worker runs.
 
 | Location              | Contents                                                                      |
 | --------------------- | ----------------------------------------------------------------------------- |
@@ -205,6 +213,10 @@ The model decides when to save knowledge, subject to write permission. There is 
 | `workspace/`          | Files accessible to the agent's file tools                                    |
 
 Local data is created on demand and ignored by Git. Settings and tokens are stored as local plaintext; configuration APIs do not expose the secrets. Files use mode 0600 where supported. Conversation writes are serialized and use atomic JSON replacement within one server process.
+
+Storage schema version 1 is validated on load and save. Migration preserves `state.pre-v1.json`; later writes retain the previous `state.json.bak`. Invalid data stops loading without replacing the original. Runs are stored separately in `.loom/runs/<id>.json`; named credentials live in `.loom/connections.json`. Bot settings downloads a conversation/agent/knowledge snapshot, excluding connection keys and run files. For a full backup, stop the server and copy `.loom/` and `workspace/`. Restore while stopped, keeping a copy of the current data; there is no automatic restore UI.
+
+Single-process JSON storage remains to preserve simple startup. Run journals are separate and streamed tokens do not rewrite conversation state. Large histories and multiple writers are reasons to migrate to SQLite later; SQLite is not implemented now. See [architecture notes](docs/architecture.md).
 
 Older Hermes/hybrid conversations migrate to Pi mode while preserving their IDs, messages, and Pi transcripts. Retired gateway settings are ignored and removed from the settings file on the next save.
 
@@ -218,17 +230,11 @@ Older Hermes/hybrid conversations migrate to Pi mode while preserving their IDs,
 - The JSON store loads all state and rewrites it on each mutation. Use one server process per data directory.
 - Scheduling, browser/computer control, MCP management, and media input are not implemented.
 
-## Suggested improvement priorities
+## Completed improvements and next steps
 
-These are **further improvements**, not complete features, based on the current code. Deep Agents now provides framework summarization; consistent token budgets across all engines remain pending.
+This iteration adds server-owned background runs, operation journals, named connections and capability probes, separate write permissions, knowledge provenance/revisions/merge/disable, agent navigation/templates, and validated versioned storage with backups.
 
-| Priority | Improvement                                                                         | Why it matters                                                                                                  |
-| -------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| 1        | Memory deduplication, source tracking, revision history, and retrieval by relevance | Reduce repeated or outdated facts and use the prompt budget for the task at hand.                               |
-| 2        | Token-aware context budgets and conversation summarization                          | Keep longer conversations usable across models with different context limits.                                   |
-| 3        | Connection testing and model capability controls                                    | Verify authentication, streaming, and tool support before a task; allow output/context limits to be configured. |
-| 4        | Task checkpoints, clearer failure causes, and explicit resume/retry                 | Recover from interruptions while avoiding repeated file writes or other side effects.                           |
-| 5        | Paginated history, storage validation, migrations, and backups                      | Keep growing local data responsive and easier to recover without complicating Node-based startup.               |
+Further work includes token-aware budgets and summarization across engines, vector retrieval, indexing/pagination for large conversation histories, and multi-user isolation. Side-effectful task replay and cross-engine workflows remain unimplemented.
 
 ## Development and verification
 
@@ -257,7 +263,12 @@ A [GitHub Actions template](docs/github-actions.yml.example) covers Windows/Linu
 
 ```text
 public/                Browser TypeScript, HTML, and CSS
-server/agent.ts         Pi runtime integration and tools
+server/agent.ts         Pi runtime integration and engine dispatch
+server/runtime.ts       Engine-neutral run/tool contracts
+server/tools.ts         Shared permission-gated tools
+server/runs.ts          Durable per-run journals
+server/connections.ts   Named connection credentials
+server/probe.ts         Isolated model capability checks
 server/agents.ts        Agent validation and memory/skill scope
 server/engines/         Deep Agents and OpenAI SDK adapters
 server/context.ts      Memory and on-demand skill context
@@ -275,7 +286,7 @@ scripts/               Build, development, sharing, and real-model checks
 test/                  Node test runner suites
 ```
 
-To add a tool, define it in `createTools()` in `server/agent.ts`, provide a schema, and return structured tool content. Apply the existing write-permission gate to mutations. Keep provider credentials and integrations server-side.
+To add a tool, define it in `createTools()` in `server/tools.ts`, provide a schema, and return structured tool content. Apply the existing write-permission gate to mutations. Keep provider credentials and integrations server-side.
 
 ## Upstream projects
 

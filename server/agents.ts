@@ -54,6 +54,10 @@ export function parseAgent(
   };
   return {
     id: previous?.id || randomUUID(),
+    version: (previous?.version || 0) + 1,
+    ...(typeof input.connectionId === "string" && input.connectionId
+      ? { connectionId: input.connectionId }
+      : {}),
     name,
     description,
     instructions,
@@ -79,12 +83,17 @@ export function scopedState(
   const scope = agent?.memoryScope === "private" ? agent.id : undefined;
   return {
     ...state,
-    memories: state.memories.filter((m) => m.agentId === scope),
-    skills: state.skills.filter((s) =>
-      agent
-        ? s.agentId === agent.id ||
-          (!s.agentId && agent.skillIds.includes(s.id))
-        : !s.agentId,
+    memories: state.memories.filter(
+      (m) => m.agentId === scope && m.enabled !== false && !m.mergedInto,
+    ),
+    skills: state.skills.filter(
+      (s) =>
+        s.enabled !== false &&
+        !s.mergedInto &&
+        (agent
+          ? s.agentId === agent.id ||
+            (!s.agentId && agent.skillIds.includes(s.id))
+          : !s.agentId),
     ),
     sessions: state.sessions.filter((s) =>
       scope

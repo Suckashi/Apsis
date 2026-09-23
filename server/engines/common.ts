@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { configuration, type RunOptions } from "../agent.ts";
+import type { AgentTool } from "../tools.ts";
+import { configuration } from "../configuration.ts";
+import type { RunOptions } from "../runtime.ts";
 import { defaultOllamaUrl } from "../ollama.ts";
 
 export function connection(options: RunOptions) {

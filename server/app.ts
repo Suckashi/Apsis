@@ -15,6 +15,9 @@ import { Workspace } from "./workspace.ts";
 import { configuration, runAgent } from "./agent.ts";
 import { TaskService } from "./tasks.ts";
 import { parseAgent } from "./agents.ts";
+import { Connections } from "./connections.ts";
+import { revise, normalizeFact } from "./knowledge.ts";
+import { testConnection } from "./probe.ts";
 import { TelegramChannel, type TelegramCall } from "./telegram.ts";
 
 const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
@@ -78,6 +81,28 @@ export async function createApp({
   const settings = await new Settings(dataDir, env).init();
   const workspace = await new Workspace(workspaceDir).init();
   const tasks = new TaskService(store, workspace, settings, runner);
+  await tasks.runs.init();
+  for (const run of tasks.runs.records.values()) {
+    if (
+      run.status === "interrupted" &&
+      store.state.sessions.some(
+        (s) =>
+          s.id === run.sessionId &&
+          s.messages.some(
+            (m) =>
+              m.runId === run.id &&
+              m.role === "assistant" &&
+              m.status === "complete",
+          ),
+      )
+    ) {
+      run.status = "completed";
+      delete run.error;
+      await tasks.runs.save(run);
+    }
+  }
+  const connections = await new Connections(dataDir, settings).init();
+  tasks.connections = connections;
   const running = tasks.running;
   const telegram = await new TelegramChannel(
     dataDir,
@@ -138,6 +163,64 @@ export async function createApp({
         });
       if (req.method === "GET" && path === "/api/settings")
         return json(res, settings.view());
+      if (req.method === "GET" && path === "/api/storage/backup") {
+        res.setHeader(
+          "Content-Disposition",
+          'attachment; filename="talaria-backup.json"',
+        );
+        return json(res, store.state);
+      }
+      if (path === "/api/connections") {
+        if (req.method === "GET") return json(res, connections.view());
+        if (req.method === "POST")
+          return json(res, await connections.save(await body(req)), 201);
+      }
+      const connectionMatch = path.match(
+        /^\/api\/connections\/([a-z0-9-]+)(?:\/(test))?$/,
+      );
+      if (connectionMatch) {
+        const [, id, action] = connectionMatch;
+        if (action === "test" && req.method === "POST")
+          return json(
+            res,
+            await testConnection(connections, id, await body(req)),
+          );
+        if (!action && req.method === "PUT")
+          return json(res, await connections.save(await body(req), id));
+        if (!action && req.method === "DELETE") {
+          if (
+            store.state.agents?.some(
+              (a) => a.connectionId === id && !a.archived,
+            )
+          )
+            fail("此連線仍有 agent 使用，請先切換該 agent 的連線。", 409);
+          if (store.state.sessions.some((s) => s.agent?.connectionId === id))
+            fail("既有對話仍使用此連線，請保留連線以便續聊。", 409);
+          await connections.archive(id);
+          return json(res, { ok: true });
+        }
+      }
+      if (path === "/api/runs" && req.method === "GET") {
+        const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
+        const all = tasks.runs.list(
+          url.searchParams.get("sessionId") || undefined,
+        );
+        return json(res, {
+          items: all.slice(offset, offset + 50),
+          total: all.length,
+          nextOffset: offset + 50 < all.length ? offset + 50 : null,
+        });
+      }
+      const runMatch = path.match(/^\/api\/runs\/([a-f0-9-]+)(?:\/(stop))?$/);
+      if (runMatch) {
+        const run = tasks.runs.records.get(runMatch[1]);
+        if (!run) fail("找不到任務。", 404);
+        if (req.method === "GET") return json(res, run);
+        if (req.method === "POST" && runMatch[2] === "stop") {
+          if (run.status === "running") tasks.stop(run.sessionId);
+          return json(res, { ok: true });
+        }
+      }
       if (path === "/api/channels/telegram") {
         if (req.method === "GET") return json(res, telegram.view());
         if (req.method === "POST")
@@ -170,6 +253,16 @@ export async function createApp({
           );
         if (req.method === "POST") {
           const agent = parseAgent(await body(req), store.state);
+          if (
+            agent.connectionId &&
+            !connections
+              .view()
+              .some(
+                (c) =>
+                  c.id === agent.connectionId && c.provider === agent.provider,
+              )
+          )
+            fail("模型連線與供應商不符。");
           await store.mutate((s) => (s.agents ||= []).push(agent));
           return json(res, agent, 201);
         }
@@ -182,6 +275,16 @@ export async function createApp({
         if (!previous) fail("找不到 agent。", 404);
         if (req.method === "PUT") {
           const agent = parseAgent(await body(req), store.state, previous);
+          if (
+            agent.connectionId &&
+            !connections
+              .view()
+              .some(
+                (c) =>
+                  c.id === agent.connectionId && c.provider === agent.provider,
+              )
+          )
+            fail("模型連線與供應商不符。");
           await store.mutate((s) => {
             s.agents![s.agents!.findIndex((a) => a.id === agent.id)] = agent;
           });
@@ -198,7 +301,13 @@ export async function createApp({
         return json(
           res,
           store.state.sessions.map(
-            ({ piMessages, engineState, messages, ...session }) => ({
+            ({
+              piMessages,
+              engineState,
+              runtimeState,
+              messages,
+              ...session
+            }) => ({
               ...session,
               count: messages.length,
               running: running.has(session.id),
@@ -225,7 +334,7 @@ export async function createApp({
         return json(res, session, 201);
       }
       const match = path.match(
-        /^\/api\/sessions\/([a-f0-9-]+)(?:\/(chat|stop|export))?$/,
+        /^\/api\/sessions\/([a-f0-9-]+)(?:\/(chat|stop|export|runs))?$/,
       );
       if (match) {
         const [, id, action] = match;
@@ -247,6 +356,30 @@ export async function createApp({
           tasks.stop(id);
           return json(res, { ok: true });
         }
+        if (action === "runs" && req.method === "POST") {
+          const input = await body(req);
+          const permissions =
+            input.permissions as import("../shared/types.ts").RunPermissions;
+          if (
+            !permissions ||
+            ["files", "memory", "skills"].some(
+              (k) =>
+                typeof (permissions as unknown as Record<string, unknown>)[
+                  k
+                ] !== "boolean",
+            )
+          )
+            fail("請提供檔案、記憶與技能權限。");
+          return json(
+            res,
+            await tasks.start(
+              id,
+              string(input.prompt, 16000, "訊息"),
+              permissions,
+            ),
+            202,
+          );
+        }
         if (action === "chat" && req.method === "POST") {
           if (running.has(id)) fail("此工作階段正在執行。", 409);
           const input = await body(req);
@@ -254,32 +387,20 @@ export async function createApp({
           if (typeof input.allowWrites !== "boolean")
             fail("allowWrites 必須為布林值。");
           if (running.has(id)) fail("此工作階段正在執行。", 409);
-          const controller = new AbortController();
-          const onClose = () => {
-            if (!res.writableEnded) controller.abort();
-          };
-          res.on("close", onClose);
           let emittedError = false;
           try {
-            await tasks.run(
-              id,
-              prompt,
-              input.allowWrites,
-              (event) => {
-                if (event.type === "error") emittedError = true;
-                if (res.destroyed) return;
-                if (!res.headersSent)
-                  res.writeHead(200, {
-                    "Content-Type": "application/x-ndjson; charset=utf-8",
-                  });
-                res.write(JSON.stringify(event) + "\n");
-              },
-              controller.signal,
-            );
+            await tasks.run(id, prompt, input.allowWrites, (event) => {
+              if (event.type === "error") emittedError = true;
+              if (res.destroyed) return;
+              if (!res.headersSent)
+                res.writeHead(200, {
+                  "Content-Type": "application/x-ndjson; charset=utf-8",
+                });
+              res.write(JSON.stringify(event) + "\n");
+            });
           } catch (error) {
             if (!emittedError) throw error;
           } finally {
-            res.off("close", onClose);
             if (res.headersSent) res.end();
           }
           return;
@@ -291,10 +412,53 @@ export async function createApp({
       if (collection) {
         const [, rawName, id] = collection;
         const name = rawName as "memories" | "skills";
+        if (id && req.method === "PUT") {
+          const input = await body(req);
+          await store.mutate((s) => {
+            const item = s[name].find((m) => m.id === id);
+            if (!item) fail("項目不存在。", 404);
+            if (input.content !== undefined)
+              revise(
+                item,
+                string(input.content, name === "skills" ? 12000 : 4000, "內容"),
+              );
+            if (input.enabled !== undefined) {
+              if (typeof input.enabled !== "boolean")
+                fail("enabled 必須為布林值。");
+              item.enabled = input.enabled;
+            }
+            if (input.mergeId !== undefined) {
+              const other = s[name].find((m) => m.id === input.mergeId);
+              if (
+                !other ||
+                other.id === id ||
+                other.agentId !== item.agentId ||
+                other.mergedInto
+              )
+                fail("只能合併同範圍且未合併的項目。");
+              if (item.mergedInto) fail("此項目已合併。");
+              revise(
+                item,
+                string(
+                  item.content + "\n" + other.content,
+                  name === "skills" ? 12000 : 4000,
+                  "合併內容",
+                ),
+              );
+              other.enabled = false;
+              other.mergedInto = item.id;
+            }
+          });
+          return json(
+            res,
+            store.state[name].find((m) => m.id === id),
+          );
+        }
         if (!id && req.method === "GET") return json(res, store.state[name]);
         if (!id && req.method === "POST") {
           const input = await body(req);
           const item: Skill = {
+            source: { kind: "manual" },
             name: "",
             id: randomUUID(),
             content: string(
@@ -305,8 +469,20 @@ export async function createApp({
             createdAt: new Date().toISOString(),
           };
           if (name === "skills") item.name = string(input.name, 100, "名稱");
-          await store.mutate((s) => s[name].unshift(item));
-          return json(res, item, 201);
+          const saved = await store.mutate((s) => {
+            const duplicate = s[name].find(
+              (m) =>
+                !m.agentId &&
+                !m.mergedInto &&
+                m.enabled !== false &&
+                normalizeFact(m.content) === normalizeFact(item.content) &&
+                (name !== "skills" || (m as Skill).name === item.name),
+            );
+            if (duplicate) return duplicate;
+            s[name].unshift(item);
+            return item;
+          });
+          return json(res, saved, saved.id === item.id ? 201 : 200);
         }
         if (id && req.method === "DELETE") {
           if (!store.state[name].some((x) => x.id === id))

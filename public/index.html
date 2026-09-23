@@ -175,6 +175,11 @@
           >
         </button>
 
+        <div
+          id="agent-roster"
+          class="agent-roster"
+          aria-label="Agent 導覽"
+        ></div>
         <button
           id="toggle-history"
           class="history-toggle"
@@ -191,6 +196,16 @@
           <div id="sessions" class="sessions" aria-label="對話清單"></div>
         </div>
         <nav class="sidebar-nav" aria-label="Bot 管理">
+          <button class="nav" data-view="runs">
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-skill"></use></svg
+            ><span>任務紀錄</span>
+          </button>
+          <button class="nav" data-view="connections">
+            <svg class="icon" aria-hidden="true">
+              <use href="#i-settings"></use></svg
+            ><span>模型連線</span>
+          </button>
           <button class="nav" data-view="agents">
             <svg class="icon" aria-hidden="true">
               <use href="#i-skill"></use></svg
@@ -435,12 +450,22 @@
                         建立與管理 Agent →</button
                       ><label class="write-option"
                         ><input type="checkbox" id="allow-writes" /><span
-                          >允許修改與保存<small
-                            >可修改檔案、保存記憶與技能。</small
+                          >允許修改檔案<small
+                            >僅限已選的工作區寫入工具。</small
                           ></span
                         ></label
                       >
                       <div class="mode-strip">
+                        <label class="write-option"
+                          ><input id="allow-memory" type="checkbox" /><span
+                            >允許保存與更新記憶</span
+                          ></label
+                        >
+                        <label class="write-option"
+                          ><input id="allow-skills" type="checkbox" /><span
+                            >允許保存技能</span
+                          ></label
+                        >
                         <div id="mode-banner" class="mode-banner">
                           示範模式，不會呼叫 AI。
                         </div>
@@ -464,6 +489,13 @@
                     hidden
                   >
                     <span class="stop-square"></span>停止</button
+                  ><button
+                    id="background-run"
+                    class="quiet-button"
+                    type="button"
+                    hidden
+                  >
+                    背景執行</button
                   ><button
                     id="send"
                     class="send-button"
@@ -659,6 +691,13 @@
                 </button>
               </div>
               <fieldset id="agent-fields">
+                <label for="agent-template">從用途開始</label
+                ><select id="agent-template">
+                  <option value="custom">自行設定</option>
+                  <option value="research">研究與整理</option>
+                  <option value="coding">程式碼閱讀</option>
+                  <option value="writing">寫作助手</option>
+                </select>
                 <label for="agent-name">名稱</label
                 ><input
                   id="agent-name"
@@ -680,28 +719,35 @@
                   rows="5"
                   placeholder="描述任務、回覆方式與完成工作的標準。"
                 ></textarea>
-                <div class="agent-field-row">
-                  <div>
-                    <label for="agent-engine">執行引擎</label
-                    ><select id="agent-engine">
-                      <option value="pi">Pi · 日常工作</option>
-                      <option value="deepagents">
-                        Deep Agents · 規劃與拆解
-                      </option>
-                      <option value="openai-agents">OpenAI Agents SDK</option>
-                    </select>
+                <label for="agent-connection">模型連線</label
+                ><select id="agent-connection"></select>
+                <details class="agent-advanced">
+                  <summary>進階設定 · 執行引擎</summary>
+                  <div class="agent-field-row">
+                    <div>
+                      <label for="agent-engine">執行引擎</label
+                      ><select id="agent-engine">
+                        <option value="pi">Pi · 日常工作</option>
+                        <option value="deepagents">
+                          Deep Agents · 規劃與拆解
+                        </option>
+                        <option value="openai-agents">OpenAI Agents SDK</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label for="agent-provider">模型供應商</label
+                      ><select id="agent-provider">
+                        <option value="ollama">Ollama · 本機</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="openai-compatible">
+                          OpenAI 相容端點
+                        </option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label for="agent-provider">模型供應商</label
-                    ><select id="agent-provider">
-                      <option value="ollama">Ollama · 本機</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="openai-compatible">OpenAI 相容端點</option>
-                    </select>
-                  </div>
-                </div>
-                <p id="agent-engine-help" class="field-help"></p>
+                  <p id="agent-engine-help" class="field-help"></p>
+                </details>
                 <label for="agent-model">模型 ID</label
                 ><input
                   id="agent-model"
@@ -711,11 +757,10 @@
                   placeholder="例如：qwen3.5:9b"
                 /><datalist id="agent-model-options"></datalist>
                 <p class="field-help">
-                  使用 Bot 設定中該供應商的 API
-                  key／網址。模型需支援工具呼叫。<button
+                  使用所選模型連線的金鑰與網址。模型需支援工具呼叫。<button
                     type="button"
                     class="text-button"
-                    data-view="settings"
+                    data-view="connections"
                   >
                     管理連線 →
                   </button>
@@ -731,7 +776,7 @@
                 <h3>工具權限</h3>
                 <div id="agent-tools" class="agent-checks"></div>
                 <p class="field-help">
-                  勾選寫入工具後，每次對話仍需開啟「允許修改與保存」。Deep
+                  勾選寫入工具後，每次對話仍需開啟對應的檔案／記憶／技能權限。Deep
                   Agents 另有虛擬筆記、規劃與子任務工具，不提供主機 shell。
                 </p>
                 <h3>可用技能</h3>
@@ -747,7 +792,101 @@
             </form>
           </div>
         </section>
+        <section id="connections-view" class="view library-view" hidden>
+          <div class="settings-heading">
+            <div>
+              <div class="eyebrow">MODEL CONNECTIONS</div>
+              <h1>模型連線</h1>
+              <p>為每個 Agent 選擇合適的模型與端點。</p>
+            </div>
+            <button id="connection-new" class="primary">＋ 新增連線</button>
+          </div>
+          <p class="field-help">
+            測試會實際呼叫選取的模型，雲端服務可能計費。測試只使用一次性工具，不讀取你的工作區或記憶。驗證結果僅代表該模型與引擎組合。
+          </p>
+          <form
+            id="connection-form"
+            class="settings-card connection-form"
+            hidden
+          >
+            <h2>連線設定</h2>
+            <label for="connection-name">名稱</label
+            ><input
+              id="connection-name"
+              name="name"
+              required
+              maxlength="100"
+              placeholder="例如：本機 Qwen"
+            />
+            <label for="connection-provider">供應商</label
+            ><select id="connection-provider" name="provider">
+              <option value="ollama">Ollama</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai-compatible">OpenAI 相容端點</option>
+            </select>
+            <label for="connection-url">端點網址</label
+            ><input
+              id="connection-url"
+              name="url"
+              placeholder="Ollama：http://127.0.0.1:11434"
+            />
+            <p class="field-help">
+              OpenAI 與 Anthropic 使用官方端點；自訂網址請選 OpenAI 相容端點。
+            </p>
+            <label for="connection-model">預設模型 ID</label
+            ><input
+              id="connection-model"
+              name="model"
+              required
+              maxlength="200"
+              placeholder="qwen3.5:9b"
+            />
+            <label for="connection-key">API key</label
+            ><input
+              id="connection-key"
+              name="apiKey"
+              type="password"
+              autocomplete="new-password"
+            /><label class="write-toggle"
+              ><input name="clearKey" type="checkbox" />移除已儲存的金鑰</label
+            >
+            <p class="field-help">更換端點或供應商時需重新填入金鑰。</p>
+            <div class="agent-card-actions">
+              <button type="submit" class="primary">儲存連線</button
+              ><button
+                id="connection-cancel"
+                type="button"
+                class="quiet-button"
+              >
+                取消
+              </button>
+            </div>
+            <p id="connection-status" role="status"></p>
+          </form>
+          <div id="connection-cards" class="agent-cards"></div>
+        </section>
+        <section id="runs-view" class="view library-view" hidden>
+          <div class="settings-heading">
+            <div>
+              <div class="eyebrow">TASK HISTORY</div>
+              <h1>任務紀錄</h1>
+              <p>離開頁面後仍會繼續執行，可隨時回來查看結果。</p>
+            </div>
+            <button id="runs-refresh" class="quiet-button">重新整理</button>
+          </div>
+          <p class="field-help">
+            服務重啟會將未完成任務標記為中斷；結果待確認的寫入請先檢查工作區，再決定下一步。任務不會自動重跑。
+          </p>
+          <div id="run-cards" class="agent-cards"></div>
+          <button id="runs-more" class="quiet-button" hidden>載入更多</button>
+        </section>
         <section id="settings-view" class="view library-view" hidden>
+          <p>
+            <a href="/api/storage/backup" download
+              >下載對話、Agent 與知識備份</a
+            >
+          </p>
           <div class="settings-heading">
             <div>
               <span class="eyebrow">YOUR TALARIA</span>

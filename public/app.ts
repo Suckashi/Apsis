@@ -1,3 +1,4 @@
+import { createManagement, knowledgeActions } from "./management.ts";
 import type {
   Mode,
   SessionView,
@@ -6,7 +7,7 @@ import type {
   Skill,
   Status,
   WorkspaceFile,
-  RunEvent,
+  TaskRun,
 } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import { createSettingsUI } from "./settings.ts";
@@ -36,6 +37,8 @@ const labels: Record<string, string> = {
   pi: "Talaria",
 };
 let navigating = false;
+let detachRun = false;
+let agentFilter: string | undefined;
 let activeReply: HTMLElement | undefined;
 const traceOpen = new Set<string>();
 let currentAction = "";
@@ -252,10 +255,19 @@ document.addEventListener("click", (event) => {
     if (!detail.contains(event.target as Node)) detail.open = false;
 });
 $("#allow-writes").addEventListener("change", updatePermissions);
+$("#allow-memory").addEventListener("change", updatePermissions);
+$("#allow-skills").addEventListener("change", updatePermissions);
 function updatePermissions() {
-  $("#permission-hint").textContent = $("#allow-writes").checked
-    ? "已允許修改與保存"
-    : "僅讀取工作區";
+  const allowed = [
+    [$("#allow-writes").checked, "檔案"],
+    [$("#allow-memory").checked, "記憶"],
+    [$("#allow-skills").checked, "技能"],
+  ]
+    .filter(([checked]) => checked)
+    .map(([, name]) => name);
+  $("#permission-hint").textContent = allowed.length
+    ? "允許寫入：" + allowed.join("、")
+    : "僅讀取 · 寫入權限皆關閉";
 }
 let followOutput = true;
 let runTimer: ReturnType<typeof setInterval> | undefined;
@@ -345,17 +357,30 @@ async function api<T = unknown>(
     response.status === 401,
   );
   const data = (await response.json()) as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "請求失敗。");
+  if (!response.ok)
+    throw Object.assign(new Error(data.error || "請求失敗。"), {
+      status: response.status,
+    });
   return data;
 }
 const post = <T = unknown>(path: string, data: unknown) =>
   api<T>(path, { method: "POST", body: JSON.stringify(data) });
 function showView(view: string) {
   if (state.busy && view !== "chat") {
-    toast("請先停止或等待目前任務完成。");
+    toast("可按「背景執行」後切換頁面，或等待目前任務完成。");
     return;
   }
-  if (!["chat", "memories", "skills", "settings", "agents"].includes(view))
+  if (
+    ![
+      "chat",
+      "memories",
+      "skills",
+      "settings",
+      "agents",
+      "runs",
+      "connections",
+    ].includes(view)
+  )
     return;
   state.view = view;
   setSidebar(false);
@@ -384,12 +409,21 @@ function showView(view: string) {
       skills: "技能庫",
       settings: "Bot 設定",
       agents: "我的 Agents",
+      runs: "任務紀錄",
+      connections: "模型連線",
     }[view as "chat" | "memories" | "skills" | "settings" | "agents"] ?? "";
   if (view === "agents")
     void agentsUI
       .load(state.session?.agent)
       .catch((e) => toast(asError(e).message));
-  if (view === "chat") composer.resize();
+  if (view === "connections")
+    void management.loadConnections().catch((e) => toast(asError(e).message));
+  if (view === "runs")
+    void management.loadRuns().catch((e) => toast(asError(e).message));
+  if (view === "chat") {
+    composer.resize();
+    updateMode();
+  }
 }
 document.addEventListener("click", (event) => {
   const button = (event.target as Element).closest<HTMLElement>("[data-view]");
@@ -404,6 +438,37 @@ $("#toggle-history").addEventListener("click", () => {
   $("#history-panel").classList.toggle("open", open);
 });
 $("#session-search").addEventListener("input", renderSessions);
+$("#agent-roster").addEventListener("click", async (event) => {
+  const button = (event.target as Element).closest<HTMLButtonElement>(
+    "[data-agent-id]",
+  );
+  if (!button || state.busy) return;
+  agentFilter =
+    button.dataset.agentId === "all" ? undefined : button.dataset.agentId;
+  document
+    .querySelectorAll("#agent-roster button")
+    .forEach((node) =>
+      node.setAttribute("aria-pressed", String(node === button)),
+    );
+  renderSessions();
+  if (agentFilter !== undefined) {
+    const existing = state.sessions.find(
+      (session) => (session.agent?.id || "") === agentFilter,
+    );
+    try {
+      if (existing) await loadSession(existing.id);
+      else {
+        await newSession();
+        agentsUI.selectById(agentFilter);
+        if (agentFilter) $("#mode").value = "pi";
+        updateMode();
+        renderWelcome();
+      }
+    } catch (e) {
+      toast(asError(e).message);
+    }
+  }
+});
 let sessionRenderKey = "";
 function renderSessions() {
   const query = $<HTMLInputElement>("#session-search")
@@ -412,10 +477,18 @@ function renderSessions() {
   updatePresence();
   const sessions = state.sessions.filter(
     (session) =>
+      (agentFilter === undefined ||
+        (session.agent?.id || "") === agentFilter) &&
       (session.count > 0 || session.running) &&
       session.title.toLocaleLowerCase().includes(query),
   );
-  const key = JSON.stringify([query, state.busy, state.session?.id, sessions]);
+  const key = JSON.stringify([
+    query,
+    agentFilter,
+    state.busy,
+    state.session?.id,
+    sessions,
+  ]);
   if (key === sessionRenderKey) return;
   sessionRenderKey = key;
   $("#sessions").replaceChildren();
@@ -600,6 +673,9 @@ function updateMode() {
   const mode = $("#mode").value as Mode;
   const agent = state.session?.agent || agentsUI.selected();
   const name = agent?.name || "Talaria";
+  if (state.view === "chat") $("#page-name").textContent = name;
+  $("#workspace-model").textContent =
+    `${agent?.model || state.status.model || "尚未設定"} · ${agent?.memoryScope === "private" ? "獨立記憶" : "共用記憶"}`;
   $("#prompt").setAttribute("aria-label", "傳訊息給 " + name);
   $("#prompt").placeholder = "傳訊息給 " + name;
   $("#messages").setAttribute("aria-label", "與 " + name + " 的訊息");
@@ -633,6 +709,8 @@ async function loadSession(id: string) {
   restoreDraft();
   $("#run-status").textContent = "已載入對話";
   $("#allow-writes").checked = false;
+  $("#allow-memory").checked = false;
+  $("#allow-skills").checked = false;
   updatePermissions();
   currentAction = "";
   preferences.set("loom-session", id);
@@ -652,6 +730,8 @@ async function newSession(preserveMode = false) {
   restoreDraft();
   $("#run-status").textContent = "新話題，一樣記得你。";
   $("#allow-writes").checked = false;
+  $("#allow-memory").checked = false;
+  $("#allow-skills").checked = false;
   updatePermissions();
   currentAction = "";
   renderConversation();
@@ -786,6 +866,9 @@ function syncComposer() {
   $<HTMLSelectElement>("#agent-select").disabled = running;
   $("#new-session").disabled = state.busy;
   $("#allow-writes").disabled = running;
+  $("#allow-memory").disabled = running;
+  $("#allow-skills").disabled = running;
+  $("#background-run").hidden = !state.busy;
 }
 function busy(value: boolean) {
   state.busy = value;
@@ -795,6 +878,9 @@ function busy(value: boolean) {
   updatePresence();
   renderSessions();
 }
+$("#background-run").onclick = () => {
+  detachRun = true;
+};
 $("#chat-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (
@@ -822,6 +908,9 @@ $("#chat-form").addEventListener("submit", async (event) => {
   }
   const originalDraft = draftKey();
   let failed = false;
+  let backgrounded = false;
+  let submitted = false;
+  detachRun = false;
   const started = Date.now();
   const sentAt = new Date(started).toISOString();
   const knownMessageIds = new Set(
@@ -836,7 +925,11 @@ $("#chat-form").addEventListener("submit", async (event) => {
   let content: HTMLElement | undefined,
     output = "";
   try {
-    const allowWrites = $("#allow-writes").checked;
+    const permissions = {
+      files: $("#allow-writes").checked,
+      memory: $("#allow-memory").checked,
+      skills: $("#allow-skills").checked,
+    };
     busy(true);
     if (!state.session) {
       state.session = await post<SessionView>("sessions", {
@@ -859,76 +952,48 @@ $("#chat-form").addEventListener("submit", async (event) => {
     preferences.remove(originalDraft);
     saveDraft();
     $("#task-options").removeAttribute("open");
-    let response: Response;
-    try {
-      response = await fetch("/api/sessions/" + state.session.id + "/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Loom-Client": "1" },
-        body: JSON.stringify({ prompt, allowWrites }),
-      });
-    } catch (error) {
-      setConnection(false);
-      throw error;
-    }
-    setConnection(
-      response.status !== 401 && response.status < 500,
-      response.status === 401,
-    );
-    if (!response.ok)
-      throw new Error((await response.json()).error || "請求失敗。");
+    submitted = true;
+    let run = await post<TaskRun>("sessions/" + state.session.id + "/runs", {
+      prompt,
+      permissions,
+    });
     observedSessionTimes.set(state.session.id, sentAt);
-    if (!response.body) throw new Error("伺服器沒有回傳串流。");
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "",
-      completed = false;
-    const consume = (line: string) => {
-      if (!line.trim()) return;
-      const data = JSON.parse(line) as RunEvent;
-      if (
-        !replyAt &&
-        (data.type === "delta" || data.type === "done" || data.type === "error")
-      ) {
-        replyAt = new Date().toISOString();
-        if (content) setMessageTime(content, replyAt);
-        if (state.session) observedSessionTimes.set(state.session.id, replyAt);
-        updatePresence();
-      }
-      if (data.type === "delta") {
-        output += data.text;
+    let activityCount = 0;
+    while (true) {
+      if (run.text !== output) {
+        output = run.text;
+        replyAt ||= new Date().toISOString();
         if (content) {
           content.classList.remove("waiting");
           setMessageContent(content, output);
+          setMessageTime(content, replyAt);
         }
       }
-      if (data.type === "activity") addActivity(data.text);
-      if (data.type === "error") {
-        completed = true;
-        throw new Error(data.text);
-      }
-      if (data.type === "done") completed = true;
+      for (const activity of run.activity.slice(activityCount))
+        addActivity(activity);
+      activityCount = run.activity.length;
       scrollLatest();
-    };
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) consume(line);
+      if (run.status !== "running") {
+        if (run.status !== "completed")
+          throw new Error(run.error || "任務已停止或中斷。");
+        break;
       }
-      buffer += decoder.decode();
-      if (buffer.trim()) consume(buffer);
-      if (!completed) throw new Error("連線中斷，請重新開啟此對話確認結果。");
-    } finally {
-      reader.releaseLock();
+      if (detachRun) {
+        backgrounded = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      run = await api<TaskRun>("runs/" + run.id);
     }
   } catch (caught) {
     if (caught instanceof TypeError || !navigator.onLine) setConnection(false);
+    if (asError(caught).status && asError(caught).status! < 500)
+      submitted = false;
     failed = true;
-    $("#prompt").value = prompt;
-    saveDraft();
+    if (!submitted) {
+      $("#prompt").value = prompt;
+      saveDraft();
+    }
     const error = asError(caught);
     if (content) {
       setMessageContent(
@@ -937,7 +1002,10 @@ $("#chat-form").addEventListener("submit", async (event) => {
       );
       content.closest(".message")?.classList.add("error");
     }
-    toast(error.message);
+    toast(
+      error.message +
+        (submitted ? " 可到任務紀錄確認執行結果，請勿重複送出。" : ""),
+    );
   } finally {
     clearInterval(runTimer);
     content?.classList.remove("waiting");
@@ -945,9 +1013,13 @@ $("#chat-form").addEventListener("submit", async (event) => {
     $("#run-status").textContent =
       (failed
         ? connected
-          ? "任務未完成 · 草稿已保留"
+          ? submitted
+            ? "請至任務紀錄確認結果"
+            : "任務未完成 · 草稿已保留"
           : "連線中斷 · 正在確認任務結果"
-        : "任務完成") +
+        : backgrounded
+          ? "已轉到背景執行"
+          : "任務完成") +
       " · " +
       Math.max(1, Math.floor((Date.now() - started) / 1000)) +
       " 秒";
@@ -980,7 +1052,7 @@ $("#chat-form").addEventListener("submit", async (event) => {
             ? "連線已恢復 · 正在同步任務進度"
             : savedReply?.status === "complete"
               ? "連線已恢復 · 回覆已同步"
-              : "對話已同步 · 草稿已保留";
+              : "對話已同步 · 請確認執行結果";
         }
         updateExport();
       }
@@ -1062,6 +1134,16 @@ function renderLibrary(
       }
     });
     article.append(p, small, del);
+    knowledgeActions(
+      article,
+      row,
+      rows,
+      name,
+      api,
+      refresh,
+      toast,
+      loadSession,
+    );
     list.append(article);
   }
 }
@@ -1135,8 +1217,12 @@ $("#refresh-files").addEventListener("click", () =>
   refreshFiles().catch((e: unknown) => toast(asError(e).message)),
 );
 const settingsUI = createSettingsUI({ api, onSaved: refresh, notify: toast });
+const management = createManagement(api, toast, loadSession, async () => {
+  await agentsUI.load(state.session?.agent);
+  updateMode();
+});
 const agentsUI = createAgentsUI(api, toast, async (agent) => {
-  if (state.busy || state.session?.running) {
+  if (state.busy) {
     toast("請先停止或等待任務完成。");
     return;
   }
@@ -1304,6 +1390,9 @@ initCommandPalette(
         },
       },
       ...[
+        ["agents", "我的 Agents", "角色、工具與記憶範圍", "agents"],
+        ["connections", "模型連線", "管理端點與測試模型", "connections models"],
+        ["runs", "任務紀錄", "背景工作與操作結果", "runs tasks"],
         ["memories", "長期記憶", "管理 Talaria 記得的事", "memory"],
         ["skills", "技能庫", "保存與整理可重用的方法", "skills"],
         [

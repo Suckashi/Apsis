@@ -37,6 +37,7 @@ test("retired gateway conversations migrate without losing messages, transcripts
   const store = await new Store(dir).init();
   const expected = {
     ...original,
+    schemaVersion: 1,
     sessions: original.sessions.map((s) => ({ ...s, mode: "pi" })),
   };
   assert.deepEqual(store.state, expected);

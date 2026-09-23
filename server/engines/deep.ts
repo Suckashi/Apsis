@@ -9,7 +9,9 @@ import {
   type BaseMessage,
   type StoredMessage,
 } from "@langchain/core/messages";
-import { agentContext, createTools, type RunOptions } from "../agent.ts";
+import { agentContext } from "../context.ts";
+import { createTools } from "../tools.ts";
+import type { RunOptions } from "../runtime.ts";
 import { connection, executeTool, toolSchema } from "./common.ts";
 
 interface DeepState {
@@ -68,7 +70,13 @@ export async function runDeep(options: RunOptions) {
     tools,
     backend: (config) => new StateBackend(config),
     systemPrompt:
-      agentContext(options.store, options.allowWrites, options.agent) +
+      agentContext(
+        options.store,
+        options.allowWrites,
+        options.agent,
+        options.prompt,
+        options.permissions,
+      ) +
       "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. Only workspace_* tools access real workspace files; use these when the user asks about their files. Never claim scratch writes modified the workspace. Long-term memory is managed only by Talaria remember/update_memory tools.",
   });
   const previous = options.session.engineState as DeepState | undefined;
@@ -143,8 +151,31 @@ export async function runDeep(options: RunOptions) {
       typeof last?.content === "string" ? last.content : "工具操作已完成。";
     options.emit({ type: "delta", text });
   }
+  const previousIds = new Set(
+    previousMessages.map((m) => m.id).filter(Boolean),
+  );
+  const usage = { inputTokens: 0, outputTokens: 0 };
+  let hasUsage = false;
+  for (const message of final.messages) {
+    if (message.id && previousIds.has(message.id)) continue;
+    if ("usage_metadata" in message && message.usage_metadata) {
+      const data = message.usage_metadata as {
+        input_tokens: number;
+        output_tokens: number;
+      };
+      if (
+        Number.isFinite(data.input_tokens) &&
+        Number.isFinite(data.output_tokens)
+      ) {
+        hasUsage = true;
+        usage.inputTokens += data.input_tokens;
+        usage.outputTokens += data.output_tokens;
+      }
+    }
+  }
   return {
     text,
+    ...(hasUsage ? { usage } : {}),
     engineState: {
       messages: mapChatMessagesToStoredMessages(final.messages),
       files: final.files,

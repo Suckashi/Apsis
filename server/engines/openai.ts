@@ -5,7 +5,9 @@ import {
   tool,
   type AgentInputItem,
 } from "@openai/agents";
-import { agentContext, createTools, type RunOptions } from "../agent.ts";
+import { agentContext } from "../context.ts";
+import { createTools } from "../tools.ts";
+import type { RunOptions } from "../runtime.ts";
 import { connection, executeTool, toolSchema } from "./common.ts";
 
 export async function runOpenAI(options: RunOptions) {
@@ -26,6 +28,8 @@ export async function runOpenAI(options: RunOptions) {
       options.store,
       options.allowWrites,
       options.agent,
+      options.prompt,
+      options.permissions,
     ),
     model: config.model,
     modelSettings: {
@@ -64,7 +68,14 @@ export async function runOpenAI(options: RunOptions) {
       text = result.finalOutput || "工具操作已完成。";
       options.emit({ type: "delta", text });
     }
-    return { text, engineState: { history: result.history } };
+    return {
+      text,
+      usage: {
+        inputTokens: result.state.usage.inputTokens,
+        outputTokens: result.state.usage.outputTokens,
+      },
+      engineState: { history: result.history },
+    };
   } finally {
     await provider.close();
   }
