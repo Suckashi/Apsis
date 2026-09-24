@@ -1,8 +1,3 @@
-export const engineLabels = {
-  pi: "Pi",
-  deepagents: "Deep Agents",
-  "openai-agents": "OpenAI Agents SDK",
-};
 export const agentTools = {
   list_files: "列出工作區檔案",
   read_file: "讀取工作區檔案",

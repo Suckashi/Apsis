@@ -66,16 +66,14 @@ export class BotBrowser {
       controls: await page
         .locator("a,button,input,textarea,select")
         .evaluateAll((nodes) =>
-          nodes
-            .slice(0, 100)
-            .map((n) => ({
-              tag: n.tagName,
-              text: n.textContent?.slice(0, 100),
-              id: n.id,
-              name: n.getAttribute("name"),
-              href: n.getAttribute("href"),
-              placeholder: n.getAttribute("placeholder"),
-            })),
+          nodes.slice(0, 100).map((n) => ({
+            tag: n.tagName,
+            text: n.textContent?.slice(0, 100),
+            id: n.id,
+            name: n.getAttribute("name"),
+            href: n.getAttribute("href"),
+            placeholder: n.getAttribute("placeholder"),
+          })),
         ),
     };
   }

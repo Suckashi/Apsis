@@ -28,7 +28,7 @@ export class Store {
       const error = asError(caught);
       if (error.code !== "ENOENT") throw error;
       this.state = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         sessions: [],
         memories: [],
         skills: [
@@ -42,29 +42,13 @@ export class Store {
         ],
       };
     }
-    const legacyMode = (mode: string) => mode === "hermes" || mode === "hybrid";
-    if (!this.state.schemaVersion) {
-      await copyFile(
-        this.file,
-        join(this.directory, "state.pre-v1.json"),
-        1,
-      ).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "EEXIST") throw error;
-      });
-      await this.mutate((s) => {
-        s.schemaVersion = 1;
-      });
-    }
     if (
-      this.state.sessions.some((s) => legacyMode(s.mode)) ||
       this.state.sessions.some((s) =>
         s.messages.some((m) => m.status === "pending"),
       )
     ) {
       await this.mutate((state) => {
         for (const session of state.sessions) {
-          // Keep the transcript and ID; future turns use the configured Pi model.
-          if (legacyMode(session.mode)) session.mode = "pi";
           if (!session.messages.some((m) => m.status === "pending")) continue;
           const interruptedRunId = session.messages.findLast(
             (m) => m.status === "pending",

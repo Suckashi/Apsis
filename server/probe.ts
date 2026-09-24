@@ -3,17 +3,13 @@ import { Connections } from "./connections.ts";
 import { Store } from "./store.ts";
 import { Workspace } from "./workspace.ts";
 import { runAgent } from "./agent.ts";
-import { engineLabels } from "../shared/agents.ts";
-import type { AgentEngine, Session } from "../shared/types.ts";
+import type { Session } from "../shared/types.ts";
 
 export async function testConnection(
   connections: Connections,
   id: string,
   input: Record<string, unknown>,
 ) {
-  const engine = (input.engine || "pi") as AgentEngine;
-  if (!Object.hasOwn(engineLabels, engine))
-    throw Object.assign(new Error("未知引擎。"), { status: 400 });
   const model =
     typeof input.model === "string" ? input.model.trim() : undefined;
   if (model && (model.length > 200 || /[\u0000-\u001f]/u.test(model)))
@@ -31,9 +27,9 @@ export async function testConnection(
     description: "",
     instructions:
       "Use connection_probe exactly once, then reply with its returned nonce. Do not use other tools.",
-    engine,
-    provider: env.PI_PROVIDER as import("../shared/types.ts").Provider,
-    model: env.PI_MODEL!,
+    engine: "deepagents" as const,
+    provider: env.MODEL_PROVIDER as import("../shared/types.ts").Provider,
+    model: env.MODEL_ID!,
     tools: [],
     skillIds: [],
     memoryScope: "private" as const,
@@ -43,17 +39,16 @@ export async function testConnection(
   const session: Session = {
     id: "probe",
     title: "Connection test",
-    mode: "pi",
+    mode: "deepagents",
     createdAt: new Date().toISOString(),
     messages: [],
-    piMessages: [],
     agent,
   };
   let message = "",
     ok = false;
   try {
     const result = await runAgent({
-      mode: "pi",
+      mode: "deepagents",
       session,
       agent,
       store,
@@ -88,8 +83,8 @@ export async function testConnection(
   return connections.verified(
     id,
     {
-      engine,
-      model: env.PI_MODEL!,
+      engine: "deepagents",
+      model: env.MODEL_ID!,
       at: new Date().toISOString(),
       ok,
       streaming,

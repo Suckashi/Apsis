@@ -30,14 +30,10 @@ export interface ToolOptions {
   env?: Environment;
 }
 export interface RunOptions extends ToolOptions {
+  codex?: import("./codex.ts").CodexRuntime;
   prompt: string;
   emit: (event: RunEvent) => void;
   signal: AbortSignal;
   mode: Session["mode"];
   session: Session;
-}
-
-export interface EngineAdapter {
-  id: "pi" | "deepagents" | "openai-agents";
-  run(options: RunOptions): Promise<RunResult>;
 }

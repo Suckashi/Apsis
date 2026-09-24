@@ -1,6 +1,3 @@
-import { createProvider, type Model } from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-
 export function compatibleUrl(value: unknown): string {
   try {
     if (
@@ -30,42 +27,4 @@ export function compatibleUrl(value: unknown): string {
       { status: 400 },
     );
   }
-}
-
-export function compatibleProvider(id: string, url: string, apiKey?: string) {
-  const model: Model<"openai-completions"> = {
-    id,
-    name: id,
-    provider: "openai-compatible",
-    api: "openai-completions",
-    baseUrl: compatibleUrl(url),
-    reasoning: false,
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 32768,
-    maxTokens: 4096,
-    compat: {
-      supportsStore: false,
-      supportsDeveloperRole: false,
-      supportsReasoningEffort: false,
-      supportsStrictMode: false,
-      supportsUsageInStreaming: false,
-      maxTokensField: "max_tokens",
-    },
-  };
-  return createProvider({
-    id: "openai-compatible",
-    name: "OpenAI Compatible",
-    models: [model],
-    auth: {
-      apiKey: {
-        name: "Compatible API",
-        resolve: async () => ({
-          auth: { apiKey: apiKey || "not-required" },
-          source: "local",
-        }),
-      },
-    },
-    api: openAICompletionsApi(),
-  });
 }

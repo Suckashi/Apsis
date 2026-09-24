@@ -10,8 +10,6 @@ const directory = await mkdtemp(join(tmpdir(), "apsis-delegation-live-"));
 const app = await createApp({
   dataDir: join(directory, "data"),
   workspaceDir: join(directory, "work"),
-  productMode: true,
-  env: {},
 });
 const product = app.product!;
 try {

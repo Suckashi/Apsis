@@ -46,6 +46,7 @@ export interface Job {
     | "cancelled"
     | "interrupted";
   error?: string;
+  dismissedAt?: string;
   runId?: string;
   replyTo?: string;
   delegatedBy?: string;

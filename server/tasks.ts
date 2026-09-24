@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { runAgent, type RunOptions } from "./agent.ts";
+import { runAgent } from "./agent.ts";
+import type { RunOptions } from "./runtime.ts";
 import type { Store } from "./store.ts";
 import type { Workspace } from "./workspace.ts";
-import type { Settings } from "./settings.ts";
 import type {
   Mode,
   RunEvent,
   Session,
   SessionView,
   AgentDefinition,
-  ConnectionSelection,
+  Environment,
 } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import { RunStore } from "./runs.ts";
@@ -20,9 +20,9 @@ import { recoveryContext } from "./recovery.ts";
 
 export type AgentRunner = typeof runAgent;
 export class TaskService {
+  codex?: import("./codex.ts").CodexRuntime;
   store: Store;
   workspace: Workspace;
-  settings: Settings;
   runner: AgentRunner;
   runs: RunStore;
   connections?: Connections;
@@ -36,41 +36,26 @@ export class TaskService {
       runId: string;
     }
   >();
-  modelSwitching = new Set<string>();
   extensions?: (session: Session, runId: string) => Partial<RunOptions>;
   timeoutMs = 300000;
   isWaiting?: (sessionId: string) => boolean;
   constructor(
     store: Store,
     workspace: Workspace,
-    settings: Settings,
     runner: AgentRunner = runAgent,
   ) {
     this.store = store;
     this.workspace = workspace;
-    this.settings = settings;
     this.runner = runner;
     this.runs = new RunStore(store.directory);
     this.projects = new Projects(store, workspace);
   }
   async create(
-    mode: Mode = "pi",
+    mode: Mode = "deepagents",
     source: Session["source"] = "web",
     agent?: AgentDefinition,
-    selection?: ConnectionSelection,
     projectId?: string,
   ) {
-    const selected =
-      mode === "pi" && !agent
-        ? selection || this.connections?.defaultSelection()
-        : undefined;
-    const resolved = selected
-      ? this.connections?.selection(selected.connectionId, selected.model)
-      : undefined;
-    const provider = resolved
-      ? this.connections?.view().find((row) => row.id === resolved.connectionId)
-          ?.provider
-      : undefined;
     const session: Session = {
       project: this.projects.get(projectId),
       id: randomUUID(),
@@ -79,9 +64,7 @@ export class TaskService {
       source,
       createdAt: new Date().toISOString(),
       messages: [],
-      piMessages: [],
       ...(agent ? { agent: structuredClone(agent) } : {}),
-      ...(resolved ? { ...resolved, provider } : {}),
     };
     await this.store.mutate((s) => s.sessions.unshift(session));
     return session;
@@ -90,7 +73,7 @@ export class TaskService {
     const session = this.store.state.sessions.find((s) => s.id === id);
     if (!session)
       throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
-    const { piMessages, engineState, runtimeState, ...view } = session;
+    const { engineState, ...view } = session;
     const live = this.running.get(id);
     return {
       ...view,
@@ -101,71 +84,11 @@ export class TaskService {
         : {}),
     };
   }
-  async changeModel(id: string, input: Record<string, unknown>) {
-    const session = this.store.state.sessions.find((s) => s.id === id);
-    if (!session)
-      throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
-    if (session.mode !== "pi" || session.agent)
-      throw Object.assign(new Error("自訂模型只能用於一般真實對話。"), {
-        status: 400,
-      });
-    if (this.running.has(id) || this.modelSwitching.has(id))
-      throw Object.assign(new Error("此對話正在執行，請等待完成或停止。"), {
-        status: 409,
-      });
-    if (!this.connections) throw new Error("模型連線服務尚未初始化。");
-    const selection = this.connections.selection(
-      input.connectionId,
-      input.model,
-    );
-    const provider = this.connections
-      .view()
-      .find((row) => row.id === selection.connectionId)!.provider;
-    if (
-      session.connectionId === selection.connectionId &&
-      session.model === selection.model
-    )
-      return this.view(id);
-    this.modelSwitching.add(id);
-    try {
-      await this.store.mutate((state) => {
-        const row = state.sessions.find((s) => s.id === id)!;
-        row.connectionId = selection.connectionId;
-        row.provider = provider;
-        row.model = selection.model;
-      });
-      return this.view(id);
-    } finally {
-      this.modelSwitching.delete(id);
-    }
-  }
   stop(id: string) {
     this.running.get(id)?.controller.abort();
   }
   stopAll() {
     for (const id of this.running.keys()) this.stop(id);
-  }
-  async start(id: string, prompt: string, permissions: RunPermissions) {
-    if (this.running.has(id))
-      throw Object.assign(new Error("此對話正在執行，請等待完成或停止。"), {
-        status: 409,
-      });
-    const completion = this.run(
-      id,
-      prompt,
-      false,
-      () => {},
-      undefined,
-      permissions,
-    );
-    void completion.catch(() => {});
-    const live = this.running.get(id);
-    if (!live) {
-      await completion;
-      throw new Error("任務未能啟動。");
-    }
-    await this.runs.flush(live.runId);
-    return this.runs.records.get(live.runId)!;
   }
   async run(
     id: string,
@@ -175,10 +98,6 @@ export class TaskService {
     signal?: AbortSignal,
     permissions?: RunPermissions,
   ) {
-    if (this.modelSwitching.has(id))
-      throw Object.assign(new Error("此對話正在切換模型，請稍後再試。"), {
-        status: 409,
-      });
     const session = structuredClone(
       this.store.state.sessions.find((s) => s.id === id),
     );
@@ -214,20 +133,16 @@ export class TaskService {
         abort();
       }
     }, 1000);
-    let env = this.settings.environment();
-    if (session.agent) {
-      env.PI_PROVIDER = session.agent.provider;
-      env.PI_MODEL = session.agent.model;
-    }
+    let env: Environment = {};
     const userId = randomUUID();
     const run: TaskRun = {
       project: session.project || this.projects.get(),
       id: runId,
       sessionId: id,
-      engine: session.mode === "demo" ? "demo" : session.agent?.engine || "pi",
+      engine: session.agent?.provider === "codex" ? "codex" : "deepagents",
       agentName: session.agent?.name || "Apsis",
       connectionId: session.agent?.connectionId || session.connectionId,
-      model: session.agent?.model || session.model || env.PI_MODEL || "",
+      model: session.agent?.model || session.model || "",
       permissions: grants,
       status: "running",
       createdAt: new Date().toISOString(),
@@ -262,15 +177,15 @@ export class TaskService {
           session.agent.connectionId,
           session.agent.model,
         );
-        if (env.PI_PROVIDER !== session.agent.provider)
+        if (env.MODEL_PROVIDER !== session.agent.provider)
           throw new Error("連線供應商已變更，請編輯 agent 並建立新對話。");
-        run.model = env.PI_MODEL || "";
+        run.model = env.MODEL_ID || "";
       } else if (session.connectionId) {
         if (!this.connections) throw new Error("模型連線服務尚未初始化。");
         env = this.connections.environment(session.connectionId, session.model);
-        if (session.provider && env.PI_PROVIDER !== session.provider)
+        if (session.provider && env.MODEL_PROVIDER !== session.provider)
           throw new Error("連線供應商已變更，請建立新對話。");
-        run.model = env.PI_MODEL || "";
+        run.model = env.MODEL_ID || "";
       }
       await this.store.mutate((s) => {
         const row = s.sessions.find((x) => x.id === id)!;
@@ -287,6 +202,7 @@ export class TaskService {
       emit({ type: "activity", text: "Apsis 正在處理任務。" });
       const extensions = this.extensions?.(session, runId);
       const result = await this.runner({
+        codex: this.codex,
         ...extensions,
         mode: session.mode,
         prompt,
@@ -344,15 +260,8 @@ export class TaskService {
           status: "complete",
           activity: live.activity,
         });
-        if (result.runtimeState) {
-          row.runtimeState = result.runtimeState;
-          row.piMessages = [];
-          delete row.engineState;
-        } else {
-          if (result.piMessages) row.piMessages = result.piMessages;
-          if (result.engineState !== undefined)
-            row.engineState = result.engineState;
-        }
+        if (result.engineState !== undefined)
+          row.engineState = result.engineState;
       });
       run.text = result.text;
       run.status = "completed";

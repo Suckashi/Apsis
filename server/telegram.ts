@@ -7,7 +7,6 @@ import {
 import { readFile, writeFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { TaskService } from "./tasks.ts";
 import type { TelegramView } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 
@@ -33,11 +32,8 @@ interface BotIdentity {
 interface BotState {
   token: string;
   enabled: boolean;
-  allowWrites: boolean;
-  groupId: string;
   ownerId?: number;
   offset?: number;
-  bindings: Record<string, string>;
 }
 export type TelegramCall = <T>(
   token: string,
@@ -115,14 +111,10 @@ export class TelegramChannel {
       });
   }
   file: string;
-  tasks: TaskService;
   call: TelegramCall;
   state: BotState = {
     token: "",
     enabled: false,
-    allowWrites: false,
-    groupId: "",
-    bindings: {},
   };
   tail: Promise<unknown> = Promise.resolve();
   controlTail: Promise<unknown> = Promise.resolve();
@@ -132,15 +124,8 @@ export class TelegramChannel {
   status: TelegramView["status"] = "disabled";
   lastError = "";
   pairing?: { digest: Buffer; expires: number; attempts: number };
-  jobs = new Set<Promise<void>>();
-  botRuns = new Set<string>();
-  constructor(
-    directory: string,
-    tasks: TaskService,
-    call: TelegramCall = telegramCall,
-  ) {
+  constructor(directory: string, call: TelegramCall = telegramCall) {
     this.file = join(directory, "telegram.json");
-    this.tasks = tasks;
     this.call = call;
   }
   async init() {
@@ -149,14 +134,15 @@ export class TelegramChannel {
       if (
         typeof data.token !== "string" ||
         typeof data.enabled !== "boolean" ||
-        typeof data.allowWrites !== "boolean" ||
-        typeof data.groupId !== "string" ||
-        !data.bindings ||
-        typeof data.bindings !== "object" ||
-        Array.isArray(data.bindings)
+        (data.ownerId !== undefined && typeof data.ownerId !== "number")
       )
         throw new Error("Telegram 設定檔格式錯誤。");
-      this.state = data;
+      this.state = {
+        token: data.token,
+        enabled: data.enabled,
+        ...(data.ownerId === undefined ? {} : { ownerId: data.ownerId }),
+        ...(Number.isSafeInteger(data.offset) ? { offset: data.offset } : {}),
+      };
     } catch (error) {
       if (asError(error).code !== "ENOENT") throw error;
     }
@@ -186,13 +172,10 @@ export class TelegramChannel {
     return {
       configured: !!this.state.token,
       enabled: this.state.enabled,
-      allowWrites: this.state.allowWrites,
-      groupId: this.state.groupId,
       ownerId: this.state.ownerId ? String(this.state.ownerId) : "",
       username: this.identity?.username || "",
       status: this.status,
       error: this.lastError,
-      running: this.botRuns.size,
       pairingExpiresAt: this.pairing
         ? new Date(this.pairing.expires).toISOString()
         : "",
@@ -205,19 +188,9 @@ export class TelegramChannel {
   }
   update(input: Record<string, unknown>) {
     return this.control(async () => {
-      if (
-        Object.keys(input).some(
-          (k) => !["token", "enabled", "allowWrites", "groupId"].includes(k),
-        )
-      )
+      if (Object.keys(input).some((k) => !["token", "enabled"].includes(k)))
         invalid("不支援的 Telegram 設定。");
-      if (
-        typeof input.enabled !== "boolean" ||
-        typeof input.allowWrites !== "boolean" ||
-        typeof input.groupId !== "string" ||
-        (input.groupId !== "" && !/^-\d{1,16}$/.test(input.groupId))
-      )
-        invalid("請確認 Bot 開關與群組 ID 格式。");
+      if (typeof input.enabled !== "boolean") invalid("請確認 Bot 開關格式。");
       if (
         input.token !== undefined &&
         input.token !== "" &&
@@ -237,14 +210,11 @@ export class TelegramChannel {
       await this.mutate((s) => {
         if (token !== s.token) {
           s.ownerId = undefined;
-          s.bindings = {};
           s.offset = undefined;
         }
         if (input.enabled && !s.enabled) s.offset = undefined;
         s.token = token;
         s.enabled = input.enabled as boolean;
-        s.allowWrites = input.allowWrites as boolean;
-        s.groupId = input.groupId as string;
       });
       this.pairing = undefined;
       this.identity = undefined;
@@ -288,7 +258,6 @@ export class TelegramChannel {
       this.pairing = undefined;
       await this.mutate((s) => {
         s.ownerId = undefined;
-        s.bindings = {};
         s.offset = undefined;
       });
       this.start();
@@ -306,9 +275,7 @@ export class TelegramChannel {
   }
   async stop() {
     this.controller?.abort();
-    for (const id of this.botRuns) this.tasks.stop(id);
     await this.poll;
-    await Promise.allSettled([...this.jobs]);
     this.controller = undefined;
     this.status = "disabled";
   }
@@ -393,190 +360,51 @@ export class TelegramChannel {
       update.update_id < (this.state.offset ?? 0)
     )
       return;
-    // Persist consumption before execution: restarts never automatically rerun a write task.
-    await this.mutate((s) => {
-      s.offset = update.update_id + 1;
+    // Acknowledge before acting so reconnects cannot replay an external action.
+    await this.mutate((state) => {
+      state.offset = update.update_id + 1;
     });
-    if (signal.aborted) return;
-    const m = update.message;
+    const message = update.message;
     if (
-      !m ||
-      !m.from ||
-      m.from.is_bot ||
-      m.sender_chat ||
-      !Number.isSafeInteger(m.from.id) ||
-      !m.text ||
-      !this.identity
+      !message?.from ||
+      message.from.is_bot ||
+      message.sender_chat ||
+      !message.text ||
+      !this.identity ||
+      message.chat.type !== "private" ||
+      message.chat.id !== message.from.id
     )
       return;
-    const privateChat = m.chat.type === "private" && m.chat.id === m.from.id;
-    const group = ["group", "supergroup"].includes(m.chat.type);
-    if (!privateChat && !group) return;
-    let text = m.text.trim();
-    const username = this.identity.username.toLowerCase();
+    const text = message.text.trim();
     const command = text.match(/^\/(\w+)(?:@([\w]+))?(?:\s+([\s\S]*))?$/);
-    if (command?.[2] && command[2].toLowerCase() !== username) return;
-    const directed =
-      command?.[2]?.toLowerCase() === username ||
-      m.entities?.some(
-        (e) =>
-          e.type === "mention" &&
-          m.text!.slice(e.offset, e.offset + e.length).toLowerCase() ===
-            "@" + username,
-      ) ||
-      m.reply_to_message?.from?.id === this.identity.id;
-    if (group && !directed) return;
-    if (command?.[1] === "pair" && privateChat && !this.state.ownerId) {
+    if (
+      command?.[2] &&
+      command[2].toLowerCase() !== this.identity.username.toLowerCase()
+    )
+      return;
+    if (command?.[1] === "pair" && !this.state.ownerId) {
       const pair = this.pairing;
       if (!pair || pair.expires < Date.now() || pair.attempts >= 10) return;
       pair.attempts++;
       if (!timingSafeEqual(hash(command[3] || ""), pair.digest)) return;
       this.pairing = undefined;
-      await this.mutate((s) => {
-        s.ownerId = m.from!.id;
+      await this.mutate((state) => {
+        state.ownerId = message.from!.id;
       });
       await this.send(
-        m,
-        "已綁定 Apsis。直接傳送任務即可開始；/new 開新對話，/stop 停止，/help 查看指令。",
+        message,
+        "已綁定 Apsis。使用 /bots 查看 Bot，再用 /bot ID 切換。",
         signal,
       );
       return;
     }
-    if (m.from.id !== this.state.ownerId) return;
-    if (this.productMessage && privateChat) {
-      try {
-        await this.send(m, await this.productMessage(text), signal);
-      } catch (error) {
-        await this.send(m, this.safeError(error), signal);
-      }
-      return;
+    if (message.from.id !== this.state.ownerId || !this.productMessage) return;
+    try {
+      await this.send(message, await this.productMessage(text), signal);
+    } catch (error) {
+      if (!signal.aborted)
+        await this.send(message, this.safeError(error), signal);
     }
-    if (command?.[1] === "where" && group) {
-      await this.send(
-        m,
-        "群組 ID：" + m.chat.id + "。請在 Apsis Web 設定這個 ID 後使用。",
-        signal,
-      );
-      return;
-    }
-    if (group && String(m.chat.id) !== this.state.groupId) return;
-    const binding = String(m.chat.id) + ":" + (m.message_thread_id || 0);
-    let sessionId = this.state.bindings[binding];
-    const active = sessionId && this.tasks.running.has(sessionId);
-    if (command?.[1] === "stop") {
-      if (sessionId) this.tasks.stop(sessionId);
-      await this.send(
-        m,
-        active ? "已送出停止要求。" : "目前沒有執行中的任務。",
-        signal,
-      );
-      return;
-    }
-    if (["help", "start"].includes(command?.[1] || "")) {
-      await this.send(
-        m,
-        "直接傳送文字交辦任務。\n/new 開新對話\n/stop 停止目前任務\n/status 查看狀態\n/resume 對話ID 接續 Web 對話（僅私訊）\n群組需先在 Web 設定群組 ID，再 @ 我或回覆我的訊息。",
-        signal,
-      );
-      return;
-    }
-    if (command?.[1] === "status") {
-      await this.send(
-        m,
-        active
-          ? "任務執行中，可在 Web 查看進度。"
-          : "已連線，等待你的下一個任務。",
-        signal,
-      );
-      return;
-    }
-    if (active) {
-      await this.send(m, "此對話仍在執行，請稍候或使用 /stop。", signal);
-      return;
-    }
-    if (command?.[1] === "resume") {
-      if (!privateChat) {
-        await this.send(m, "請在私訊中接續 Web 對話。", signal);
-        return;
-      }
-      const id = command[3]?.trim();
-      const existing = this.tasks.store.state.sessions.find(
-        (s) => s.id === id && s.mode === "pi",
-      );
-      if (!existing) {
-        await this.send(
-          m,
-          "找不到可接續的 Apsis 對話。請从 Web 複製續聊指令。",
-          signal,
-        );
-        return;
-      }
-      await this.mutate((s) => {
-        s.bindings[binding] = existing.id;
-      });
-      await this.send(m, "已接續：" + existing.title, signal);
-      return;
-    }
-    if (command && command[1] !== "new") {
-      await this.send(m, "不支援此指令，請輸入 /help。", signal);
-      return;
-    }
-    if (
-      !sessionId ||
-      command?.[1] === "new" ||
-      !this.tasks.store.state.sessions.some((s) => s.id === sessionId)
-    ) {
-      const session = await this.tasks.create("pi", "telegram");
-      sessionId = session.id;
-      await this.mutate((s) => {
-        s.bindings[binding] = session.id;
-      });
-      if (command?.[1] === "new") {
-        await this.send(m, "已開新對話，記憶與技能仍會保留。", signal);
-        return;
-      }
-    }
-    text = text.replace(new RegExp("@" + username + "\\b", "gi"), "").trim();
-    if (!text) return;
-    if (text.length > 16000) {
-      await this.send(m, "訊息太長，請拆成較短的任務。", signal);
-      return;
-    }
-    const id = sessionId;
-    const allowWrites = this.state.allowWrites;
-    this.botRuns.add(id);
-    const job = (async () => {
-      try {
-        // Own AbortSignal also keeps stopping the channel from delivering late results.
-        const result = this.tasks.run(id, text, allowWrites, () => {}, signal);
-        void this.call(
-          this.state.token,
-          "sendChatAction",
-          {
-            chat_id: m.chat.id,
-            action: "typing",
-            ...(m.message_thread_id
-              ? { message_thread_id: m.message_thread_id }
-              : {}),
-          },
-          signal,
-        ).catch(() => {});
-        let output: string;
-        try {
-          output = await result;
-        } catch (error) {
-          output = this.safeError(error);
-        }
-        if (!signal.aborted) await this.send(m, output, signal);
-      } catch (error) {
-        if (!signal.aborted)
-          this.lastError = "回覆傳送失敗；結果可在 Web 對話查看。";
-      } finally {
-        this.botRuns.delete(id);
-      }
-    })();
-    this.jobs.add(job);
-    void job.finally(() => this.jobs.delete(job));
   }
   private async send(m: TelegramMessage, text: string, signal: AbortSignal) {
     for (const chunk of splitTelegramText(text || "任務完成。")) {

@@ -1,10 +1,9 @@
 node_modules/
 .apsis/
+.apsis-pre-deep-*/
 .env
 .env.*
 !.env.example
-.loom/
-workspace/
 coverage/
 *.log
 artifacts/

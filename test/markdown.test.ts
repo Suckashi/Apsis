@@ -4,7 +4,7 @@ import { renderMarkdown } from "../public/markdown.ts";
 
 test("assistant Markdown supports headings, nested lists, quotes, code and aligned tables", () => {
   const html = renderMarkdown(
-    '# 計畫\n\n**粗體**與 `npm run dev`\n\n1. 安裝\n   - 執行\n\n> 提醒\n\n```ts\nconst html = "<div>";\n```\n\n| 名稱 | 狀態 |\n| :--- | ---: |\n| Pi | 可用 |',
+    '# 計畫\n\n**粗體**與 `npm run dev`\n\n1. 安裝\n   - 執行\n\n> 提醒\n\n```ts\nconst html = "<div>";\n```\n\n| 名稱 | 狀態 |\n| :--- | ---: |\n| Deep Agents | 可用 |',
   );
   for (const expected of [
     "<h1>計畫</h1>",

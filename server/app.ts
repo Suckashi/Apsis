@@ -1,47 +1,33 @@
-import { discoverOllama } from "./ollama.ts";
-import { exportConversation } from "../shared/export.ts";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
-import type { Environment, Session, Skill } from "../shared/types.ts";
-import type { RunOptions } from "./agent.ts";
-import { asError } from "../shared/errors.ts";
-import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { Store } from "./store.ts";
-import { Settings } from "./settings.ts";
-import { Workspace } from "./workspace.ts";
-import { configuration, runAgent } from "./agent.ts";
-import { TaskService } from "./tasks.ts";
-import { parseAgent } from "./agents.ts";
+import { readFile } from "node:fs/promises";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import type { AddressInfo } from "node:net";
+import { asError } from "../shared/errors.ts";
+import type { RunResult, Skill } from "../shared/types.ts";
+import { runAgent } from "./agent.ts";
 import { Connections } from "./connections.ts";
-import { revise, normalizeFact } from "./knowledge.ts";
+import { CodexRuntime } from "./codex.ts";
+import { normalizeFact } from "./knowledge.ts";
+import { discoverOllama } from "./ollama.ts";
 import { testConnection } from "./probe.ts";
-import { TelegramChannel, type TelegramCall } from "./telegram.ts";
 import { ProductService } from "./product.ts";
+import type { RunOptions } from "./runtime.ts";
+import { Store } from "./store.ts";
+import { TaskService } from "./tasks.ts";
+import { TelegramChannel, type TelegramCall } from "./telegram.ts";
+import { Workspace } from "./workspace.ts";
 
-const publicDir = fileURLToPath(new URL("../public/", import.meta.url));
-const assets: Record<string, [string, string]> = {
-  "/": ["index.html", "text/html"],
-  "/app.js": ["app.js", "text/javascript"],
-  "/app.js.map": ["app.js.map", "application/json"],
-  "/style.css": ["style.css", "text/css"],
-  "/favicon.svg": ["favicon.svg", "image/svg+xml"],
-};
-const modes = ["demo", "pi"];
 function fail(message: string, status = 400): never {
   throw Object.assign(new Error(message), { status });
-}
-function string(value: unknown, max: number, label: string) {
-  if (typeof value !== "string" || !value.trim() || value.length > max)
-    fail(label + "需為 1–" + max + " 字。");
-  return value.trim();
 }
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   if (!req.headers["content-type"]?.startsWith("application/json"))
     fail("需要 application/json。", 415);
-  const chunks = [];
+  const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
@@ -49,10 +35,10 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
     chunks.push(chunk);
   }
   try {
-    const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!input || typeof input !== "object" || Array.isArray(input))
+    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value))
       fail("需要 JSON 物件。");
-    return input;
+    return value;
   } catch {
     fail("JSON 格式錯誤。");
   }
@@ -61,90 +47,39 @@ function json(res: ServerResponse, value: unknown, status = 200) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(value));
 }
+function text(value: unknown, limit: number, label: string) {
+  if (typeof value !== "string" || !value.trim() || value.length > limit)
+    fail(`${label}需為 1–${limit} 字。`);
+  return value.trim();
+}
 
 export interface AppOptions {
-  productMode?: boolean;
   telegramCall?: TelegramCall;
   dataDir?: string;
   workspaceDir?: string;
-  env?: Environment;
-  runner?: (
-    options: RunOptions,
-  ) => Promise<import("../shared/types.ts").RunResult>;
+  runner?: (options: RunOptions) => Promise<RunResult>;
 }
 export async function createApp({
-  dataDir = ".loom",
-  workspaceDir = "workspace",
-  env = process.env,
+  dataDir = ".apsis",
+  workspaceDir = ".apsis/workspace",
   runner = runAgent,
   telegramCall,
-  productMode = false,
 }: AppOptions = {}) {
   const store = await new Store(dataDir).init();
-  const settings = await new Settings(dataDir, env).init();
   const workspace = await new Workspace(workspaceDir).init();
-  const tasks = new TaskService(store, workspace, settings, runner);
+  const tasks = new TaskService(store, workspace, runner);
   await tasks.runs.init();
-  for (const run of tasks.runs.records.values()) {
-    if (
-      run.status === "interrupted" &&
-      store.state.sessions.some(
-        (s) =>
-          s.id === run.sessionId &&
-          s.messages.some(
-            (m) =>
-              m.runId === run.id &&
-              m.role === "assistant" &&
-              m.status === "complete",
-          ),
-      )
-    ) {
-      run.status = "completed";
-      delete run.error;
-      await tasks.runs.save(run);
-    }
-  }
-  const connections = await new Connections(dataDir, settings).init();
-  // Bind pre-connection agents and conversations to the imported service. This
-  // lets credentials rotate in one place without losing their saved model.
-  const inherited = settings.view().pi;
-  const bindConnection = (target: {
-    connectionId?: string;
-    provider?: string;
-    model?: string;
-  }) => {
-    if (target.connectionId) return;
-    const provider = target.provider || inherited.provider;
-    const connection = connections
-      .view()
-      .find((row) => row.id === "legacy-" + provider);
-    if (!connection) return;
-    target.connectionId = connection.id;
-    target.provider = provider;
-    target.model ||=
-      inherited.provider === provider ? inherited.model : connection.model;
-  };
-  await store.mutate((data) => {
-    for (const agent of data.agents || []) bindConnection(agent);
-    for (const session of data.sessions) {
-      if (session.mode !== "pi") continue;
-      bindConnection(session.agent || session);
-    }
-  });
+  const connections = await new Connections(dataDir).init();
   tasks.connections = connections;
-  const running = tasks.running;
-  const telegram = await new TelegramChannel(
-    dataDir,
-    tasks,
-    telegramCall,
-  ).init();
-  const product = productMode
-    ? await new ProductService(tasks, connections).init()
-    : undefined;
-  if (product) {
-    telegram.productMessage = (text) => product.telegram(text);
-    product.notifyOwner = (text) => telegram.notifyOwner(text);
-  }
+  const codex = new CodexRuntime(
+    () => (server.address() as AddressInfo | null)?.port,
+  );
+  tasks.codex = codex;
+  const telegram = await new TelegramChannel(dataDir, telegramCall).init();
+  const product = await new ProductService(tasks, connections).init();
+  telegram.productMessage = (message) => product.telegram(message);
+  product.notifyOwner = (message) => telegram.notifyOwner(message);
+
   const server = createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-store");
@@ -169,71 +104,68 @@ export async function createApp({
         fail("不允許跨來源請求。", 403);
       if (req.headers["sec-fetch-site"] === "cross-site")
         fail("不允許跨網站請求。", 403);
-      const url = new URL(req.url || "/", "http://localhost");
-      const path = url.pathname;
+      const path = new URL(req.url || "/", "http://localhost").pathname;
+      const mcp = path.match(/^\/api\/codex\/mcp\/([a-f0-9-]+)$/);
       if (
         !["GET", "HEAD"].includes(req.method || "") &&
-        req.headers["x-loom-client"] !== "1"
+        req.headers["x-apsis-client"] !== "1" &&
+        !mcp
       )
         fail("缺少工作台請求標頭。", 403);
-      if (req.method === "POST" && path === "/api/ollama/models") {
-        const input = await body(req);
-        return json(res, await discoverOllama(input.url));
-      }
-      if (product && path.startsWith("/api/v2/"))
-        return await product.handle(req, res, url, body);
+      if (mcp) return await codex.handleMcp(req, res, mcp[1]);
+
+      if (path.startsWith("/api/v2/"))
+        return await product.handle(
+          req,
+          res,
+          new URL(req.url || "/", "http://localhost"),
+          body,
+        );
       if (
-        product &&
         req.method === "GET" &&
-        ["/", "/bot.js", "/bot.js.map", "/bot.css"].includes(path)
+        ["/", "/bot.js", "/bot.js.map", "/bot.css", "/favicon.svg"].includes(
+          path,
+        )
       ) {
         const file =
           path === "/"
             ? new URL("../public/bot.html", import.meta.url)
-            : path === "/bot.css"
-              ? new URL("../public/bot.css", import.meta.url)
+            : path === "/bot.css" || path === "/favicon.svg"
+              ? new URL("../public" + path, import.meta.url)
               : new URL("../dist/public" + path, import.meta.url);
-        res.writeHead(200, {
-          "Content-Type":
-            (path === "/"
-              ? "text/html"
-              : path.endsWith("css")
-                ? "text/css"
-                : "text/javascript") + "; charset=utf-8",
-        });
+        const type = path.endsWith(".css")
+          ? "text/css"
+          : path.endsWith(".svg")
+            ? "image/svg+xml"
+            : path.endsWith(".map")
+              ? "application/json"
+              : path.endsWith(".js")
+                ? "text/javascript"
+                : "text/html";
+        res.writeHead(200, { "Content-Type": type + "; charset=utf-8" });
         return res.end(await readFile(file));
       }
-      if (req.method === "GET" && assets[path]) {
-        const [file, type] = assets[path];
-        const content = await readFile(
-          path === "/app.js" || path === "/app.js.map"
-            ? new URL("../dist/public/" + file, import.meta.url)
-            : publicDir + file,
-        );
-        res.writeHead(200, { "Content-Type": type + "; charset=utf-8" });
-        return res.end(content);
-      }
-      if (req.method === "GET" && path === "/api/status") {
-        const selected = connections.defaultSelection();
+      if (path === "/api/status" && req.method === "GET")
         return json(res, {
-          ...configuration(
-            selected
-              ? connections.environment(selected.connectionId, selected.model)
-              : settings.environment(),
-          ),
-          version: "0.1.0",
-          workspace: "workspace/",
-          running: running.size,
+          runtimes: ["deepagents", "codex"],
+          version: "0.2.0",
+          workspace: workspaceDir,
+          running: tasks.running.size,
         });
-      }
-      if (req.method === "GET" && path === "/api/settings")
-        return json(res, settings.view());
-      if (req.method === "GET" && path === "/api/storage/backup") {
+      if (path === "/api/storage/backup" && req.method === "GET") {
         res.setHeader(
           "Content-Disposition",
           'attachment; filename="apsis-backup.json"',
         );
         return json(res, store.state);
+      }
+      if (path === "/api/ollama/models" && req.method === "POST")
+        return json(res, await discoverOllama((await body(req)).url));
+      if (path === "/api/codex/status" && req.method === "GET")
+        return json(res, await codex.inspect());
+      if (path === "/api/codex/login" && req.method === "POST") {
+        await body(req);
+        return json(res, await codex.beginLogin());
       }
       if (path === "/api/connections") {
         if (req.method === "GET") return json(res, connections.view());
@@ -246,75 +178,48 @@ export async function createApp({
         if (req.method === "PUT")
           return json(res, await connections.setDefault(await body(req)));
       }
-      const connectionMatch = path.match(
-        /^\/api\/connections\/([a-z0-9-]+)(?:\/(test))?$/,
+      const connection = path.match(
+        /^\/api\/connections\/([a-f0-9-]+)(?:\/(test))?$/,
       );
-      if (connectionMatch) {
-        const [, id, action] = connectionMatch;
-        if (action === "test" && req.method === "POST")
-          return json(
-            res,
-            await testConnection(connections, id, await body(req)),
-          );
-        if (!action && req.method === "PUT") {
+      if (connection) {
+        const [, id, action] = connection;
+        if (action === "test" && req.method === "POST") {
           const input = await body(req);
-          const previous = connections.view().find((row) => row.id === id);
           if (
-            previous &&
-            typeof input.provider === "string" &&
-            input.provider !== previous.provider &&
-            (store.state.agents?.some(
-              (agent) => agent.connectionId === id && !agent.archived,
-            ) ||
-              store.state.sessions.some(
-                (session) =>
-                  session.connectionId === id ||
-                  session.agent?.connectionId === id,
-              ))
-          )
-            fail("此連線已有 agent 或對話使用，請新增另一個模型服務。", 409);
-          return json(res, await connections.save(input, id));
+            connections.view().find((c) => c.id === id)?.provider === "codex"
+          ) {
+            const status = await codex.inspect();
+            const selected = connections.selection(id, input.model);
+            const ok =
+              status.connected &&
+              status.models.some(
+                (m: { id: string }) => m.id === selected.model,
+              );
+            return json(
+              res,
+              await connections.verified(id, {
+                engine: "codex",
+                model: selected.model,
+                at: new Date().toISOString(),
+                ok,
+                streaming: false,
+                tools: false,
+                message: ok
+                  ? "ChatGPT 已登入；模型可用。派工工具需以任務測試驗證。"
+                  : "請登入 ChatGPT，並選擇可用的 Codex 模型。",
+              }),
+            );
+          }
+          return json(res, await testConnection(connections, id, input));
         }
+        if (!action && req.method === "PUT")
+          return json(res, await connections.save(await body(req), id));
         if (!action && req.method === "DELETE") {
-          if (
-            store.state.agents?.some(
-              (a) => a.connectionId === id && !a.archived,
-            )
-          )
-            fail("此連線仍有 agent 使用，請先切換該 agent 的連線。", 409);
-          if (
-            store.state.sessions.some(
-              (s) => s.agent?.connectionId === id || s.connectionId === id,
-            )
-          )
-            fail("既有對話仍使用此連線，請保留連線以便續聊。", 409);
+          const used = product.db
+            .all<{ connectionId?: string }>("bot")
+            .some((b) => b.connectionId === id);
+          if (used) fail("此模型連線仍有 Bot 使用。", 409);
           await connections.archive(id);
-          return json(res, { ok: true });
-        }
-      }
-      if (path === "/api/projects") {
-        if (req.method === "GET") return json(res, tasks.projects.list());
-        if (req.method === "POST")
-          return json(res, await tasks.projects.add(await body(req)), 201);
-      }
-      if (path === "/api/runs" && req.method === "GET") {
-        const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
-        const all = tasks.runs.list(
-          url.searchParams.get("sessionId") || undefined,
-        );
-        return json(res, {
-          items: all.slice(offset, offset + 50),
-          total: all.length,
-          nextOffset: offset + 50 < all.length ? offset + 50 : null,
-        });
-      }
-      const runMatch = path.match(/^\/api\/runs\/([a-f0-9-]+)(?:\/(stop))?$/);
-      if (runMatch) {
-        const run = tasks.runs.records.get(runMatch[1]);
-        if (!run) fail("找不到任務。", 404);
-        if (req.method === "GET") return json(res, run);
-        if (req.method === "POST" && runMatch[2] === "stop") {
-          if (run.status === "running") tasks.stop(run.sessionId);
           return json(res, { ok: true });
         }
       }
@@ -323,317 +228,39 @@ export async function createApp({
         if (req.method === "POST")
           return json(res, await telegram.update(await body(req)));
       }
-      if (req.method === "POST" && path.startsWith("/api/channels/telegram/")) {
+      if (path.startsWith("/api/channels/telegram/") && req.method === "POST") {
         await body(req);
         if (path.endsWith("/pairing"))
           return json(res, telegram.createPairing());
         if (path.endsWith("/unpair")) return json(res, await telegram.unpair());
-        if (path.endsWith("/test")) {
-          try {
-            return json(res, await telegram.testConnection());
-          } catch (error) {
-            fail(asError(error).message);
-          }
-        }
+        if (path.endsWith("/test"))
+          return json(res, await telegram.testConnection());
       }
-      const settingsMatch = path.match(/^\/api\/settings\/(pi)$/);
-      if (req.method === "POST" && settingsMatch) {
-        const updated = await settings.update(
-          settingsMatch[1],
-          await body(req),
-        );
-        await connections.importSettings(updated.pi.provider);
-        return json(res, updated);
-      }
-      if (path === "/api/agents") {
-        if (req.method === "GET")
-          return json(
-            res,
-            (store.state.agents || []).filter((a) => !a.archived),
-          );
+      if (path === "/api/skills") {
+        if (req.method === "GET") return json(res, store.state.skills);
         if (req.method === "POST") {
-          const agent = parseAgent(await body(req), store.state);
-          if (
-            agent.connectionId &&
-            !connections
-              .view()
-              .some(
-                (c) =>
-                  c.id === agent.connectionId && c.provider === agent.provider,
-              )
-          )
-            fail("模型連線與供應商不符。");
-          await store.mutate((s) => (s.agents ||= []).push(agent));
-          return json(res, agent, 201);
-        }
-      }
-      const agentMatch = path.match(/^\/api\/agents\/([a-f0-9-]+)$/);
-      if (agentMatch) {
-        const previous = store.state.agents?.find(
-          (a) => a.id === agentMatch[1] && !a.archived,
-        );
-        if (!previous) fail("找不到 agent。", 404);
-        if (req.method === "PUT") {
-          const agent = parseAgent(await body(req), store.state, previous);
-          if (
-            agent.connectionId &&
-            !connections
-              .view()
-              .some(
-                (c) =>
-                  c.id === agent.connectionId && c.provider === agent.provider,
-              )
-          )
-            fail("模型連線與供應商不符。");
-          await store.mutate((s) => {
-            s.agents![s.agents!.findIndex((a) => a.id === agent.id)] = agent;
-          });
-          return json(res, agent);
-        }
-        if (req.method === "DELETE") {
-          await store.mutate((s) => {
-            s.agents!.find((a) => a.id === previous.id)!.archived = true;
-          });
-          return json(res, { ok: true });
-        }
-      }
-      if (req.method === "GET" && path === "/api/sessions")
-        return json(
-          res,
-          store.state.sessions.map(
-            ({
-              piMessages,
-              engineState,
-              runtimeState,
-              messages,
-              ...session
-            }) => ({
-              ...session,
-              count: messages.length,
-              running: running.has(session.id),
-            }),
-          ),
-        );
-      if (req.method === "POST" && path === "/api/sessions") {
-        const input = await body(req);
-        const mode = input.mode || "demo";
-        if (typeof mode !== "string" || !modes.includes(mode))
-          fail("未知模式。");
-        const agent = input.agentId
-          ? store.state.agents?.find(
-              (a) => a.id === input.agentId && !a.archived,
-            )
-          : undefined;
-        if (input.agentId && !agent) fail("找不到 agent。", 404);
-        if (agent && mode !== "pi") fail("自建 agent 必須使用真實回覆模式。");
-        if (
-          (input.connectionId !== undefined || input.model !== undefined) &&
-          (mode !== "pi" || agent)
-        )
-          fail("自訂模型只能用於一般真實對話。");
-        if (input.model !== undefined && input.connectionId === undefined)
-          fail("指定模型時請一併指定模型連線。");
-        const selection =
-          input.connectionId === undefined
-            ? undefined
-            : connections.selection(input.connectionId, input.model);
-        const session = await tasks.create(
-          mode as Session["mode"],
-          "web",
-          agent,
-          selection,
-          input.projectId === undefined
-            ? undefined
-            : string(input.projectId, 100, "專案"),
-        );
-        return json(res, session, 201);
-      }
-      const match = path.match(
-        /^\/api\/sessions\/([a-f0-9-]+)(?:\/(chat|stop|export|runs|model))?$/,
-      );
-      if (match) {
-        const [, id, action] = match;
-        const session = store.state.sessions.find((s) => s.id === id);
-        if (!session) fail("找不到工作階段。", 404);
-        if (!action && req.method === "GET") {
-          return json(res, tasks.view(id));
-        }
-        if (action === "model" && req.method === "PUT")
-          return json(res, await tasks.changeModel(id, await body(req)));
-        if (action === "export" && req.method === "GET") {
-          if (running.has(id)) fail("請等待任務完成後再匯出。", 409);
-          res.writeHead(200, {
-            "Content-Type": "text/markdown; charset=utf-8",
-            "Content-Disposition": 'attachment; filename="apsis-' + id + '.md"',
-          });
-          return res.end(exportConversation(session));
-        }
-        if (action === "stop" && req.method === "POST") {
-          tasks.stop(id);
-          return json(res, { ok: true });
-        }
-        if (action === "runs" && req.method === "POST") {
-          const input = await body(req);
-          const permissions =
-            input.permissions as import("../shared/types.ts").RunPermissions;
-          if (
-            !permissions ||
-            (permissions.shell !== undefined &&
-              typeof permissions.shell !== "boolean") ||
-            (permissions.shell === true && permissions.files !== true) ||
-            ["files", "memory", "skills"].some(
-              (k) =>
-                typeof (permissions as unknown as Record<string, unknown>)[
-                  k
-                ] !== "boolean",
-            )
-          )
-            fail("請提供檔案、記憶與技能權限。");
-          return json(
-            res,
-            await tasks.start(
-              id,
-              string(input.prompt, 16000, "訊息"),
-              permissions,
-            ),
-            202,
-          );
-        }
-        if (action === "chat" && req.method === "POST") {
-          if (running.has(id)) fail("此工作階段正在執行。", 409);
-          const input = await body(req);
-          const prompt = string(input.prompt, 16000, "訊息");
-          if (typeof input.allowWrites !== "boolean")
-            fail("allowWrites 必須為布林值。");
-          if (running.has(id)) fail("此工作階段正在執行。", 409);
-          let emittedError = false;
-          try {
-            await tasks.run(id, prompt, input.allowWrites, (event) => {
-              if (event.type === "error") emittedError = true;
-              if (res.destroyed) return;
-              if (!res.headersSent)
-                res.writeHead(200, {
-                  "Content-Type": "application/x-ndjson; charset=utf-8",
-                });
-              res.write(JSON.stringify(event) + "\n");
-            });
-          } catch (error) {
-            if (!emittedError) throw error;
-          } finally {
-            if (res.headersSent) res.end();
-          }
-          return;
-        }
-      }
-      const collection = path.match(
-        /^\/api\/(memories|skills)(?:\/([a-f0-9-]+|starter))?$/,
-      );
-      if (collection) {
-        const [, rawName, id] = collection;
-        const name = rawName as "memories" | "skills";
-        if (id && req.method === "PUT") {
-          const input = await body(req);
-          await store.mutate((s) => {
-            const item = s[name].find((m) => m.id === id);
-            if (!item) fail("項目不存在。", 404);
-            if (input.content !== undefined)
-              revise(
-                item,
-                string(input.content, name === "skills" ? 12000 : 4000, "內容"),
-              );
-            if (input.enabled !== undefined) {
-              if (typeof input.enabled !== "boolean")
-                fail("enabled 必須為布林值。");
-              item.enabled = input.enabled;
-            }
-            if (input.mergeId !== undefined) {
-              const other = s[name].find((m) => m.id === input.mergeId);
-              if (
-                !other ||
-                other.id === id ||
-                other.agentId !== item.agentId ||
-                other.mergedInto
-              )
-                fail("只能合併同範圍且未合併的項目。");
-              if (item.mergedInto) fail("此項目已合併。");
-              revise(
-                item,
-                string(
-                  item.content + "\n" + other.content,
-                  name === "skills" ? 12000 : 4000,
-                  "合併內容",
-                ),
-              );
-              other.enabled = false;
-              other.mergedInto = item.id;
-            }
-          });
-          return json(
-            res,
-            store.state[name].find((m) => m.id === id),
-          );
-        }
-        if (!id && req.method === "GET") return json(res, store.state[name]);
-        if (!id && req.method === "POST") {
           const input = await body(req);
           const item: Skill = {
-            source: { kind: "manual" },
-            name: "",
             id: randomUUID(),
-            content: string(
-              input.content,
-              name === "skills" ? 12000 : 4000,
-              "內容",
-            ),
+            name: text(input.name, 100, "名稱"),
+            content: text(input.content, 12000, "內容"),
+            source: { kind: "manual" },
             createdAt: new Date().toISOString(),
           };
-          if (name === "skills") item.name = string(input.name, 100, "名稱");
           const saved = await store.mutate((s) => {
-            const duplicate = s[name].find(
-              (m) =>
-                !m.agentId &&
-                !m.mergedInto &&
-                m.enabled !== false &&
-                normalizeFact(m.content) === normalizeFact(item.content) &&
-                (name !== "skills" || (m as Skill).name === item.name),
+            const duplicate = s.skills.find(
+              (skill) =>
+                !skill.agentId &&
+                !skill.mergedInto &&
+                skill.enabled !== false &&
+                skill.name === item.name &&
+                normalizeFact(skill.content) === normalizeFact(item.content),
             );
             if (duplicate) return duplicate;
-            s[name].unshift(item);
+            s.skills.unshift(item);
             return item;
           });
           return json(res, saved, saved.id === item.id ? 201 : 200);
-        }
-        if (id && req.method === "DELETE") {
-          if (!store.state[name].some((x) => x.id === id))
-            fail("項目不存在。", 404);
-          await store.mutate((s) => {
-            if (name === "skills")
-              s.skills = s.skills.filter((x) => x.id !== id);
-            else s.memories = s.memories.filter((x) => x.id !== id);
-          });
-          return json(res, { ok: true });
-        }
-      }
-      if (path === "/api/files" && req.method === "GET") {
-        const sessionId = url.searchParams.get("sessionId");
-        const session = sessionId
-          ? store.state.sessions.find((s) => s.id === sessionId)
-          : undefined;
-        if (sessionId && !session) fail("找不到對話。", 404);
-        const selected = await tasks.projects.workspace(
-          session || {
-            project: tasks.projects.get(
-              url.searchParams.get("projectId") || undefined,
-            ),
-          },
-        );
-        try {
-          return json(
-            res,
-            await selected.list(url.searchParams.get("path") || ""),
-          );
-        } catch (error) {
-          fail(asError(error).message, 400);
         }
       }
       fail("找不到此頁面。", 404);
@@ -654,10 +281,20 @@ export async function createApp({
     }
   });
   server.on("close", () => {
-    void product?.close();
+    codex.close();
+    void product.close();
     tasks.stopAll();
     void telegram.stop();
   });
   server.once("listening", () => telegram.start());
-  return { server, store, workspace, tasks, telegram, product };
+  return {
+    server,
+    store,
+    workspace,
+    tasks,
+    telegram,
+    product,
+    connections,
+    codex,
+  };
 }

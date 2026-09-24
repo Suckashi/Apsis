@@ -7,8 +7,7 @@ import {
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-// Keep the established wire name so rebranding does not invalidate login sessions.
-const cookieName = "__Host-talaria-share";
+const cookieName = "__Host-apsis-share";
 const lifetime = 8 * 60 * 60 * 1000;
 const digest = (value: string) => createHash("sha256").update(value).digest();
 const loginPage = (error = "") =>
@@ -157,14 +156,14 @@ export function createShareGateway({
         return send(res, 404, "找不到頁面。");
       if (
         !["GET", "HEAD"].includes(req.method || "") &&
-        req.headers["x-loom-client"] !== "1"
+        req.headers["x-apsis-client"] !== "1"
       )
         return send(res, 403, "缺少工作台請求標頭。");
       // Rebuild a small header allowlist after authentication. Never forward proxy credentials.
       const headers: Record<string, string> = {
         host: `127.0.0.1:${upstreamPort}`,
       };
-      for (const key of ["content-type", "accept", "x-loom-client"]) {
+      for (const key of ["content-type", "accept", "x-apsis-client"]) {
         const value = req.headers[key];
         if (typeof value === "string") headers[key] = value;
       }

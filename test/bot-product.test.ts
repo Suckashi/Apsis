@@ -28,8 +28,6 @@ async function fixture(
   const app = await createApp({
     dataDir: join(dir, "data"),
     workspaceDir: join(dir, "work"),
-    productMode: true,
-    env: {},
     runner,
   });
   app.server.listen(0, "127.0.0.1");
@@ -38,7 +36,7 @@ async function fixture(
   const request = async (path: string, method = "GET", body?: unknown) => {
     const response = await fetch(base + path, {
       method,
-      headers: { "Content-Type": "application/json", "X-Loom-Client": "1" },
+      headers: { "Content-Type": "application/json", "X-Apsis-Client": "1" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await response.json();
@@ -66,6 +64,7 @@ async function fixture(
 test("Bot customization validates before creation and persists edits", async (t) => {
   const f = await fixture();
   t.after(f.close);
+  assert.equal((await f.request("/api/sessions")).response.status, 404);
   const invalid = await f.request("/api/v2/bots", "POST", {
     name: "Test",
     avatar: "invalid",
@@ -93,6 +92,42 @@ test("Bot customization validates before creation and persists edits", async (t)
   assert.equal(invalidEdit.response.status, 400);
   assert.equal(f.product.bot(id).name, "寫作助理");
   assert.equal(f.product.bot(id).avatar, "bloom");
+});
+
+test("interrupted task notice can be dismissed without deleting the task", async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const bot = await f.product.create("測試 Bot");
+  const other = await f.product.create("另一個 Bot");
+  const job: Job = {
+    id: "interrupted-notice",
+    botId: bot.id,
+    prompt: "尚未完成的任務",
+    createdAt: new Date().toISOString(),
+    status: "interrupted",
+    error: "服務重新啟動。",
+  };
+  f.product.db.put("job", job);
+  const path = `/api/v2/bots/${bot.id}/jobs/${job.id}/dismiss`;
+  assert.equal(
+    (
+      await f.request(
+        `/api/v2/bots/${other.id}/jobs/${job.id}/dismiss`,
+        "POST",
+        {},
+      )
+    ).response.status,
+    404,
+  );
+  assert.equal((await f.request(path, "POST", {})).response.status, 200);
+  assert.equal((await f.request(path, "POST", {})).response.status, 200);
+  const saved = f.product.db.get<Job>("job", job.id)!;
+  assert.equal(saved.status, "interrupted");
+  assert.ok(saved.dismissedAt);
+  assert.equal(
+    f.product.detail(bot.id).jobs.find((j) => j.id === job.id)?.dismissedAt,
+    saved.dismissedAt,
+  );
 });
 
 test("deleting Bot cancels approval and queue, removes owned data and leaves other Bots intact", async (t) => {
@@ -494,7 +529,7 @@ test("attachments, published snapshots and generated documents round-trip throug
   const upload = await fetch(f.base + `/api/v2/bots/${bot.id}/attachments`, {
     method: "POST",
     headers: {
-      "X-Loom-Client": "1",
+      "X-Apsis-Client": "1",
       "X-File-Name": encodeURIComponent("研究.txt"),
     },
     body: "example text",
@@ -565,8 +600,6 @@ test("routine ticks are idempotent, hidden Bots keep schedules, restart expires 
   const reopened = await createApp({
     dataDir: join(f.dir, "data"),
     workspaceDir: join(f.dir, "work"),
-    productMode: true,
-    env: {},
   });
   t.after(() => reopened.product!.close());
   assert.equal(
@@ -666,7 +699,7 @@ test("MCP drafts edit arguments, call the connector once, hide credentials and n
   assert.equal(invocations.length, 1);
 });
 
-test("Pi product extensions pass through the common tool gate and preserve operation evidence", async (t) => {
+test("Deep Agents product tools pass through the common gate and preserve operation evidence", async (t) => {
   const f = await fixture(async (options) => {
     const tools = createTools(options);
     await tools

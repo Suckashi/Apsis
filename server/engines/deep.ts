@@ -4,6 +4,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { tool } from "@langchain/core/tools";
 import {
   HumanMessage,
+  AIMessage,
   mapStoredMessagesToChatMessages,
   mapChatMessagesToStoredMessages,
   type BaseMessage,
@@ -50,7 +51,7 @@ export async function runDeep(options: RunOptions) {
     tool(
       async (args) => {
         try {
-          return await executeTool(t, args, options);
+          return await executeTool(t, args as Record<string, unknown>, options);
         } catch (error) {
           options.signal.throwIfAborted();
           return `Tool failed: ${(error as Error).message}`;
@@ -85,19 +86,23 @@ export async function runDeep(options: RunOptions) {
   const previous = options.session.engineState as DeepState | undefined;
   const previousMessages = previous
     ? mapStoredMessagesToChatMessages(previous.messages)
-    : [];
-  const stream = await agent.stream(
-    {
-      messages: [...previousMessages, new HumanMessage(options.prompt)],
-      ...(previous?.files ? { files: previous.files } : {}),
-      ...(previous?.todos ? { todos: previous.todos } : {}),
-    },
-    {
-      streamMode: ["messages", "values"],
-      signal: options.signal,
-      recursionLimit: 48,
-    },
-  );
+    : options.session.messages
+        .filter((message) => message.status === "complete")
+        .slice(-12)
+        .map((message) =>
+          message.role === "user"
+            ? new HumanMessage(message.content.slice(0, 16000))
+            : new AIMessage(message.content.slice(0, 16000)),
+        );
+  const steers: string[] = [];
+  options.registerSteer?.(async (instruction) => {
+    steers.push(instruction);
+  });
+  let input = {
+    messages: [...previousMessages, new HumanMessage(options.prompt)],
+    ...(previous?.files ? { files: previous.files } : {}),
+    ...(previous?.todos ? { todos: previous.todos } : {}),
+  };
   let final:
     | {
         messages: BaseMessage[];
@@ -113,45 +118,69 @@ export async function runDeep(options: RunOptions) {
         if (call.id) seenTools.add(call.id);
     }
   }
-  for await (const [kind, value] of stream) {
-    options.signal.throwIfAborted();
-    if (kind === "messages") {
-      const [message] = value;
-      if (message.type === "ai") {
-        const delta =
-          typeof message.content === "string"
-            ? message.content
-            : message.content
-                .filter((c) => c.type === "text")
-                .map((c) => c.text)
-                .join("");
-        if (delta) {
-          text += delta;
-          options.emit({ type: "delta", text: delta });
+  for (;;) {
+    final = undefined;
+    const stream = await agent.stream(input, {
+      streamMode: ["messages", "values"],
+      signal: options.signal,
+      recursionLimit: Math.min(200, Math.max(48, options.maxTurns || 48)),
+    });
+    for await (const [kind, value] of stream) {
+      options.signal.throwIfAborted();
+      if (kind === "messages") {
+        const [message] = value;
+        if (message.type === "ai") {
+          const delta =
+            typeof message.content === "string"
+              ? message.content
+              : message.content
+                  .filter((c) => c.type === "text")
+                  .map((c) => c.text)
+                  .join("");
+          if (delta) {
+            text += delta;
+            options.emit({ type: "delta", text: delta });
+          }
+        }
+      } else if (kind === "values") {
+        final = value;
+        for (const m of value.messages) {
+          if ("tool_calls" in m && Array.isArray(m.tool_calls))
+            for (const call of m.tool_calls) {
+              if (call.id && !seenTools.has(call.id)) {
+                seenTools.add(call.id);
+                options.emit({
+                  type: "activity",
+                  tool: call.name,
+                  text: `規劃工具 ${call.name}`,
+                });
+              }
+            }
         }
       }
-    } else if (kind === "values") {
-      final = value;
-      for (const m of value.messages) {
-        if ("tool_calls" in m && Array.isArray(m.tool_calls))
-          for (const call of m.tool_calls) {
-            if (call.id && !seenTools.has(call.id)) {
-              seenTools.add(call.id);
-              options.emit({
-                type: "activity",
-                tool: call.name,
-                text: `規劃工具 ${call.name}`,
-              });
-            }
-          }
-      }
     }
+    if (!final) throw new Error("Deep Agents 未回傳執行結果。");
+    if (!steers.length) break;
+    const instruction = steers.splice(0).join("\n");
+    input = {
+      messages: [...final.messages, new HumanMessage(instruction)],
+      ...(final.files ? { files: final.files } : {}),
+      ...(final.todos ? { todos: final.todos } : {}),
+    };
   }
-  if (!final) throw new Error("Deep Agents 未回傳執行結果。");
   if (!text) {
     const last = final.messages.findLast((m) => m.type === "ai");
     text =
-      typeof last?.content === "string" ? last.content : "工具操作已完成。";
+      typeof last?.content === "string"
+        ? last.content
+        : Array.isArray(last?.content)
+          ? last.content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("")
+          : "";
+    if (!text.trim())
+      throw new Error("模型未回傳文字結果；請檢查操作紀錄並更換模型或重試。");
     options.emit({ type: "delta", text });
   }
   const previousIds = new Set(

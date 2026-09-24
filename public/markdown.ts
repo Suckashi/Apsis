@@ -1,5 +1,10 @@
-import { t } from "./i18n.ts";
 import MarkdownIt from "markdown-it";
+
+const t = (message: string, ...args: string[]) =>
+  message.replace(
+    /\{(\d+)\}/g,
+    (_, index: string) => args[Number(index)] || "",
+  );
 
 // Model output is untrusted: raw HTML stays text, and unsafe link schemes are rejected.
 const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });

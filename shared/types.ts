@@ -1,8 +1,11 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-
-export type Provider = "openai" | "anthropic" | "ollama" | "openai-compatible";
-export type Mode = "demo" | "pi";
-export type AgentEngine = "pi" | "deepagents" | "openai-agents";
+export type Provider =
+  | "openai"
+  | "anthropic"
+  | "ollama"
+  | "openai-compatible"
+  | "codex";
+export type Mode = "deepagents" | "codex";
+export type AgentEngine = Mode;
 export interface AgentDefinition {
   connectionId?: string;
   version?: number;
@@ -45,7 +48,6 @@ export interface ChatMessage {
 }
 export interface Session {
   project?: Project;
-  runtimeState?: { engine: AgentEngine; version: 1; data: unknown };
   agent?: AgentDefinition;
   connectionId?: string;
   provider?: Provider;
@@ -57,20 +59,13 @@ export interface Session {
   mode: Mode;
   createdAt: string;
   messages: ChatMessage[];
-  piMessages: AgentMessage[];
 }
-export type SessionView = Omit<
-  Session,
-  "piMessages" | "engineState" | "runtimeState"
-> & {
+export type SessionView = Omit<Session, "engineState"> & {
   activeRunId?: string;
   running?: boolean;
   live?: { text: string; activity: string[] };
 };
-export type SessionSummary = Omit<
-  Session,
-  "piMessages" | "engineState" | "runtimeState" | "messages"
-> & {
+export type SessionSummary = Omit<Session, "engineState" | "messages"> & {
   count: number;
   running: boolean;
 };
@@ -86,11 +81,9 @@ export type RunEvent =
   | { type: "delta" | "activity" | "error"; text: string; tool?: string }
   | { type: "done" };
 export interface RunResult {
-  runtimeState?: Session["runtimeState"];
   usage?: { inputTokens: number; outputTokens: number };
   engineState?: unknown;
   text: string;
-  piMessages?: AgentMessage[];
 }
 export interface RunPermissions {
   shell?: boolean;
@@ -120,7 +113,7 @@ export interface TaskRun {
   recoveryRunIds?: string[];
   id: string;
   sessionId: string;
-  engine: AgentEngine | "demo";
+  engine: AgentEngine;
   agentName: string;
   connectionId?: string;
   model: string;
@@ -163,29 +156,6 @@ export interface ConnectionSelection {
   connectionId: string;
   model: string;
 }
-export interface Status {
-  provider: string;
-  model: string;
-  piReady: boolean;
-  version?: string;
-  workspace?: string;
-  running?: number;
-}
-export interface CredentialState {
-  configured: boolean;
-  source: "none" | "local" | "environment";
-}
-export interface SettingsView {
-  pi: {
-    provider: string;
-    model: string;
-    credentials: Record<Exclude<Provider, "ollama">, CredentialState>;
-    ollamaUrl: string;
-    compatibleUrl: string;
-  };
-  models: Record<string, { id: string; name: string }[]>;
-  defaults: Record<Provider, string>;
-}
 export type Api = <T = unknown>(
   path: string,
   options?: RequestInit,
@@ -197,12 +167,9 @@ export interface WorkspaceFile {
 export interface TelegramView {
   configured: boolean;
   enabled: boolean;
-  allowWrites: boolean;
-  groupId: string;
   ownerId: string;
   username: string;
   status: "disabled" | "connecting" | "connected" | "error";
   error: string;
-  running: number;
   pairingExpiresAt: string;
 }

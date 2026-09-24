@@ -26,10 +26,8 @@ await once(website, "listening");
 const websiteUrl = `http://127.0.0.1:${(website.address() as AddressInfo).port}`;
 let delegateWorkerId = "";
 const app = await createApp({
-  productMode: true,
   dataDir: join(dir, "data"),
   workspaceDir: join(dir, "work"),
-  env: {},
   runner: async (options) => {
     const tools = createTools(options);
     const call = async (name: string, args: unknown) =>
@@ -116,6 +114,123 @@ try {
   await page.getByRole("button", { name: "建立 Bot", exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole("heading", { name: "你好，我是 新 Bot。" }).waitFor();
+  // Layout preferences, focus restoration and narrow-screen drawer isolation.
+  const details = page.locator("#bot-details");
+  const roster = page.locator("#bot-roster");
+  const composerInput = page.getByRole("textbox", { name: "傳送訊息" });
+  assert.equal(await roster.isVisible(), true);
+  assert.equal(await details.count(), 0, "details closed by default");
+  await page.getByRole("button", { name: "切換詳情面板" }).click();
+  const artifactsToggle = details.getByRole("button", { name: /^檔案與成果/ });
+  assert.equal(await artifactsToggle.getAttribute("aria-expanded"), "true");
+  assert.equal(
+    await details
+      .getByRole("button", { name: /^電腦/ })
+      .getAttribute("aria-expanded"),
+    "false",
+  );
+  assert.equal(
+    await details
+      .getByRole("button", { name: /^排程/ })
+      .getAttribute("aria-expanded"),
+    "false",
+  );
+  await artifactsToggle.click();
+  assert.equal(
+    await details.getByText("附件與成果會顯示在這裡。").isVisible(),
+    false,
+  );
+  await artifactsToggle.press("Enter");
+  assert.equal(
+    await details.getByText("附件與成果會顯示在這裡。").isVisible(),
+    true,
+  );
+  await page.getByRole("button", { name: "進入專注模式" }).click();
+  assert.equal(await roster.isVisible(), false);
+  assert.equal(await details.count(), 0);
+  await page.getByRole("button", { name: "離開專注模式" }).click();
+  assert.equal(await roster.isVisible(), true);
+  await details.waitFor();
+  await page
+    .getByRole("button", { name: "收起 Bot 名單", exact: true })
+    .click();
+  await page.reload();
+  await composerInput.waitFor();
+  await details.waitFor();
+  assert.equal(
+    await roster.isVisible(),
+    false,
+    "desktop roster choice persists",
+  );
+  const desktopPreference = await page.evaluate(() =>
+    localStorage.getItem("apsis.layout.v1"),
+  );
+  for (const width of [375, 768, 1024]) {
+    await page.setViewportSize({ width, height: 900 });
+    await details.waitFor({ state: "detached" });
+    if (width === 375) {
+      await page.getByRole("button", { name: "開啟 Bot 名單" }).click();
+      await page.keyboard.press("Escape");
+    }
+    await page.getByRole("button", { name: "切換詳情面板" }).click();
+    await page.getByRole("dialog", { name: "Bot 詳情" }).waitFor();
+    await page.keyboard.press("Escape");
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("apsis.layout.v1")),
+      desktopPreference,
+    );
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await details.waitFor();
+  assert.equal(await roster.isVisible(), false);
+  await page.getByRole("button", { name: "進入專注模式" }).click();
+  await page.getByRole("button", { name: "離開專注模式" }).click();
+  assert.equal(
+    await roster.isVisible(),
+    false,
+    "focus restores collapsed roster too",
+  );
+  await details.waitFor();
+  await page.getByRole("button", { name: "開啟 Bot 名單" }).click();
+  await page.getByRole("button", { name: "切換詳情面板" }).click();
+  const shortHeight = (await composerInput.boundingBox())!.height;
+  await composerInput.fill(
+    Array.from({ length: 20 }, (_, i) => `第 ${i + 1} 行`).join("\n"),
+  );
+  const tallHeight = (await composerInput.boundingBox())!.height;
+  assert.ok(
+    tallHeight > shortHeight && tallHeight <= 180,
+    "composer grows within its limit",
+  );
+  assert.equal(
+    await composerInput.evaluate(
+      (el: HTMLTextAreaElement) => el.scrollHeight > el.clientHeight,
+    ),
+    true,
+  );
+  await composerInput.fill("中文輸入");
+  await composerInput.dispatchEvent("keydown", {
+    key: "Enter",
+    code: "Enter",
+    isComposing: true,
+    bubbles: true,
+  });
+  assert.equal(
+    await composerInput.inputValue(),
+    "中文輸入",
+    "IME Enter must not submit",
+  );
+  await composerInput.press("Shift+Enter");
+  assert.equal(await composerInput.inputValue(), "中文輸入\n");
+  await composerInput.fill("");
+  assert.equal((await composerInput.boundingBox())!.height, shortHeight);
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "ui-check.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("UI attachment verification"),
+  });
+  await page.getByRole("button", { name: "移除 ui-check.txt" }).click();
+  assert.equal(await page.locator(".attachment-chips").count(), 0);
   assert.equal(app.product!.snapshot().bots[0].avatar, "cloud");
   await page.getByRole("button", { name: /新 Bot 隨時可以交辦/ }).click();
   await page.getByLabel("名稱", { exact: true }).fill("研究助理");
@@ -159,16 +274,35 @@ try {
   ]);
   assert.equal(download.suggestedFilename(), "研究報告.md");
   await download.saveAs(join(output, "report.md"));
+  assert.equal(
+    await details
+      .getByRole("button", { name: /^電腦/ })
+      .getAttribute("aria-expanded"),
+    "true",
+  );
+  await page.screenshot({
+    path: join(output, "desktop-details.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "關閉詳情", exact: true }).click();
   await page.screenshot({
     path: join(output, "desktop-completed.png"),
     fullPage: true,
   });
+  await page.getByRole("button", { name: "進入專注模式" }).click();
+  await page.screenshot({
+    path: join(output, "desktop-focus.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "離開專注模式" }).click();
+  await page.getByRole("button", { name: "切換詳情面板" }).click();
   await page.reload();
   await page.locator('.header-profile [data-avatar="spark"]').waitFor();
   await page
     .getByText("報告已完成，驗證命令成功。", { exact: false })
     .first()
     .waitFor();
+  await details.getByRole("button", { name: /^排程/ }).click();
   await page.getByRole("button", { name: "新增排程", exact: true }).click();
   await page.getByLabel("名稱", { exact: true }).fill("每日日報");
   await page.getByLabel("交辦內容").fill("整理當天的研究資料");
@@ -224,6 +358,38 @@ try {
   await page.getByRole("button", { name: "設定與工具" }).click();
   const settingsDialog = page.getByRole("dialog", { name: "設定與工具" });
   await settingsDialog.waitFor();
+  await settingsDialog
+    .getByRole("button", { name: "編輯", exact: true })
+    .click();
+  await settingsDialog.getByLabel("名稱", { exact: true }).fill("研究模型");
+  await settingsDialog
+    .getByRole("button", { name: "儲存連線", exact: true })
+    .click();
+  await settingsDialog
+    .getByText("模型已儲存並設為預設。", { exact: true })
+    .waitFor();
+  await settingsDialog.getByText("研究模型", { exact: true }).waitFor();
+  await page.screenshot({
+    path: join(output, "desktop-settings-dark.png"),
+    fullPage: true,
+  });
+  for (const category of [
+    "連接器",
+    "技能",
+    "Telegram",
+    "自動核准",
+    "模型連線",
+  ]) {
+    await settingsDialog
+      .getByRole("button", { name: category, exact: true })
+      .click();
+    assert.equal(
+      await settingsDialog
+        .getByRole("button", { name: category, exact: true })
+        .getAttribute("aria-current"),
+      "true",
+    );
+  }
   await page.keyboard.press("Shift+Tab");
   assert.equal(
     await page.evaluate(
@@ -323,12 +489,52 @@ try {
     animations: "disabled",
     fullPage: true,
   });
+  const touchContext = await browser.newContext({
+    viewport: { width: 375, height: 844 },
+    hasTouch: true,
+    storageState: await page.context().storageState(),
+  });
+  try {
+    const touchPage = await touchContext.newPage();
+    await touchPage.goto(url);
+    await touchPage.getByRole("textbox", { name: "傳送訊息" }).waitFor();
+    const checkTouchTargets = async () => {
+      const undersized = await touchPage.evaluate(() =>
+        Array.from(document.querySelectorAll("button"))
+          .filter((el) => el.getClientRects().length && !el.closest("[inert]"))
+          .flatMap((el) => {
+            const { width, height } = el.getBoundingClientRect();
+            return width < 44 || height < 44
+              ? [{ label: el.ariaLabel || el.textContent, width, height }]
+              : [];
+          }),
+      );
+      assert.deepEqual(
+        undersized,
+        [],
+        "visible touch targets must be at least 44px",
+      );
+    };
+    await checkTouchTargets();
+    await touchPage.getByRole("button", { name: "開啟 Bot 名單" }).click();
+    await checkTouchTargets();
+    await touchPage.getByRole("button", { name: "設定與工具" }).click();
+    await checkTouchTargets();
+    await touchPage.keyboard.press("Escape");
+    await touchPage.getByRole("button", { name: "切換詳情面板" }).click();
+    await checkTouchTargets();
+  } finally {
+    await touchContext.close();
+  }
   const bot = app.product!.bot(app.product!.snapshot().bots[0].id);
   delegateWorkerId = (await app.product!.create("協作助理")).id;
+  await page.getByRole("button", { name: "回覆", exact: true }).first().click();
+  await page.locator(".reply-chip").waitFor();
   await page
     .getByRole("textbox", { name: "傳送訊息" })
     .fill("coordinate-browser");
   await page.getByRole("button", { name: "傳送", exact: true }).click();
+  await page.locator(".quoted-message").waitFor();
   await page.getByRole("button", { name: "前往核准" }).click();
   await page.getByText("需要你的核准", { exact: true }).waitFor();
   await page.getByRole("button", { name: "核准並繼續", exact: true }).click();
@@ -395,6 +601,12 @@ try {
           "steering",
           "artifact download",
           "reload persistence",
+          "desktop sidebar preferences and focus-mode restoration",
+          "responsive drawers never overwrite desktop preferences",
+          "detail section disclosure and connected computer expansion",
+          "auto-growing composer, IME Enter and Shift+Enter",
+          "attachment upload/removal, quoted reply and model settings save",
+          "44px touch controls on chat, roster, settings and details",
           "routine creation",
           "mobile layout/settings",
           "light/dark contrast >= 4.5:1",

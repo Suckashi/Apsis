@@ -1,13 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { renderMarkdown } from "./markdown.ts";
+import { parseMcpConnectorJson, type McpConnectorInput } from "./mcp-json.ts";
 import {
   BrandMark,
   AvatarPicker,
   CopyButton,
+  DetailSection,
   Modal,
   useDrawer,
-  useMedia,
+  useWorkspaceLayout,
 } from "./bot-ui.tsx";
 import type { ProductService } from "../server/product.ts";
 import type { Routine, Artifact, Draft } from "../shared/product.ts";
@@ -24,7 +32,7 @@ async function api<T>(
     path.startsWith("/api/") ? path : "/api/v2" + path,
     {
       method,
-      headers: { "Content-Type": "application/json", "X-Loom-Client": "1" },
+      headers: { "Content-Type": "application/json", "X-Apsis-Client": "1" },
       body: body === undefined ? undefined : JSON.stringify(body),
     },
   );
@@ -54,8 +62,8 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
     ),
     settings: (
       <>
-        <path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h6l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3Z" />
-        <circle cx="12" cy="12" r="3" />
+        <path d="M 19.825 10.337 L 21.781 9.921 A 10 10 0 0 1 21.781 14.079 L 19.825 13.663 A 8 8 0 0 1 18.709 16.357 L 20.387 17.446 A 10 10 0 0 1 17.446 20.387 L 16.357 18.709 A 8 8 0 0 1 13.663 19.825 L 14.079 21.781 A 10 10 0 0 1 9.921 21.781 L 10.337 19.825 A 8 8 0 0 1 7.643 18.709 L 6.554 20.387 A 10 10 0 0 1 3.613 17.446 L 5.291 16.357 A 8 8 0 0 1 4.175 13.663 L 2.219 14.079 A 10 10 0 0 1 2.219 9.921 L 4.175 10.337 A 8 8 0 0 1 5.291 7.643 L 3.613 6.554 A 10 10 0 0 1 6.554 3.613 L 7.643 5.291 A 8 8 0 0 1 10.337 4.175 L 9.921 2.219 A 10 10 0 0 1 14.079 2.219 L 13.663 4.175 A 8 8 0 0 1 16.357 5.291 L 17.446 3.613 A 10 10 0 0 1 20.387 6.554 L 18.709 7.643 A 8 8 0 0 1 19.825 10.337 Z" />
+        <circle cx="12" cy="12" r="3.5" />
       </>
     ),
     panel: (
@@ -64,6 +72,7 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
         <path d="M15 4v16" />
       </>
     ),
+    focus: <path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5" />,
     monitor: (
       <>
         <rect x="3" y="3" width="18" height="13" rx="2" />
@@ -163,8 +172,19 @@ function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("apsis.theme", theme);
   }, [theme]);
-  const smallScreen = useMedia("(max-width: 640px)");
-  const overlayDetails = useMedia("(max-width: 1149px)");
+  const {
+    smallScreen,
+    overlayDetails,
+    mobileList,
+    setMobileList,
+    listVisible,
+    panel,
+    setPanel,
+    focusMode,
+    toggleFocus,
+    toggleList,
+    closeList,
+  } = useWorkspaceLayout();
   const sidebarRef = useRef<HTMLElement>(null);
   const detailsRef = useRef<HTMLElement>(null);
   const [creating, setCreating] = useState(false);
@@ -172,15 +192,12 @@ function App() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [settings, setSettings] = useState(false);
-  const [panel, setPanel] = useState(() => window.innerWidth >= 1150);
   const [profile, setProfile] = useState(false);
-  const [mobileList, setMobileList] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [attachments, setAttachments] = useState<Artifact[]>([]);
   const [replyTo, setReplyTo] = useState<string>();
   const [routine, setRoutine] = useState<Routine | "new">();
-  const [connection, setConnection] = useState("connecting");
   const [expanded, setExpanded] = useState(false);
   const listDrawer = smallScreen && mobileList;
   const detailsDrawer =
@@ -191,6 +208,23 @@ function App() {
   const scroller = useRef<HTMLDivElement>(null);
   const pinnedBottom = useRef(true);
   const input = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const element = input.current;
+    if (!element) return;
+    const resize = () => {
+      element.style.height = "0px";
+      const maximum = parseFloat(getComputedStyle(element).maxHeight);
+      element.style.height = `${Math.min(element.scrollHeight, maximum)}px`;
+    };
+    resize();
+    const observer = new ResizeObserver(resize);
+    if (element.parentElement) observer.observe(element.parentElement);
+    window.addEventListener("resize", resize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", resize);
+    };
+  }, [text, selected]);
   const upload = useRef<HTMLInputElement>(null);
   const pendingRequest = useRef<
     { prompt: string; botId: string; id: string } | undefined
@@ -215,7 +249,6 @@ function App() {
     if (id && !nextDetail) {
       selectedRef.current = null;
       setSelected(null);
-      setPanel(false);
       localStorage.removeItem("apsis.bot");
     }
   }, []);
@@ -232,8 +265,6 @@ function App() {
     void refresh().catch((e) => setError(e.message));
     const events = new EventSource("/api/v2/events");
     let timer: ReturnType<typeof setTimeout> | undefined;
-    events.onopen = () => setConnection("connected");
-    events.onerror = () => setConnection("reconnecting");
     events.onmessage = () => {
       if (timer) return;
       timer = setTimeout(() => {
@@ -318,7 +349,7 @@ function App() {
         const res = await fetch(`/api/v2/bots/${selected}/attachments`, {
           method: "POST",
           headers: {
-            "X-Loom-Client": "1",
+            "X-Apsis-Client": "1",
             "X-File-Name": encodeURIComponent(file.name),
             "Content-Type": "application/octet-stream",
           },
@@ -372,7 +403,7 @@ function App() {
       : [];
   return (
     <div
-      className={`app ${panel ? "details-open" : ""} ${mobileList ? "list-open" : ""}`}
+      className={`app ${panel ? "details-open" : ""} ${mobileList ? "list-open" : ""} ${!listVisible ? "list-collapsed" : ""} ${focusMode ? "focus-mode" : ""}`}
     >
       <a className="skip-link" href="#conversation">
         跳至對話
@@ -383,18 +414,19 @@ function App() {
           tabIndex={-1}
           aria-hidden="true"
           onClick={() => {
-            setMobileList(false);
-            setPanel(false);
+            if (listDrawer) setMobileList(false);
+            else setPanel(false);
           }}
         />
       )}
       <aside
+        id="bot-roster"
         ref={sidebarRef}
         className="sidebar"
         role={listDrawer ? "dialog" : undefined}
         aria-modal={listDrawer || undefined}
         aria-label="Bot 導覽"
-        inert={detailsDrawer}
+        inert={detailsDrawer || !listVisible}
       >
         <div className="brand">
           <span className="brand-mark">
@@ -403,9 +435,10 @@ function App() {
           <strong>Apsis</strong>
           <span className="local-badge">LOCAL</span>
           <button
-            className="icon mobile-only"
+            className="icon roster-close"
             aria-label="關閉名單"
-            onClick={() => setMobileList(false)}
+            title="收起 Bot 名單"
+            onClick={closeList}
           >
             <Icon name="close" />
           </button>
@@ -470,30 +503,19 @@ function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
-          <span className={`connection ${connection}`} role="status">
-            <i />
-            {connection === "connected"
-              ? "本機已連線"
-              : connection === "reconnecting"
-                ? "重新連線中"
-                : "連線中"}
-          </span>
-          <button
-            className="settings-link"
-            onClick={() => {
-              setMobileList(false);
-              setSettings(true);
-            }}
-          >
-            <Icon name="settings" />
-            <span>設定與工具</span>
-            <Icon name="arrow" size={15} />
-          </button>
-          <div className="owner">
-            <span>S</span>
-            <div>
-              個人工作空間<small>由你選擇模型</small>
-            </div>
+          <div className="sidebar-actions">
+            <button
+              className="settings-link"
+              onClick={() => {
+                setMobileList(false);
+                setSettings(true);
+              }}
+            >
+              <span className="settings-symbol" aria-hidden="true">
+                <Icon name="settings" size={20} />
+              </span>
+              <span>設定與工具</span>
+            </button>
             <button
               className="icon theme-toggle"
               aria-label={
@@ -514,16 +536,18 @@ function App() {
         inert={listDrawer || detailsDrawer}
       >
         {!selected && (
-          <div className="mobile-topbar">
+          <div className="workspace-topbar">
             <button
+              id="roster-toggle"
               className="icon"
-              aria-label="開啟 Bot 名單"
-              aria-expanded={mobileList}
-              onClick={() => setMobileList(true)}
+              aria-label={listVisible ? "收起 Bot 名單" : "開啟 Bot 名單"}
+              aria-expanded={listVisible}
+              aria-controls="bot-roster"
+              onClick={toggleList}
             >
               <Icon name="menu" />
             </button>
-            <strong>Apsis</strong>
+            {!listVisible && <strong>Apsis</strong>}
           </div>
         )}
         {error && (
@@ -543,7 +567,6 @@ function App() {
             <div className="welcome-symbol">
               <BrandMark size={56} />
             </div>
-            <span className="eyebrow">YOUR PERSONAL TEAM</span>
             <h1>把事情交給你的 Bot。</h1>
             <p>
               一段持續的對話。能動手工作的幫手。
@@ -575,10 +598,13 @@ function App() {
           <>
             <header className="chat-header">
               <button
-                className="icon mobile-only"
-                aria-label="開啟 Bot 名單"
-                aria-expanded={mobileList}
-                onClick={() => setMobileList(true)}
+                id="roster-toggle"
+                className="icon"
+                aria-label={listVisible ? "收起 Bot 名單" : "開啟 Bot 名單"}
+                title={listVisible ? "收起 Bot 名單" : "開啟 Bot 名單"}
+                aria-expanded={listVisible}
+                aria-controls="bot-roster"
+                onClick={toggleList}
               >
                 <Icon name="menu" />
               </button>
@@ -609,8 +635,18 @@ function App() {
                   {bot?.model || state?.defaultModel?.model || "尚未連接模型"}
                 </span>
                 <button
+                  className={`icon focus-toggle ${focusMode ? "active" : ""}`}
+                  aria-label={focusMode ? "離開專注模式" : "進入專注模式"}
+                  title={focusMode ? "離開專注模式" : "專注模式"}
+                  aria-pressed={focusMode}
+                  onClick={toggleFocus}
+                >
+                  <Icon name="focus" />
+                </button>
+                <button
                   className={`icon ${panel ? "active" : ""}`}
                   aria-label="切換詳情面板"
+                  title="Bot 詳情"
                   aria-expanded={panel}
                   aria-controls="bot-details"
                   onClick={() => setPanel(!panel)}
@@ -778,7 +814,14 @@ function App() {
                               </strong>
                               <span>{label}</span>
                             </div>
-                            <p>{job.prompt}</p>
+                            {job.prompt.length > 100 ? (
+                              <details className="delegation-prompt">
+                                <summary>{job.prompt.slice(0, 100)}…</summary>
+                                <p>{job.prompt}</p>
+                              </details>
+                            ) : (
+                              <p>{job.prompt}</p>
+                            )}
                             {(job.result || job.error) && (
                               <details>
                                 <summary>
@@ -829,20 +872,37 @@ function App() {
                   {detail.jobs
                     .filter(
                       (j) =>
-                        (j.status === "failed" && !j.runId) ||
-                        j.status === "interrupted",
+                        !j.dismissedAt &&
+                        ((j.status === "failed" && !j.runId) ||
+                          j.status === "interrupted"),
                     )
                     .map((j) => (
                       <div className="job-error" key={j.id}>
-                        {j.error}
-                        <button
-                          onClick={() => {
-                            setText(j.prompt);
-                            input.current?.focus();
-                          }}
-                        >
-                          重新交辦
-                        </button>
+                        <span className="job-error-message">{j.error}</span>
+                        <div className="job-error-actions">
+                          <button
+                            onClick={() => {
+                              setText(j.prompt);
+                              input.current?.focus();
+                            }}
+                          >
+                            重新交辦
+                          </button>
+                          <button
+                            aria-label="關閉這則任務提示"
+                            onClick={() =>
+                              perform(() =>
+                                api(
+                                  `/bots/${selected}/jobs/${j.id}/dismiss`,
+                                  "POST",
+                                  {},
+                                ),
+                              )
+                            }
+                          >
+                            關閉
+                          </button>
+                        </div>
                       </div>
                     ))}
                   <div ref={bottom} />
@@ -920,6 +980,7 @@ function App() {
                     <button
                       className="icon"
                       aria-label="新增附件"
+                      title="新增附件"
                       disabled={busy}
                       onClick={() => upload.current?.click()}
                     >
@@ -928,6 +989,7 @@ function App() {
                     <button
                       className="slash-button"
                       aria-label="選擇技能"
+                      title="選擇技能 /"
                       onClick={() => {
                         setText("/");
                         input.current?.focus();
@@ -938,6 +1000,7 @@ function App() {
                     <button
                       className="slash-button"
                       aria-label="選擇連接器"
+                      title="選擇連接器 @"
                       onClick={() => {
                         setText("@");
                         input.current?.focus();
@@ -959,6 +1022,7 @@ function App() {
                         <button
                           className="icon"
                           aria-label="停止任務"
+                          title="停止任務"
                           onClick={() =>
                             perform(() =>
                               api(`/bots/${selected}/stop`, "POST", {}),
@@ -970,11 +1034,13 @@ function App() {
                       </>
                     )}
                     <button
-                      className="send"
+                      className={`send ${running ? "queue-send" : ""}`}
                       aria-label={running ? "排入下一個任務" : "傳送"}
+                      title={running ? "排入下一個任務" : "傳送"}
                       disabled={busy || (!text.trim() && !attachments.length)}
                       onClick={() => void send()}
                     >
+                      {running && <span>排入下一個</span>}
                       <Icon name="send" size={18} />
                     </button>
                   </div>
@@ -1040,110 +1106,26 @@ function App() {
               }}
             />
           ) : (
-            <div className="details-body">
+            <div className="details-body" key={selected}>
               <button
                 className="detail-profile"
                 onClick={() => setProfile(true)}
               >
-                <span className="avatar large">
-                  <BrandMark size={32} avatar={bot?.avatar} />
+                <span className="avatar">
+                  <BrandMark size={26} avatar={bot?.avatar} />
                 </span>
-                <strong>{bot?.name}</strong>
-                <span>
-                  {bot?.description || "設定這位 Bot 的角色與工作方式"}
+                <span className="detail-profile-copy">
+                  <strong>{bot?.name}</strong>
+                  <small>自訂 Bot</small>
                 </span>
-                <small>
-                  自訂 Bot <span>›</span>
-                </small>
+                <Icon name="arrow" size={16} />
               </button>
-              <section>
-                <div className="section-title">
-                  <h3>
-                    <Icon name="monitor" size={16} />
-                    電腦
-                  </h3>
-                  <span className="tiny-status">
-                    {detail.computerOwner
-                      ? "使用者控制中"
-                      : detail.browserUrl
-                        ? "已連線"
-                        : "待命"}
-                  </span>
-                </div>
-                <button
-                  className="computer-preview"
-                  onClick={() => setExpanded(true)}
-                >
-                  {detail.browserUrl ? (
-                    <img
-                      src={`/api/v2/bots/${selected}/screenshot?v=${detail.session.live?.activity.length || 0}`}
-                      alt="Bot 瀏覽器畫面"
-                    />
-                  ) : (
-                    <div className="screen-placeholder">
-                      <Icon name="monitor" size={32} />
-                      <span>Bot 的工作畫面</span>
-                      <small>開始瀏覽網頁後會顯示在這裡</small>
-                    </div>
-                  )}
-                  <span className="preview-bottom">
-                    {detail.browserUrl
-                      ? new URL(detail.browserUrl).hostname
-                      : "共用瀏覽器 · 獨立 Bot 分頁"}
-                    <span>↗</span>
-                  </span>
-                </button>
-              </section>
-              <section>
-                <div className="section-title">
-                  <h3>
-                    <Icon name="clock" size={16} />
-                    排程
-                  </h3>
-                  <button
-                    className="icon"
-                    aria-label="新增排程"
-                    onClick={() => setRoutine("new")}
-                  >
-                    <Icon name="plus" size={16} />
-                  </button>
-                </div>
-                {detail.routines.length ? (
-                  detail.routines.map((r) => (
-                    <button
-                      className="routine-row"
-                      key={r.id}
-                      onClick={() => setRoutine(r)}
-                    >
-                      <span className="routine-icon">
-                        <Icon name="clock" size={18} />
-                      </span>
-                      <span>
-                        <strong>{r.name}</strong>
-                        <small>
-                          {r.enabled
-                            ? `下次 ${new Date(r.nextAt).toLocaleString("zh-TW")}`
-                            : "已暫停"}
-                        </small>
-                      </span>
-                      <Icon name="arrow" size={14} />
-                    </button>
-                  ))
-                ) : (
-                  <div className="empty-section">
-                    讓 Bot 在指定時間替你工作。
-                    <button onClick={() => setRoutine("new")}>建立排程</button>
-                  </div>
-                )}
-              </section>
-              <section>
-                <div className="section-title">
-                  <h3>
-                    <Icon name="file" size={16} />
-                    檔案與成果
-                  </h3>
-                  <span>{detail.artifacts.length}</span>
-                </div>
+              <DetailSection
+                title="檔案與成果"
+                icon={<Icon name="file" size={16} />}
+                status={detail.artifacts.length}
+                defaultOpen
+              >
                 {detail.artifacts.length ? (
                   detail.artifacts
                     .slice()
@@ -1152,17 +1134,85 @@ function App() {
                       <ArtifactCard key={a.id} artifact={a} compact />
                     ))
                 ) : (
-                  <p className="muted">附件與完成的成果會出現在這裡。</p>
+                  <p className="muted">附件與成果會顯示在這裡。</p>
                 )}
-              </section>
-              <section>
-                <div className="section-title">
-                  <h3>
-                    <Icon name="spark" size={16} />
-                    記憶
-                  </h3>
-                  <span>{detail.memories.length}</span>
-                </div>
+              </DetailSection>
+              <DetailSection
+                title="電腦"
+                icon={<Icon name="monitor" size={16} />}
+                status={
+                  detail.computerOwner
+                    ? "使用者控制中"
+                    : detail.browserUrl
+                      ? "已連線"
+                      : "待命"
+                }
+                defaultOpen={!!detail.browserUrl || !!detail.computerOwner}
+              >
+                {detail.browserUrl ? (
+                  <button
+                    className="computer-preview"
+                    onClick={() => setExpanded(true)}
+                  >
+                    <img
+                      src={`/api/v2/bots/${selected}/screenshot?v=${detail.session.live?.activity.length || 0}`}
+                      alt="Bot 瀏覽器畫面"
+                    />
+                    <span className="preview-bottom">
+                      {new URL(detail.browserUrl).hostname}
+                      <span>↗</span>
+                    </span>
+                  </button>
+                ) : (
+                  <div className="detail-empty">
+                    <p className="muted">開始瀏覽網頁後會顯示工作畫面。</p>
+                    <button
+                      className="text-button"
+                      onClick={() => setExpanded(true)}
+                    >
+                      開啟電腦
+                    </button>
+                  </div>
+                )}
+              </DetailSection>
+              <DetailSection
+                title="排程"
+                icon={<Icon name="clock" size={16} />}
+                status={detail.routines.length}
+              >
+                {detail.routines.map((r) => (
+                  <button
+                    className="routine-row"
+                    key={r.id}
+                    onClick={() => setRoutine(r)}
+                  >
+                    <span>
+                      <strong>{r.name}</strong>
+                      <small>
+                        {r.enabled
+                          ? `下次 ${new Date(r.nextAt).toLocaleString("zh-TW")}`
+                          : "已暫停"}
+                      </small>
+                    </span>
+                    <Icon name="arrow" size={14} />
+                  </button>
+                ))}
+                {!detail.routines.length && (
+                  <p className="muted">在指定時間交辦工作。</p>
+                )}
+                <button
+                  className="text-button detail-add"
+                  onClick={() => setRoutine("new")}
+                >
+                  <Icon name="plus" size={16} />
+                  新增排程
+                </button>
+              </DetailSection>
+              <DetailSection
+                title="記憶"
+                icon={<Icon name="spark" size={16} />}
+                status={detail.memories.length}
+              >
                 {detail.memories.length ? (
                   detail.memories.map((m) => (
                     <div className="memory" key={m.id}>
@@ -1172,13 +1222,14 @@ function App() {
                 ) : (
                   <p className="muted">告訴 Bot 你希望它記住的偏好。</p>
                 )}
-              </section>
-              {!!detail.runs.length && (
-                <section>
-                  <div className="section-title">
-                    <h3>最近操作</h3>
-                  </div>
-                  {detail.runs.at(-1)?.operations.map((o) => (
+              </DetailSection>
+              <DetailSection
+                title="最近操作"
+                icon={<Icon name="clock" size={16} />}
+                status={detail.runs.at(-1)?.operations.length || 0}
+              >
+                {detail.runs.at(-1)?.operations.length ? (
+                  detail.runs.at(-1)!.operations.map((o) => (
                     <details className="operation" key={o.id}>
                       <summary>
                         <span className={`operation-dot ${o.status}`} />
@@ -1190,9 +1241,11 @@ function App() {
                         {o.evidence?.output || o.error || o.evidence?.patch}
                       </pre>
                     </details>
-                  ))}
-                </section>
-              )}
+                  ))
+                ) : (
+                  <p className="muted">執行任務後可查看操作紀錄。</p>
+                )}
+              </DetailSection>
             </div>
           )}
         </aside>
@@ -1810,7 +1863,24 @@ function Settings({
   const [model, setModel] = useState("");
   const [key, setKey] = useState("");
   const [editing, setEditing] = useState<string>();
+  const [showConnectionForm, setShowConnectionForm] = useState(false);
+  const modelFormRef = useRef<HTMLFormElement>(null);
+  const [showTelegramTokenForm, setShowTelegramTokenForm] = useState(false);
+  const [pairingCommand, setPairingCommand] = useState("");
+  const [connectorMode, setConnectorMode] = useState<"form" | "json">("form");
+  const [connectorJson, setConnectorJson] = useState("");
+  const [connectorJsonError, setConnectorJsonError] = useState("");
+  const [connectorDrafts, setConnectorDrafts] = useState<McpConnectorInput[]>(
+    [],
+  );
   const [telegram, setTelegram] = useState<TelegramView>();
+  const [codexStatus, setCodexStatus] = useState<{
+    connected: boolean;
+    plan: string | null;
+    login: { state: string; error?: string };
+    models: { id: string; name: string }[];
+  }>();
+  const [codexLoginUrl, setCodexLoginUrl] = useState("");
   const [rules, setRules] = useState<
     { id: string; tool: string; args: unknown }[]
   >([]);
@@ -1826,7 +1896,41 @@ function Settings({
       setBusy(false);
     }
   };
+  const importConnectorDrafts = async () => {
+    setBusy(true);
+    setNotice("");
+    let added = 0;
+    let failure = "";
+    for (const draft of connectorDrafts) {
+      try {
+        await api("/connectors", "POST", draft);
+        added++;
+      } catch (error) {
+        failure = `${draft.name}：${(error as Error).message}`;
+        break;
+      }
+    }
+    if (added) {
+      try {
+        await refresh();
+      } catch (error) {
+        failure ||= `清單更新失敗：${(error as Error).message}`;
+      }
+    }
+    setConnectorDrafts(connectorDrafts.slice(added));
+    if (failure) {
+      setNotice(`${added ? `已加入 ${added} 個。` : ""}${failure}`);
+    } else {
+      setConnectorJson("");
+      setNotice(`已加入 ${added} 個 MCP 連接器。`);
+    }
+    setBusy(false);
+  };
   useEffect(() => {
+    if (tab === "models")
+      void api<typeof codexStatus>("/api/codex/status")
+        .then(setCodexStatus)
+        .catch((error) => setNotice(`Codex：${error.message}`));
     if (tab === "telegram")
       void api<TelegramView>("/api/channels/telegram")
         .then(setTelegram)
@@ -1836,6 +1940,57 @@ function Settings({
         .then(setRules)
         .catch((e) => setNotice(e.message));
   }, [tab]);
+  useEffect(() => {
+    if (codexStatus?.login.state !== "pending") return;
+    const timer = setInterval(() => {
+      void api<typeof codexStatus>("/api/codex/status")
+        .then(setCodexStatus)
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [codexStatus?.login.state]);
+  useEffect(() => {
+    if (codexStatus?.login.state === "completed")
+      setNotice("ChatGPT 登入完成。現在可以儲存 Codex 模型連線。");
+    if (codexStatus?.login.state === "failed")
+      setNotice(codexStatus.login.error || "ChatGPT 登入失敗。");
+  }, [codexStatus?.login.state]);
+  useEffect(() => {
+    if (tab !== "telegram") return;
+    const timer = setInterval(() => {
+      void api<TelegramView>("/api/channels/telegram")
+        .then(setTelegram)
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [tab]);
+  useEffect(() => {
+    if (telegram?.ownerId) setPairingCommand("");
+  }, [telegram?.ownerId]);
+  useEffect(() => {
+    if (showConnectionForm)
+      modelFormRef.current?.querySelector("input")?.focus();
+  }, [showConnectionForm, editing]);
+  const resetConnectionForm = () => {
+    setEditing(undefined);
+    setShowConnectionForm(false);
+    setName("");
+    setKey("");
+    setModel("");
+    setUrl("");
+  };
+  const modelConnections = [...state.connections].sort(
+    (a, b) =>
+      Number(state.defaultModel?.connectionId === b.id) -
+      Number(state.defaultModel?.connectionId === a.id),
+  );
+  const providerLabels: Record<string, string> = {
+    codex: "ChatGPT Codex",
+    ollama: "Ollama 本機模型",
+    "openai-compatible": "OpenAI 相容 API",
+    openai: "OpenAI API",
+    anthropic: "Anthropic API",
+  };
   return (
     <Modal label="設定與工具" close={close}>
       <section className="modal settings-modal">
@@ -1860,6 +2015,7 @@ function Settings({
               <button
                 key={id}
                 className={tab === id ? "selected" : ""}
+                aria-current={tab === id ? "true" : undefined}
                 onClick={() => {
                   setTab(id);
                   setNotice("");
@@ -1877,184 +2033,309 @@ function Settings({
             )}
             {tab === "models" && (
               <>
-                <h3>你的模型</h3>
-                <p className="muted">
-                  新增第三方 API，選擇 Bots 預設使用的模型。
-                </p>
-                {state.connections.map((c) => (
-                  <div className="connection-card" key={c.id}>
-                    <div>
-                      <strong>{c.name}</strong>
-                      <small>
-                        {c.provider} · {c.model}
-                      </small>
-                    </div>
+                <div className="settings-section-heading">
+                  <div>
+                    <h3>ChatGPT 帳號</h3>
+                    <p className="muted">
+                      登入後可新增使用 Codex 額度的模型連線。
+                    </p>
+                  </div>
+                </div>
+                <div className="service-card">
+                  <div className="service-card-main">
+                    <strong>ChatGPT Codex</strong>
+                    <span
+                      className={`status-badge ${codexStatus?.connected ? "is-success" : ""}`}
+                    >
+                      {!codexStatus
+                        ? "檢查中"
+                        : codexStatus.connected
+                          ? "已登入"
+                          : codexStatus.login.state === "pending"
+                            ? "登入中"
+                            : "尚未登入"}
+                    </span>
+                    {codexStatus?.plan && (
+                      <small>方案：{codexStatus.plan}</small>
+                    )}
+                    <small>使用 ChatGPT 訂閱額度，無需 API key。</small>
+                  </div>
+                  <div className="service-card-actions">
                     <button
                       className="secondary"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          await api("/api/connections/default", "PUT", {
-                            connectionId: c.id,
-                            model: c.model,
-                          });
-                          setNotice("已設為預設模型。");
-                        })
+                      disabled={
+                        busy ||
+                        !codexStatus ||
+                        codexStatus.login.state === "pending"
                       }
-                    >
-                      {state.defaultModel?.connectionId === c.id
-                        ? "預設"
-                        : "設為預設"}
-                    </button>
-                    <button
-                      className="text-button"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          const result = await api<{
-                            ok?: boolean;
-                            error?: string;
-                            message?: string;
-                          }>(`/api/connections/${c.id}/test`, "POST", {
-                            model: c.model,
-                            engine: "pi",
-                          });
-                          setNotice(
-                            result.message ||
-                              (result.ok
-                                ? "連線測試通過。"
-                                : "連線測試未通過。"),
-                          );
-                        })
-                      }
-                    >
-                      測試
-                    </button>
-                    <button
-                      className="text-button"
-                      disabled={busy}
                       onClick={() => {
-                        setEditing(c.id);
-                        setName(c.name);
-                        setProvider(c.provider);
-                        setModel(c.model);
-                        setUrl(c.url || "");
-                        setKey("");
+                        const popup = window.open("about:blank", "_blank");
+                        void run(async () => {
+                          try {
+                            const result = await api<{ url: string }>(
+                              "/api/codex/login",
+                              "POST",
+                              {},
+                            );
+                            setCodexLoginUrl(result.url);
+                            if (popup) popup.location.href = result.url;
+                            setCodexStatus(
+                              await api<typeof codexStatus>(
+                                "/api/codex/status",
+                              ),
+                            );
+                            setNotice("請在開啟的頁面完成 ChatGPT 登入。");
+                          } catch (error) {
+                            popup?.close();
+                            throw error;
+                          }
+                        });
                       }}
                     >
-                      編輯
+                      {codexStatus?.connected ? "重新登入" : "登入 ChatGPT"}
                     </button>
+                    {codexLoginUrl && (
+                      <a href={codexLoginUrl} target="_blank" rel="noreferrer">
+                        開啟登入頁
+                      </a>
+                    )}
                   </div>
-                ))}
-                <form
-                  className="settings-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void run(async () => {
-                      const c = await api<{ id: string }>(
-                        editing
-                          ? `/api/connections/${editing}`
-                          : "/api/connections",
-                        editing ? "PUT" : "POST",
-                        { name, provider, model, url, apiKey: key },
-                      );
-                      await api("/api/connections/default", "PUT", {
-                        connectionId: c.id,
-                        model,
-                      });
-                      setKey("");
-                      setName("");
-                      setEditing(undefined);
-                      setNotice("模型已儲存並設為預設。");
-                    });
-                  }}
-                >
-                  <h3>{editing ? "編輯連線" : "新增連線"}</h3>
-                  <div className="form-row">
-                    <label>
-                      名稱
-                      <input
-                        required
-                        placeholder="我的模型服務"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                      />
-                    </label>
-                    <label>
-                      服務類型
-                      <select
-                        value={provider}
-                        onChange={(e) => setProvider(e.target.value)}
-                      >
-                        <option value="openai-compatible">
-                          OpenAI 相容 API
-                        </option>
-                        <option value="openai">OpenAI</option>
-                        <option value="anthropic">Anthropic</option>
-                        <option value="ollama">Ollama</option>
-                      </select>
-                    </label>
+                </div>
+                <div className="settings-section-heading model-section-heading">
+                  <div>
+                    <h3>模型連線</h3>
+                    <p className="muted">預設模型會用於未指定模型的 Bot。</p>
                   </div>
-                  {["openai-compatible", "ollama"].includes(provider) && (
-                    <label>
-                      API 網址
-                      <input
-                        type="url"
-                        required
-                        placeholder={
-                          provider === "ollama"
-                            ? "http://127.0.0.1:11434"
-                            : "https://api.example.com/v1"
-                        }
-                        value={url}
-                        onChange={(e) => setUrl(e.target.value)}
-                      />
-                    </label>
-                  )}
-                  <label>
-                    模型 ID
-                    <input
-                      required
-                      placeholder="供應商提供的模型名稱"
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                    />
-                  </label>
-                  {provider !== "ollama" && (
-                    <label>
-                      API key
-                      <input
-                        type="password"
-                        autoComplete="off"
-                        value={key}
-                        onChange={(e) => setKey(e.target.value)}
-                        placeholder={
-                          editing
-                            ? "留白保留原金鑰；變更網址後須重新填寫"
-                            : "儲存在這台電腦"
-                        }
-                      />
-                    </label>
-                  )}
-                  <button className="primary" disabled={busy}>
-                    {busy ? "儲存中…" : "儲存連線"}
+                  <button
+                    className="secondary"
+                    aria-expanded={showConnectionForm}
+                    aria-controls="model-connection-form"
+                    onClick={() => {
+                      if (showConnectionForm && !editing) {
+                        resetConnectionForm();
+                      } else {
+                        resetConnectionForm();
+                        setShowConnectionForm(true);
+                      }
+                    }}
+                  >
+                    {showConnectionForm && !editing ? "收起表單" : "新增連線"}
                   </button>
-                  {editing && (
-                    <button
-                      type="button"
-                      className="text-button"
-                      onClick={() => {
-                        setEditing(undefined);
-                        setName("");
-                        setKey("");
-                        setModel("");
-                        setUrl("");
-                      }}
-                    >
-                      取消編輯
-                    </button>
+                </div>
+                <div className="model-list">
+                  {modelConnections.length === 0 && (
+                    <p className="empty-section">尚未新增模型連線。</p>
                   )}
-                </form>
+                  {modelConnections.map((c) => (
+                    <div className="model-card" key={c.id}>
+                      <div className="model-card-main">
+                        <div className="model-card-title">
+                          <strong>{c.name}</strong>
+                          {state.defaultModel?.connectionId === c.id && (
+                            <span className="status-badge is-success">
+                              預設
+                            </span>
+                          )}
+                        </div>
+                        <small>
+                          {providerLabels[c.provider] || c.provider} · {c.model}
+                        </small>
+                      </div>
+                      <div className="model-card-actions">
+                        {state.defaultModel?.connectionId !== c.id && (
+                          <button
+                            className="secondary"
+                            disabled={busy}
+                            onClick={() =>
+                              void run(async () => {
+                                await api("/api/connections/default", "PUT", {
+                                  connectionId: c.id,
+                                  model: c.model,
+                                });
+                                setNotice("已設為預設模型。");
+                              })
+                            }
+                          >
+                            設為預設
+                          </button>
+                        )}
+                        <button
+                          className="text-button"
+                          disabled={busy}
+                          onClick={() =>
+                            void run(async () => {
+                              const result = await api<{
+                                ok?: boolean;
+                                error?: string;
+                                message?: string;
+                              }>(`/api/connections/${c.id}/test`, "POST", {
+                                model: c.model,
+                              });
+                              setNotice(
+                                result.message ||
+                                  (result.ok
+                                    ? "連線測試通過。"
+                                    : "連線測試未通過。"),
+                              );
+                            })
+                          }
+                        >
+                          測試
+                        </button>
+                        <button
+                          className="text-button"
+                          disabled={busy}
+                          onClick={() => {
+                            setEditing(c.id);
+                            setShowConnectionForm(true);
+                            setName(c.name);
+                            setProvider(c.provider);
+                            setModel(c.model);
+                            setUrl(c.url || "");
+                            setKey("");
+                          }}
+                        >
+                          編輯
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {showConnectionForm && (
+                  <form
+                    id="model-connection-form"
+                    ref={modelFormRef}
+                    className="settings-form model-form"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void run(async () => {
+                        const c = await api<{ id: string }>(
+                          editing
+                            ? `/api/connections/${editing}`
+                            : "/api/connections",
+                          editing ? "PUT" : "POST",
+                          { name, provider, model, url, apiKey: key },
+                        );
+                        await api("/api/connections/default", "PUT", {
+                          connectionId: c.id,
+                          model,
+                        });
+                        resetConnectionForm();
+                        setNotice("模型已儲存並設為預設。");
+                      });
+                    }}
+                  >
+                    <h3>{editing ? "編輯模型連線" : "新增模型連線"}</h3>
+                    <div className="form-row">
+                      <label>
+                        名稱
+                        <input
+                          required
+                          placeholder="我的模型服務"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                        />
+                      </label>
+                      <label>
+                        服務類型
+                        <select
+                          value={provider}
+                          onChange={(e) => {
+                            setProvider(e.target.value);
+                            if (e.target.value === "codex") {
+                              setName("ChatGPT Codex");
+                              setModel(codexStatus?.models[0]?.id || "");
+                            }
+                          }}
+                        >
+                          <option value="codex">
+                            ChatGPT Codex（免 API key）
+                          </option>
+                          <option value="openai-compatible">
+                            OpenAI 相容 API
+                          </option>
+                          <option value="openai">OpenAI</option>
+                          <option value="anthropic">Anthropic</option>
+                          <option value="ollama">Ollama</option>
+                        </select>
+                      </label>
+                    </div>
+                    {["openai-compatible", "ollama"].includes(provider) && (
+                      <label>
+                        API 網址
+                        <input
+                          type="url"
+                          required
+                          placeholder={
+                            provider === "ollama"
+                              ? "http://127.0.0.1:11434"
+                              : "https://api.example.com/v1"
+                          }
+                          value={url}
+                          onChange={(e) => setUrl(e.target.value)}
+                        />
+                      </label>
+                    )}
+                    <label>
+                      模型 ID
+                      {provider === "codex" ? (
+                        <select
+                          required
+                          value={model}
+                          onChange={(e) => setModel(e.target.value)}
+                        >
+                          <option value="">選擇 Codex 模型</option>
+                          {codexStatus?.models.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          required
+                          placeholder="供應商提供的模型名稱"
+                          value={model}
+                          onChange={(e) => setModel(e.target.value)}
+                        />
+                      )}
+                    </label>
+                    {!["ollama", "codex"].includes(provider) && (
+                      <label>
+                        API key
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          value={key}
+                          onChange={(e) => setKey(e.target.value)}
+                          placeholder={
+                            editing
+                              ? "留白保留原金鑰；變更網址後須重新填寫"
+                              : "儲存在這台電腦"
+                          }
+                        />
+                      </label>
+                    )}
+                    <button
+                      className="primary"
+                      disabled={
+                        busy ||
+                        (provider === "codex" && !codexStatus?.connected)
+                      }
+                    >
+                      {busy ? "儲存中…" : "儲存連線"}
+                    </button>
+                    {editing && (
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={resetConnectionForm}
+                      >
+                        取消編輯
+                      </button>
+                    )}
+                  </form>
+                )}
               </>
             )}
             {tab === "connectors" && (
@@ -2080,42 +2361,155 @@ function Settings({
                     </button>
                   </div>
                 ))}
-                <form
-                  className="settings-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const form = new FormData(e.currentTarget);
-                    void run(async () => {
-                      await api(
-                        "/connectors",
-                        "POST",
-                        Object.fromEntries(form),
-                      );
-                      setNotice("已連線，Bot 可使用這個服務。");
-                    });
-                  }}
-                >
-                  <label>
-                    名稱
-                    <input name="name" required />
-                  </label>
-                  <label>
-                    MCP endpoint
-                    <input
-                      name="url"
-                      type="url"
-                      required
-                      placeholder="https://example.com/mcp"
-                    />
-                  </label>
-                  <label>
-                    Bearer token（選填）
-                    <input name="token" type="password" autoComplete="off" />
-                  </label>
-                  <button className="primary" disabled={busy}>
-                    測試並加入
-                  </button>
-                </form>
+                <section className="settings-form connector-setup">
+                  <h3>新增連接器</h3>
+                  <div className="connector-mode" aria-label="連接器輸入方式">
+                    <button
+                      className={connectorMode === "form" ? "selected" : ""}
+                      aria-current={
+                        connectorMode === "form" ? "true" : undefined
+                      }
+                      onClick={() => setConnectorMode("form")}
+                    >
+                      手動輸入
+                    </button>
+                    <button
+                      className={connectorMode === "json" ? "selected" : ""}
+                      aria-current={
+                        connectorMode === "json" ? "true" : undefined
+                      }
+                      onClick={() => setConnectorMode("json")}
+                    >
+                      貼上 JSON
+                    </button>
+                  </div>
+                  {connectorMode === "form" ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const form = new FormData(e.currentTarget);
+                        void run(async () => {
+                          await api(
+                            "/connectors",
+                            "POST",
+                            Object.fromEntries(form),
+                          );
+                          setNotice("已連線，Bot 可使用這個服務。");
+                        });
+                      }}
+                    >
+                      <label>
+                        名稱
+                        <input name="name" required />
+                      </label>
+                      <label>
+                        MCP endpoint
+                        <input
+                          name="url"
+                          type="url"
+                          required
+                          placeholder="https://example.com/mcp"
+                        />
+                      </label>
+                      <label>
+                        Bearer token（選填）
+                        <input
+                          name="token"
+                          type="password"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <button className="primary" disabled={busy}>
+                        測試並加入
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="connector-json">
+                      <p className="muted">
+                        支援 mcpServers、servers 或單筆 JSON；可一次加入多個
+                        Streamable HTTP 服務。
+                      </p>
+                      <label>
+                        MCP 設定 JSON
+                        <textarea
+                          rows={9}
+                          spellCheck={false}
+                          value={connectorJson}
+                          onChange={(event) => {
+                            setConnectorJson(event.target.value);
+                            setConnectorDrafts([]);
+                            setConnectorJsonError("");
+                          }}
+                          placeholder={
+                            '{\n  "mcpServers": {\n    "notes": {\n      "url": "https://example.com/mcp",\n      "headers": { "Authorization": "Bearer YOUR_TOKEN" }\n    }\n  }\n}'
+                          }
+                          aria-invalid={!!connectorJsonError}
+                          aria-describedby={
+                            connectorJsonError
+                              ? "connector-json-error"
+                              : undefined
+                          }
+                        />
+                      </label>
+                      {connectorJsonError && (
+                        <p
+                          id="connector-json-error"
+                          className="field-error"
+                          role="alert"
+                        >
+                          {connectorJsonError}
+                        </p>
+                      )}
+                      <div className="connector-json-actions">
+                        <button
+                          className="secondary"
+                          disabled={busy || !connectorJson.trim()}
+                          onClick={() => {
+                            try {
+                              setConnectorDrafts(
+                                parseMcpConnectorJson(connectorJson),
+                              );
+                              setConnectorJsonError("");
+                            } catch (error) {
+                              setConnectorDrafts([]);
+                              setConnectorJsonError((error as Error).message);
+                            }
+                          }}
+                        >
+                          檢查 JSON
+                        </button>
+                      </div>
+                      {connectorDrafts.length > 0 && (
+                        <div className="connector-preview">
+                          <strong>
+                            準備加入 {connectorDrafts.length} 個連接器
+                          </strong>
+                          {connectorDrafts.map((draft, index) => (
+                            <div
+                              className="connector-preview-item"
+                              key={`${draft.name}-${index}`}
+                            >
+                              <span>{draft.name}</span>
+                              <small>{draft.url}</small>
+                              <small>
+                                {draft.token
+                                  ? "Bearer token 已提供"
+                                  : "無需 token"}
+                              </small>
+                            </div>
+                          ))}
+                          <button
+                            className="primary"
+                            disabled={busy}
+                            onClick={() => void importConnectorDrafts()}
+                          >
+                            {busy ? "連線測試中…" : "測試並加入"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </section>
               </>
             )}
             {tab === "skills" && (
@@ -2157,78 +2551,204 @@ function Settings({
             )}
             {tab === "telegram" && (
               <>
-                <h3>Telegram</h3>
-                <p className="muted">
-                  配對你的帳號，在 Telegram 接續 Bot 的工作。
-                </p>
+                <div className="settings-section-heading">
+                  <div>
+                    <h3>Telegram</h3>
+                    <p className="muted">
+                      在 Telegram 私訊你的 Bot，接續本機工作。
+                    </p>
+                  </div>
+                </div>
+                <div className="service-card telegram-status-card">
+                  <div className="service-card-main">
+                    <strong>
+                      {telegram?.username
+                        ? `@${telegram.username}`
+                        : "Telegram Bot"}
+                    </strong>
+                    <span
+                      className={`status-badge ${telegram?.ownerId ? "is-success" : telegram?.status === "error" ? "is-error" : ""}`}
+                    >
+                      {!telegram
+                        ? "檢查中"
+                        : telegram.ownerId
+                          ? "已配對"
+                          : !telegram.configured
+                            ? "尚未設定"
+                            : telegram.status === "connected"
+                              ? "等待配對"
+                              : telegram.status === "connecting"
+                                ? "連線中"
+                                : telegram.status === "error"
+                                  ? "連線失敗"
+                                  : "已停用"}
+                    </span>
+                    <small>
+                      {!telegram
+                        ? "正在讀取 Telegram 設定。"
+                        : telegram.ownerId
+                          ? "你的 Telegram 帳號已綁定，可開始傳訊。"
+                          : !telegram.configured
+                            ? "先儲存從 BotFather 取得的 token。"
+                            : telegram.status === "connected"
+                              ? "Bot 已連線，請建立配對碼綁定你的帳號。"
+                              : telegram.status === "connecting"
+                                ? "正在連線 Telegram，完成後即可配對。"
+                                : telegram.error || "啟用 Bot 後即可配對。"}
+                    </small>
+                  </div>
+                </div>
                 {telegram && (
-                  <div className="connection-card">
-                    <div>
-                      <strong>
-                        {telegram.username
-                          ? `@${telegram.username}`
-                          : "尚未連線"}
-                      </strong>
-                      <small>
-                        {telegram.status} ·{" "}
-                        {telegram.ownerId ? "已配對" : "未配對"}
-                      </small>
-                    </div>
+                  <div className="setup-steps">
+                    <section className="setup-step">
+                      <div className="setup-step-heading">
+                        <span className="setup-step-number">1</span>
+                        <div>
+                          <h4>連接你的 Bot</h4>
+                          <p>
+                            從 Telegram 的 @BotFather 取得 Bot
+                            token，儲存在這台電腦。
+                          </p>
+                        </div>
+                      </div>
+                      {telegram?.configured && !showTelegramTokenForm ? (
+                        <div className="setup-step-actions">
+                          <span className="setup-step-done">Token 已儲存</span>
+                          {!telegram.enabled && (
+                            <button
+                              className="primary"
+                              disabled={busy}
+                              onClick={() =>
+                                void run(async () => {
+                                  setTelegram(
+                                    await api<TelegramView>(
+                                      "/api/channels/telegram",
+                                      "POST",
+                                      { enabled: true },
+                                    ),
+                                  );
+                                })
+                              }
+                            >
+                              啟用 Bot
+                            </button>
+                          )}
+                          <button
+                            className="text-button"
+                            onClick={() => setShowTelegramTokenForm(true)}
+                          >
+                            更換 token
+                          </button>
+                        </div>
+                      ) : (
+                        <form
+                          className="telegram-token-form"
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const form = new FormData(e.currentTarget);
+                            void run(async () => {
+                              const next = await api<TelegramView>(
+                                "/api/channels/telegram",
+                                "POST",
+                                { token: form.get("token"), enabled: true },
+                              );
+                              setTelegram(next);
+                              setShowTelegramTokenForm(false);
+                              setPairingCommand("");
+                              setNotice("Token 已儲存，正在連線 Telegram。");
+                            });
+                          }}
+                        >
+                          <label>
+                            Bot token
+                            <input
+                              name="token"
+                              type="password"
+                              required
+                              autoComplete="off"
+                              placeholder="從 @BotFather 取得"
+                            />
+                          </label>
+                          <div className="setup-step-actions">
+                            <button className="primary" disabled={busy}>
+                              儲存並啟用
+                            </button>
+                            {telegram?.configured && (
+                              <button
+                                type="button"
+                                className="text-button"
+                                onClick={() => setShowTelegramTokenForm(false)}
+                              >
+                                取消
+                              </button>
+                            )}
+                          </div>
+                        </form>
+                      )}
+                    </section>
+                    <section className="setup-step">
+                      <div className="setup-step-heading">
+                        <span className="setup-step-number">2</span>
+                        <div>
+                          <h4>配對 Telegram 帳號</h4>
+                          <p>
+                            建立指令後，私訊你的 Bot 完成配對。指令有效 10
+                            分鐘。
+                          </p>
+                        </div>
+                      </div>
+                      {telegram?.ownerId ? (
+                        <p className="setup-step-done">帳號已配對</p>
+                      ) : (
+                        <div className="setup-step-actions">
+                          <button
+                            className="secondary"
+                            disabled={busy || telegram?.status !== "connected"}
+                            onClick={() =>
+                              void run(async () => {
+                                const result = await api<{ command: string }>(
+                                  "/api/channels/telegram/pairing",
+                                  "POST",
+                                  {},
+                                );
+                                setPairingCommand(result.command);
+                              })
+                            }
+                          >
+                            {pairingCommand ? "重新產生指令" : "建立配對指令"}
+                          </button>
+                          {telegram?.status === "connecting" && (
+                            <span className="muted">等待連線完成…</span>
+                          )}
+                        </div>
+                      )}
+                      {pairingCommand && !telegram?.ownerId && (
+                        <div className="pairing-command" role="status">
+                          <span>傳送給 Bot</span>
+                          <code>{pairingCommand}</code>
+                          <button
+                            className="secondary"
+                            onClick={() =>
+                              void navigator.clipboard
+                                .writeText(pairingCommand)
+                                .then(() => setNotice("配對指令已複製。"))
+                                .catch(() =>
+                                  setNotice(
+                                    "無法自動複製，請手動選取配對指令。",
+                                  ),
+                                )
+                            }
+                          >
+                            複製指令
+                          </button>
+                        </div>
+                      )}
+                    </section>
                   </div>
                 )}
-                <form
-                  className="settings-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const form = new FormData(e.currentTarget);
-                    void run(async () => {
-                      const next = await api<TelegramView>(
-                        "/api/channels/telegram",
-                        "POST",
-                        {
-                          token: form.get("token"),
-                          enabled: true,
-                          allowWrites: false,
-                          groupId: "",
-                        },
-                      );
-                      setTelegram(next);
-                      setNotice("已儲存，請建立配對碼。");
-                    });
-                  }}
-                >
-                  <label>
-                    Bot token
-                    <input
-                      name="token"
-                      type="password"
-                      required
-                      autoComplete="off"
-                      placeholder="從 @BotFather 取得"
-                    />
-                  </label>
-                  <button className="primary" disabled={busy}>
-                    啟用 Telegram
-                  </button>
-                </form>
-                <button
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(async () => {
-                      const result = await api<{ command: string }>(
-                        "/api/channels/telegram/pairing",
-                        "POST",
-                        {},
-                      );
-                      setNotice(`在 Telegram 私訊 Bot：${result.command}`);
-                    })
-                  }
-                >
-                  建立配對碼
-                </button>
-                <p className="muted">
-                  使用 /bots 查看名單、/bot ID 選擇 Bot、/stop 停止工作。
+                <p className="telegram-help muted">
+                  配對後可用 <code>/bots</code> 查看名單、<code>/bot ID</code>{" "}
+                  選擇 Bot、<code>/stop</code> 停止工作。
                 </p>
               </>
             )}

@@ -145,12 +145,12 @@ test("share gateway fails closed, authenticates exact origin and strips forwarde
   );
 });
 
-test("authenticated remote requests preserve Apsis chat streaming, exports, and CSRF checks", async (t) => {
+test("authenticated remote requests reach the Bot workspace and keep CSRF checks", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "apsis-share-"));
   const app = await createApp({
     dataDir: join(dir, "data"),
     workspaceDir: join(dir, "work"),
-    env: {},
+    runner: async (options) => ({ text: `完成：${options.prompt}` }),
   });
   const upstreamPort = await listen(app.server);
   t.after(() => app.server.close());
@@ -163,11 +163,11 @@ test("authenticated remote requests preserve Apsis chat streaming, exports, and 
     Cookie: cookie,
     Origin: origin,
     "Content-Type": "application/json",
-    "X-Loom-Client": "1",
+    "X-Apsis-Client": "1",
   };
   assert.equal(
     (
-      await call(port, "/api/sessions", {
+      await call(port, "/api/v2/bots", {
         method: "POST",
         headers: { Cookie: cookie, Origin: origin },
         body: "{}",
@@ -177,7 +177,7 @@ test("authenticated remote requests preserve Apsis chat streaming, exports, and 
   );
   assert.equal(
     (
-      await call(port, "/api/sessions", {
+      await call(port, "/api/v2/bots", {
         method: "POST",
         headers: { ...headers, Origin: "https://evil.example" },
         body: "{}",
@@ -185,38 +185,44 @@ test("authenticated remote requests preserve Apsis chat streaming, exports, and 
     ).status,
     403,
   );
-  const session = JSON.parse(
+  const connection = await app.connections.save({
+    name: "Test",
+    provider: "openai-compatible",
+    model: "mock",
+    url: "http://127.0.0.1:1/v1",
+  });
+  await app.connections.setDefault({
+    connectionId: connection.id,
+    model: connection.model,
+  });
+  const bot = JSON.parse(
     (
-      await call(port, "/api/sessions", {
+      await call(port, "/api/v2/bots", {
         method: "POST",
         headers,
-        body: JSON.stringify({ mode: "demo" }),
+        body: JSON.stringify({ name: "Remote Bot" }),
       })
     ).body,
   );
-  const reply = await call(port, "/api/sessions/" + session.id + "/chat", {
+  const reply = await call(port, `/api/v2/bots/${bot.id}/messages`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ prompt: "remote test", allowWrites: false }),
+    body: JSON.stringify({ prompt: "remote test", requestId: "remote-test" }),
   });
-  assert.equal(reply.status, 200);
-  assert.match(reply.headers["content-type"]!, /x-ndjson/);
-  const events = reply.body
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
-  assert.equal(events.at(-1).type, "done");
-  assert.ok(events.filter((e) => e.type === "delta").length > 1);
-  const exported = await call(port, "/api/sessions/" + session.id + "/export", {
+  assert.equal(reply.status, 202);
+  const state = await call(port, "/api/v2/state", {
     headers: { Cookie: cookie },
   });
-  assert.equal(exported.status, 200);
-  assert.match(exported.body, /remote test/);
-  assert.match(exported.headers["content-disposition"]!, /attachment/);
+  assert.equal(state.status, 200);
+  assert.ok(
+    JSON.parse(state.body).bots.some(
+      (item: { id: string }) => item.id === bot.id,
+    ),
+  );
   assert.equal(
     (
-      await call(port, "/api/settings", {
-        headers: { Cookie: "__Host-talaria-share=forged" },
+      await call(port, "/api/v2/state", {
+        headers: { Cookie: "__Host-apsis-share=forged" },
       })
     ).status,
     401,

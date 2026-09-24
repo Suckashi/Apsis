@@ -10,7 +10,7 @@ export const runSchema = z
     recoveryRunIds: z.array(z.string()).optional(),
     id: z.string().uuid(),
     sessionId: z.string(),
-    engine: z.enum(["demo", "pi", "deepagents", "openai-agents"]),
+    engine: z.enum(["deepagents", "codex"]),
     agentName: z.string(),
     model: z.string(),
     permissions: z.object({
@@ -56,17 +56,15 @@ export const runSchema = z
 export const connectionsSchema = z.array(
   z
     .object({
-      id: z.union([
-        z.string().uuid(),
-        z.enum([
-          "legacy-openai",
-          "legacy-anthropic",
-          "legacy-ollama",
-          "legacy-openai-compatible",
-        ]),
-      ]),
+      id: z.string().uuid(),
       name: z.string(),
-      provider: z.enum(["openai", "anthropic", "ollama", "openai-compatible"]),
+      provider: z.enum([
+        "openai",
+        "anthropic",
+        "ollama",
+        "openai-compatible",
+        "codex",
+      ]),
       model: z.string(),
       models: z.array(z.string()).optional(),
       vendor: z
@@ -101,17 +99,23 @@ const knowledge = z
 export const storageSchema = z
   .object({
     projects: z.array(projectSchema).optional(),
-    schemaVersion: z.literal(1).optional(),
+    schemaVersion: z.literal(2),
     sessions: z.array(
       z
         .object({
           project: projectSchema.optional(),
           id: z.string(),
           title: z.string(),
-          mode: z.enum(["pi", "demo", "hermes", "hybrid"]),
+          mode: z.enum(["deepagents", "codex"]),
           connectionId: z.string().optional(),
           provider: z
-            .enum(["openai", "anthropic", "ollama", "openai-compatible"])
+            .enum([
+              "openai",
+              "anthropic",
+              "ollama",
+              "openai-compatible",
+              "codex",
+            ])
             .optional(),
           model: z.string().optional(),
           createdAt: z.string(),
@@ -125,14 +129,7 @@ export const storageSchema = z
               })
               .passthrough(),
           ),
-          piMessages: z.array(z.unknown()),
-          runtimeState: z
-            .object({
-              engine: z.enum(["pi", "deepagents", "openai-agents"]),
-              version: z.literal(1),
-              data: z.unknown(),
-            })
-            .optional(),
+          engineState: z.unknown().optional(),
         })
         .passthrough(),
     ),
@@ -145,12 +142,13 @@ export const storageSchema = z
             id: z.string(),
             name: z.string(),
             instructions: z.string(),
-            engine: z.enum(["pi", "deepagents", "openai-agents"]),
+            engine: z.enum(["deepagents", "codex"]),
             provider: z.enum([
               "openai",
               "anthropic",
               "ollama",
               "openai-compatible",
+              "codex",
             ]),
             model: z.string(),
             tools: z.array(z.string()),

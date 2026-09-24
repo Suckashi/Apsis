@@ -1,7 +1,6 @@
 import { readFile, writeFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import type { Settings } from "./settings.ts";
 import type {
   ConnectionSelection,
   Environment,
@@ -32,6 +31,7 @@ const keys = {
   anthropic: "ANTHROPIC_API_KEY",
   "openai-compatible": "COMPATIBLE_API_KEY",
   ollama: "",
+  codex: "",
 };
 export class Connections {
   file: string;
@@ -39,11 +39,9 @@ export class Connections {
   rows: SavedConnection[] = [];
   savedDefault: ConnectionSelection | null = null;
   tail: Promise<unknown> = Promise.resolve();
-  settings: Settings;
-  constructor(directory: string, settings: Settings) {
+  constructor(directory: string) {
     this.file = join(directory, "connections.json");
     this.defaultFile = join(directory, "connection-default.json");
-    this.settings = settings;
   }
   async init() {
     try {
@@ -68,50 +66,7 @@ export class Connections {
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }
-    await this.importSettings();
     return this;
-  }
-  async importSettings(updatedProvider?: string) {
-    // Keep existing IDs so saved conversations and agent snapshots remain valid.
-    // Persist credentials once; subsequent edits go through the unified manager.
-    const settings = this.settings.view();
-    const env = this.settings.environment();
-    await this.mutate((rows) => {
-      for (const provider of Object.keys(keys) as Provider[]) {
-        if (updatedProvider && updatedProvider !== provider) continue;
-        const id = "legacy-" + provider;
-        const index = rows.findIndex((row) => row.id === id);
-        if (index >= 0 && !updatedProvider) continue;
-        const configured =
-          provider === "ollama"
-            ? env.PI_PROVIDER === "ollama" || !!env.OLLAMA_URL
-            : provider === "openai-compatible"
-              ? !!env.COMPATIBLE_BASE_URL
-              : !!env[keys[provider]];
-        if (!configured && !updatedProvider) continue;
-        const model =
-          settings.pi.provider === provider
-            ? settings.pi.model
-            : settings.defaults[provider];
-        if (!model) continue;
-        const imported: SavedConnection = {
-          id,
-          name: provider === "ollama" ? "Ollama" : provider,
-          provider,
-          model,
-          models: [model],
-          apiKey: keys[provider] ? env[keys[provider]] : undefined,
-          url:
-            provider === "ollama"
-              ? settings.pi.ollamaUrl
-              : provider === "openai-compatible"
-                ? settings.pi.compatibleUrl
-                : undefined,
-        };
-        if (index >= 0) rows[index] = { ...imported, name: rows[index]!.name };
-        else rows.push(imported);
-      }
-    });
   }
   view() {
     return this.rows
@@ -119,7 +74,8 @@ export class Connections {
       .map(({ apiKey, ...row }) => ({
         ...row,
         models: row.models?.length ? [...row.models] : [row.model],
-        credentialConfigured: !!apiKey || row.provider === "ollama",
+        credentialConfigured:
+          !!apiKey || ["ollama", "codex"].includes(row.provider),
       }));
   }
   selection(connectionId: unknown, model?: unknown): ConnectionSelection {
@@ -147,18 +103,13 @@ export class Connections {
             : connection.model,
         };
     }
-    const current = this.settings.view().pi;
-    const connectionId = "legacy-" + current.provider;
-    const legacy = visible.find((row) => row.id === connectionId);
     const ready = (row: ModelConnection) =>
       row.provider === "ollama" ||
+      row.provider === "codex" ||
       (row.provider === "openai-compatible"
         ? Boolean(row.url)
         : row.credentialConfigured);
-    const preferred =
-      legacy && ready(legacy)
-        ? legacy
-        : visible.find((row) => ready(row)) || legacy;
+    const preferred = visible.find((row) => ready(row));
     return preferred
       ? { connectionId: preferred.id, model: preferred.model }
       : null;
@@ -180,24 +131,12 @@ export class Connections {
     return operation;
   }
   environment(id: string, model?: string): Environment {
-    // Compatibility for older snapshots without a migrated usable connection.
-    if (
-      !this.rows.some((row) => row.id === id) &&
-      (Object.keys(keys) as Provider[]).some(
-        (provider) => id === "legacy-" + provider,
-      )
-    )
-      return {
-        ...this.settings.environment(),
-        PI_PROVIDER: id.slice(7),
-        ...(model ? { PI_MODEL: model } : {}),
-      };
     const publicRow = this.view().find((r) => r.id === id);
     if (!publicRow) error("找不到可用的模型連線。");
     const row = this.rows.find((r) => r.id === id)!;
     return {
-      PI_PROVIDER: row.provider,
-      PI_MODEL: model || row.model,
+      MODEL_PROVIDER: row.provider,
+      MODEL_ID: model || row.model,
       [keys[row.provider] || "UNUSED"]: row.apiKey,
       ...(row.provider === "ollama"
         ? { OLLAMA_URL: row.url }
@@ -292,7 +231,7 @@ export class Connections {
     )
       error("API key 格式錯誤。");
     const apiKey =
-      provider === "ollama"
+      provider === "ollama" || provider === "codex"
         ? undefined
         : input.apiKey === null
           ? undefined
