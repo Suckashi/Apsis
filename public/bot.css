@@ -1585,6 +1585,42 @@ label textarea::placeholder {
 .profile-form {
   padding: 28px 24px;
 }
+.delegation-list {
+  margin: 24px 0;
+}
+.delegation-list h3 {
+  font-size: 0.875rem;
+}
+.delegation-card {
+  padding: 16px;
+  margin: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.delegation-card > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+.delegation-card span,
+.delegation-card p {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.delegation-card p {
+  white-space: pre-wrap;
+  margin: 8px 0;
+}
+.delegation-card button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 0.8125rem;
+}
 .bot-create-modal {
   width: min(520px, calc(100vw - 48px));
 }

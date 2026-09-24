@@ -13,6 +13,7 @@
     "start": "npm run build && node --env-file-if-exists=.env server/index.ts",
     "test": "node --test test/*.test.ts",
     "test:bots:browser": "npm run build && node scripts/verify-bots.ts",
+    "test:bots:ollama": "node scripts/test-bot-delegation.ts",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

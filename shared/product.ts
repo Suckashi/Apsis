@@ -48,6 +48,12 @@ export interface Job {
   error?: string;
   runId?: string;
   replyTo?: string;
+  delegatedBy?: string;
+  delegatedByName?: string;
+  parentJobId?: string;
+  rootJobId?: string;
+  delegationPath?: string[];
+  result?: string;
 }
 export interface Artifact {
   id: string;

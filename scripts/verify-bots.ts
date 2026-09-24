@@ -24,6 +24,7 @@ const website = createServer((_req, res) => {
 website.listen(0, "127.0.0.1");
 await once(website, "listening");
 const websiteUrl = `http://127.0.0.1:${(website.address() as AddressInfo).port}`;
+let delegateWorkerId = "";
 const app = await createApp({
   productMode: true,
   dataDir: join(dir, "data"),
@@ -33,6 +34,24 @@ const app = await createApp({
     const tools = createTools(options);
     const call = async (name: string, args: unknown) =>
       tools.find((t) => t.name === name)!.execute(name, args, options.signal);
+    if (options.prompt === "coordinate-browser") {
+      const result = await call("delegate_task", {
+        botId: delegateWorkerId,
+        prompt: "delegated-browser",
+      });
+      assert.match(JSON.stringify(result), /協作結果：42/);
+      return { text: "秘書彙整：協作結果：42" };
+    }
+    if (options.prompt === "delegated-browser") {
+      await call("shell", {
+        command:
+          process.platform === "win32"
+            ? "Write-Output 'delegation'"
+            : "printf delegation",
+        timeout: 5,
+      });
+      return { text: "協作結果：42" };
+    }
     options.registerSteer?.(async (text) => {
       assert.ok(text);
     });
@@ -305,6 +324,31 @@ try {
     fullPage: true,
   });
   const bot = app.product!.bot(app.product!.snapshot().bots[0].id);
+  delegateWorkerId = (await app.product!.create("協作助理")).id;
+  await page
+    .getByRole("textbox", { name: "傳送訊息" })
+    .fill("coordinate-browser");
+  await page.getByRole("button", { name: "傳送", exact: true }).click();
+  await page.getByRole("button", { name: "前往核准" }).click();
+  await page.getByText("需要你的核准", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "核准並繼續", exact: true }).click();
+  await page
+    .locator(".message.assistant")
+    .getByText("協作結果：42", { exact: true })
+    .waitFor();
+  await page
+    .getByRole("region", { name: "Bot 協作" })
+    .getByRole("button", { name: "開啟 Bot 對話" })
+    .click();
+  await page
+    .locator(".message.assistant")
+    .getByText("秘書彙整：協作結果：42", { exact: true })
+    .waitFor();
+  await page.screenshot({
+    path: join(output, "mobile-delegation.png"),
+    fullPage: true,
+  });
+  await app.product!.remove(delegateWorkerId);
   const pdf = await app.product!.createDocument(bot, "fixture", {
     format: "pdf",
     name: "PDF report",
@@ -360,6 +404,7 @@ try {
           "PDF round-trip",
           "image tool",
           "delete confirmation, cancellation and reload persistence",
+          "Bot delegation, approval navigation and secretary summary",
           "no browser console errors",
         ],
         artifacts: output,

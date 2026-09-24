@@ -752,6 +752,58 @@ function App() {
                       }
                     />
                   ))}
+                  {!!detail.delegations?.length && (
+                    <section className="delegation-list" aria-label="Bot 協作">
+                      <h3>Bot 協作</h3>
+                      {detail.delegations.map((job) => {
+                        const outgoing = job.delegatedBy === selected;
+                        const peerId = outgoing ? job.botId : job.delegatedBy!;
+                        const label = job.waitingApproval
+                          ? "等待你的核准"
+                          : {
+                              queued: "排隊中",
+                              running: "執行中",
+                              completed: "已完成",
+                              failed: "失敗",
+                              cancelled: "已取消",
+                              interrupted: "已中斷",
+                            }[job.status];
+                        return (
+                          <article className="delegation-card" key={job.id}>
+                            <div>
+                              <strong>
+                                {outgoing
+                                  ? `交給 ${job.targetName}`
+                                  : `來自 ${job.delegatedByName}`}
+                              </strong>
+                              <span>{label}</span>
+                            </div>
+                            <p>{job.prompt}</p>
+                            {(job.result || job.error) && (
+                              <details>
+                                <summary>
+                                  查看{job.error ? "錯誤" : "結果"}
+                                </summary>
+                                <p>{job.error || job.result}</p>
+                              </details>
+                            )}
+                            <button
+                              type="button"
+                              disabled={
+                                !state?.bots.some((b) => b.id === peerId)
+                              }
+                              onClick={() => select(peerId)}
+                            >
+                              {job.waitingApproval && outgoing
+                                ? "前往核准"
+                                : "開啟 Bot 對話"}
+                              <Icon name="arrow" size={14} />
+                            </button>
+                          </article>
+                        );
+                      })}
+                    </section>
+                  )}
                   {detail.drafts.map((d) => (
                     <DraftCard
                       key={d.id}
@@ -1479,7 +1531,7 @@ function Profile({
           value={description}
           maxLength={4000}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="例如：協助我研究科技趨勢，每次都附上資料來源。"
+          placeholder="例如：你是我的秘書，依其他 Bot 的角色派工，收到結果後整理回覆給我。"
         />
       </label>
       <label>

@@ -6,6 +6,8 @@ Apsis is a local Bot workspace for persistent conversations and third-party LLM 
 
 ## Run the current workspace
 
+Bots can delegate tasks or questions to other Bots and collect their results. A secretary Bot can discover teammates by role, assign work, and summarize their replies in its original conversation. Collaboration cards show progress and link to any approval required by the receiving Bot. See [Bot collaboration](docs/bot-workspace.md#bot-協作與秘書派工) for an example and execution limits.
+
 Requires Node.js 22.19 or later and npm.
 
 ```sh

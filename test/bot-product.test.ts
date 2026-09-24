@@ -181,6 +181,194 @@ test("Bot deletion waits for outgoing draft to settle", async (t) => {
   assert.equal(f.product.bot(bot.id).id, bot.id);
 });
 
+test("secretary delegates through real tools, waits for approval and receives only the assigned result", async (t) => {
+  let workerId = "";
+  let workerCalls = 0;
+  const f = await fixture(async (o) => {
+    const tools = createTools(o);
+    if (o.prompt === "coordinate") {
+      const roster = await tools
+        .find((tool) => tool.name === "list_bots")!
+        .execute("roster", {}, o.signal);
+      assert.ok(JSON.stringify(roster).includes(workerId));
+      assert.ok(!JSON.stringify(roster).includes("hidden-worker"));
+      assert.ok(!JSON.stringify(roster).includes("private-note"));
+      const delegate = tools.find((tool) => tool.name === "delegate_task")!;
+      const args = { botId: workerId, prompt: "research precisely" };
+      const first = await delegate.execute("assignment-1", args, o.signal);
+      const repeated = await delegate.execute("assignment-1", args, o.signal);
+      assert.deepEqual(first, repeated);
+      assert.match(JSON.stringify(first), /verified-research-result/);
+      assert.ok(!JSON.stringify(first).includes("private-note"));
+      return { text: "Summary: verified-research-result" };
+    }
+    workerCalls++;
+    await o.authorize?.("shell", { command: "research" }, o.signal);
+    return { text: "verified-research-result" };
+  });
+  t.after(f.close);
+  const secretary = await f.product.create("Secretary");
+  const worker = await f.product.create("Researcher");
+  workerId = worker.id;
+  const hidden = await f.product.create("hidden-worker");
+  await f.product.update(hidden.id, { hidden: true });
+  await f.store.mutate((state) =>
+    state.sessions
+      .find((s) => s.id === worker.sessionId)!
+      .messages.push({
+        id: "private",
+        role: "user",
+        content: "private-note",
+        status: "complete",
+      }),
+  );
+  await f.product.submit(secretary.id, {
+    prompt: "coordinate",
+    requestId: "secretary-job",
+  });
+  await until(() => f.product.pending.size === 1);
+  assert.equal(
+    f.product.detail(secretary.id).delegations[0].waitingApproval,
+    true,
+  );
+  const approval = f.product.db
+    .all<Approval>("approval")
+    .find((a) => a.status === "pending")!;
+  f.product.decide(approval.id, { approved: true });
+  await until(() => !f.product.active.size);
+  assert.equal(
+    f.product.db.get<Job>("job", "secretary-job")!.status,
+    "completed",
+  );
+  assert.equal(workerCalls, 1);
+  const child = f.product.detail(secretary.id).delegations[0];
+  assert.equal(child.status, "completed");
+  assert.equal(child.result, "verified-research-result");
+  assert.equal(child.parentJobId, "secretary-job");
+  assert.match(
+    f.tasks.view(secretary.sessionId).messages.at(-1)!.content,
+    /Summary/,
+  );
+});
+
+test("stopping secretary cancels its delegated work and releases approval", async (t) => {
+  let workerId = "";
+  let effects = 0;
+  const f = await fixture(async (o) => {
+    if (o.prompt === "coordinate") {
+      await createTools(o)
+        .find((tool) => tool.name === "delegate_task")!
+        .execute("cancel-child", { botId: workerId, prompt: "wait" }, o.signal);
+    } else {
+      await o.authorize?.("shell", { command: "wait" }, o.signal);
+      effects++;
+    }
+    return { text: "done" };
+  });
+  t.after(f.close);
+  const secretary = await f.product.create("Secretary");
+  workerId = (await f.product.create("Worker")).id;
+  await f.product.submit(secretary.id, {
+    prompt: "coordinate",
+    requestId: "cancel-parent",
+  });
+  await until(() => f.product.pending.size === 1);
+  await f.request(`/api/v2/bots/${secretary.id}/stop`, "POST", {});
+  await until(() => !f.product.active.size);
+  assert.equal(effects, 0);
+  assert.equal(f.product.pending.size, 0);
+  assert.equal(
+    f.product.detail(secretary.id).delegations[0].status,
+    "cancelled",
+  );
+});
+
+test("cancelling queued delegation does not stop the receiver's unrelated task", async (t) => {
+  let workerId = "",
+    release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let unrelatedAborted = false;
+  const f = await fixture(async (o) => {
+    if (o.prompt === "unrelated") {
+      o.signal.addEventListener(
+        "abort",
+        () => {
+          unrelatedAborted = true;
+        },
+        { once: true },
+      );
+      await gate;
+    } else if (o.prompt === "coordinate") {
+      await createTools(o)
+        .find((tool) => tool.name === "delegate_task")!
+        .execute(
+          "queued-child",
+          { botId: workerId, prompt: "queued-child" },
+          o.signal,
+        );
+    } else assert.fail("Cancelled queued child must never run");
+    return { text: "done" };
+  });
+  t.after(async () => {
+    release();
+    await f.close();
+  });
+  const secretary = await f.product.create("Secretary");
+  workerId = (await f.product.create("Worker")).id;
+  await f.product.submit(workerId, {
+    prompt: "unrelated",
+    requestId: "unrelated-job",
+  });
+  await f.product.submit(secretary.id, {
+    prompt: "coordinate",
+    requestId: "queued-parent",
+  });
+  await until(() => f.product.detail(secretary.id).delegations.length === 1);
+  await f.request(`/api/v2/bots/${secretary.id}/stop`, "POST", {});
+  await until(() => !f.product.active.has(secretary.id));
+  assert.equal(
+    f.product.detail(secretary.id).delegations[0].status,
+    "cancelled",
+  );
+  assert.equal(unrelatedAborted, false);
+  release();
+  await until(() => !f.product.active.size);
+  assert.equal(
+    f.product.db.get<Job>("job", "unrelated-job")!.status,
+    "completed",
+  );
+});
+
+test("cross-conversation delegation cycles fail without deadlocking", async (t) => {
+  let aId = "",
+    bId = "";
+  const f = await fixture(async (o) => {
+    const tool = createTools(o).find((item) => item.name === "delegate_task")!;
+    if (o.prompt === "A-root")
+      await tool.execute("a-to-b", { botId: bId, prompt: "child" }, o.signal);
+    if (o.prompt === "B-root") {
+      await until(() =>
+        f.product.db.all<Job>("job").some((j) => j.delegatedBy === aId),
+      );
+      await assert.rejects(
+        tool.execute("b-to-a", { botId: aId, prompt: "cycle" }, o.signal),
+        /互相等待/,
+      );
+    }
+    return { text: "done" };
+  });
+  t.after(f.close);
+  aId = (await f.product.create("A")).id;
+  bId = (await f.product.create("B")).id;
+  await f.product.submit(bId, { prompt: "B-root", requestId: "root-b" });
+  await f.product.submit(aId, { prompt: "A-root", requestId: "root-a" });
+  await until(() => !f.product.active.size);
+  assert.equal(f.product.db.get<Job>("job", "root-a")!.status, "completed");
+  assert.equal(f.product.db.get<Job>("job", "root-b")!.status, "completed");
+});
+
 test("persistent Bot uses one conversation, queues and deduplicates requests, inherits defaults and preserves reply context", async (t) => {
   const calls: RunOptions[] = [];
   const f = await fixture(async (o) => {

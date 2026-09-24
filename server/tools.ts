@@ -257,7 +257,7 @@ export function createTools({
       const values = args as Record<string, unknown> | null;
       const target =
         values &&
-        (["path", "id", "name", "command"]
+        (["path", "id", "botId", "name", "command"]
           .map((k) => values[k])
           .find((v) => typeof v === "string") as string | undefined);
       const operation: ToolOperation = {
@@ -272,6 +272,7 @@ export function createTools({
           "remember",
           "update_memory",
           "save_skill",
+          "delegate_task",
         ].includes(t.name),
         target: target?.slice(0, 300),
       };
