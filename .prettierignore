@@ -5,3 +5,4 @@ artifacts/
 package-lock.json
 
 dist/
+server/vendor/kimi-bash/

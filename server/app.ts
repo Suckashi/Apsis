@@ -9,8 +9,8 @@ import type { AddressInfo } from "node:net";
 import { asError } from "../shared/errors.ts";
 import type { RunResult, Skill } from "../shared/types.ts";
 import { runAgent } from "./agent.ts";
+import { discoverCompatibleModels } from "./compatible.ts";
 import { Connections } from "./connections.ts";
-import { CodexRuntime } from "./codex.ts";
 import { normalizeFact } from "./knowledge.ts";
 import { discoverOllama } from "./ollama.ts";
 import { testConnection } from "./probe.ts";
@@ -71,10 +71,6 @@ export async function createApp({
   await tasks.runs.init();
   const connections = await new Connections(dataDir).init();
   tasks.connections = connections;
-  const codex = new CodexRuntime(
-    () => (server.address() as AddressInfo | null)?.port,
-  );
-  tasks.codex = codex;
   const telegram = await new TelegramChannel(dataDir, telegramCall).init();
   const product = await new ProductService(tasks, connections).init();
   telegram.productMessage = (message) => product.telegram(message);
@@ -105,14 +101,11 @@ export async function createApp({
       if (req.headers["sec-fetch-site"] === "cross-site")
         fail("不允許跨網站請求。", 403);
       const path = new URL(req.url || "/", "http://localhost").pathname;
-      const mcp = path.match(/^\/api\/codex\/mcp\/([a-f0-9-]+)$/);
       if (
         !["GET", "HEAD"].includes(req.method || "") &&
-        req.headers["x-apsis-client"] !== "1" &&
-        !mcp
+        req.headers["x-apsis-client"] !== "1"
       )
         fail("缺少工作台請求標頭。", 403);
-      if (mcp) return await codex.handleMcp(req, res, mcp[1]);
 
       if (path.startsWith("/api/v2/"))
         return await product.handle(
@@ -123,14 +116,21 @@ export async function createApp({
         );
       if (
         req.method === "GET" &&
-        ["/", "/bot.js", "/bot.js.map", "/bot.css", "/favicon.svg"].includes(
-          path,
-        )
+        [
+          "/",
+          "/bot.js",
+          "/bot.js.map",
+          "/bot.css",
+          "/providers.css",
+          "/favicon.svg",
+        ].includes(path)
       ) {
         const file =
           path === "/"
             ? new URL("../public/bot.html", import.meta.url)
-            : path === "/bot.css" || path === "/favicon.svg"
+            : path === "/bot.css" ||
+                path === "/providers.css" ||
+                path === "/favicon.svg"
               ? new URL("../public" + path, import.meta.url)
               : new URL("../dist/public" + path, import.meta.url);
         const type = path.endsWith(".css")
@@ -147,7 +147,7 @@ export async function createApp({
       }
       if (path === "/api/status" && req.method === "GET")
         return json(res, {
-          runtimes: ["deepagents", "codex"],
+          runtimes: ["deepagents"],
           version: "0.2.0",
           workspace: workspaceDir,
           running: tasks.running.size,
@@ -157,15 +157,30 @@ export async function createApp({
           "Content-Disposition",
           'attachment; filename="apsis-backup.json"',
         );
-        return json(res, store.state);
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.write(
+          '{"version":3,"state":' +
+            JSON.stringify({ ...store.state, sessions: [] }) +
+            ',"conversations":',
+        );
+        for await (const chunk of store.conversations.exportChunks()) {
+          if (!res.write(chunk))
+            await new Promise<void>((resolve) => res.once("drain", resolve));
+        }
+        res.end("}");
+        return;
       }
       if (path === "/api/ollama/models" && req.method === "POST")
         return json(res, await discoverOllama((await body(req)).url));
-      if (path === "/api/codex/status" && req.method === "GET")
-        return json(res, await codex.inspect());
-      if (path === "/api/codex/login" && req.method === "POST") {
-        await body(req);
-        return json(res, await codex.beginLogin());
+      if (path === "/api/compatible/models" && req.method === "POST") {
+        const input = await body(req);
+        return json(
+          res,
+          await discoverCompatibleModels(
+            input.url,
+            connections.discoveryKey(input),
+          ),
+        );
       }
       if (path === "/api/connections") {
         if (req.method === "GET") return json(res, connections.view());
@@ -188,27 +203,7 @@ export async function createApp({
           if (
             connections.view().find((c) => c.id === id)?.provider === "codex"
           ) {
-            const status = await codex.inspect();
-            const selected = connections.selection(id, input.model);
-            const ok =
-              status.connected &&
-              status.models.some(
-                (m: { id: string }) => m.id === selected.model,
-              );
-            return json(
-              res,
-              await connections.verified(id, {
-                engine: "codex",
-                model: selected.model,
-                at: new Date().toISOString(),
-                ok,
-                streaming: false,
-                tools: false,
-                message: ok
-                  ? "ChatGPT 已登入；模型可用。派工工具需以任務測試驗證。"
-                  : "請登入 ChatGPT，並選擇可用的 Codex 模型。",
-              }),
-            );
+            fail("Codex 已停止支援；請明確選擇其他模型連線。");
           }
           return json(res, await testConnection(connections, id, input));
         }
@@ -281,7 +276,6 @@ export async function createApp({
     }
   });
   server.on("close", () => {
-    codex.close();
     void product.close();
     tasks.stopAll();
     void telegram.stop();
@@ -295,6 +289,5 @@ export async function createApp({
     telegram,
     product,
     connections,
-    codex,
   };
 }

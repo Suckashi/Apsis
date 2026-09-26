@@ -54,6 +54,8 @@ export async function testConnection(
       store,
       workspace: new Workspace("."),
       env,
+      modelSettings: connections.view().find((row) => row.id === id)
+        ?.modelSettings?.[env.MODEL_ID || ""],
       prompt: `Call connection_probe with nonce ${nonce} and then reply with its exact output.`,
       allowWrites: false,
       signal: AbortSignal.timeout(45000),

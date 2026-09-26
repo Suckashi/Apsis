@@ -1,3 +1,4 @@
+import { changeMemory } from "./memory.ts";
 import { Type, type TSchema } from "typebox";
 import { codingTools } from "./coding-tools.ts";
 import {
@@ -83,6 +84,9 @@ export function createTools({
   probe,
   extraTools = [],
   authorize,
+  runtimeSettings,
+  executeAuthorizedTool,
+  checkToolPermission,
 }: ToolOptions) {
   if (probe)
     return [
@@ -108,8 +112,43 @@ export function createTools({
         throw new Error("使用者尚未開啟「允許修改」此類資料的權限。");
       return fn(...args);
     };
+  const memoryVersions = new Map(
+    view().memories.map((m) => [m.id, m.revision ?? 1]),
+  );
   const tools = [
-    ...codingTools({ store, workspace, allowWrites, permissions }),
+    tool(
+      "read_history",
+      "Read surrounding messages for a sequence from search_history. Results are scoped to your Bot.",
+      ["sequence"],
+      (a) =>
+        store.conversations.around(
+          view().sessions.map((s) => s.id),
+          Number(a.sequence),
+        ),
+    ),
+    tool(
+      "manage_memory",
+      "Manage memory using JSON: id and revision for updates, content, tier (core/reference), enabled, mergeIds and mergeRevisions. Omit id to create. Cannot change user-edited or locked memories.",
+      ["change"],
+      writable(async (a) => {
+        const change = JSON.parse(a.change);
+        return store.mutate((s) =>
+          changeMemory(
+            s,
+            agent?.memoryScope === "private" ? agent.id : undefined,
+            change,
+            { kind: "agent", ...source },
+          ),
+        );
+      }),
+    ),
+    ...codingTools({
+      store,
+      workspace,
+      allowWrites,
+      permissions,
+      runtimeSettings,
+    }),
     tool(
       "list_skills",
       "List reusable skill names, IDs and brief descriptions. Pass a query or empty string to list all.",
@@ -135,37 +174,23 @@ export function createTools({
     ),
     tool(
       "search_history",
-      "Find matching completed messages in the owner's past Web and bot conversations. Query must be at least two characters.",
+      "Search your scoped archived history. Query must be 2–200 characters. For older results, set optional before to the smallest sequence returned; read_history loads surrounding messages.",
       ["query"],
       (a) => {
         const query = a.query.trim().toLocaleLowerCase();
         if (query.length < 2 || query.length > 200)
           throw new Error("查詢需為 2–200 字。");
-        return view()
-          .sessions.flatMap((s) =>
-            s.messages
-              .filter(
-                (m) =>
-                  m.status === "complete" &&
-                  m.content.toLocaleLowerCase().includes(query),
-              )
-              .map((m) => ({
-                sessionId: s.id,
-                title: s.title,
-                role: m.role,
-                excerpt: m.content.slice(
-                  Math.max(
-                    0,
-                    m.content.toLocaleLowerCase().indexOf(query) - 160,
-                  ),
-                  Math.max(
-                    0,
-                    m.content.toLocaleLowerCase().indexOf(query) - 160,
-                  ) + 1000,
-                ),
-              })),
-          )
-          .slice(0, 10);
+        const before = a.before ? Number(a.before) : undefined;
+        if (
+          before !== undefined &&
+          (!Number.isSafeInteger(before) || before < 1)
+        )
+          throw new Error("無效的分頁游標。");
+        return store.conversations.search(
+          query,
+          view().sessions.map((s) => s.id),
+          before,
+        );
       },
     ),
     tool(
@@ -175,14 +200,20 @@ export function createTools({
       writable(async (a) => {
         if (!a.content.trim() || a.content.length > 4000)
           throw new Error("記憶需為 1–4000 字。");
-        await store.mutate((s) => {
-          const memory = scopedState(s, agent).memories.find(
-            (m) => m.id === a.id,
-          );
-          if (!memory) throw new Error("找不到記憶。");
-          revise(memory, a.content);
-        });
-        return "記憶已更新。";
+        const updated = await store.mutate((s) =>
+          changeMemory(
+            s,
+            agent?.memoryScope === "private" ? agent.id : undefined,
+            {
+              id: a.id,
+              revision: memoryVersions.get(a.id),
+              content: a.content,
+            },
+            { kind: "agent", ...source },
+          ),
+        );
+        memoryVersions.set(updated.id, updated.revision ?? 1);
+        return updated;
       }),
     ),
     tool(
@@ -201,22 +232,16 @@ export function createTools({
       writable(async (a) => {
         if (!a.content.trim() || a.content.length > 4000)
           throw new Error("記憶長度必須為 1–4000 字。");
-        await store.mutate((s) => {
-          if (
-            scopedState(s, agent).memories.some(
-              (m) => normalizeFact(m.content) === normalizeFact(a.content),
-            )
-          )
-            return;
-          s.memories.push({
-            source: { kind: "agent", ...source },
-            ...(agent?.memoryScope === "private" ? { agentId: agent.id } : {}),
-            id: randomUUID(),
-            content: a.content,
-            createdAt: new Date().toISOString(),
-          });
-        });
-        return "已儲存記憶。";
+        const saved = await store.mutate((s) =>
+          changeMemory(
+            s,
+            agent?.memoryScope === "private" ? agent.id : undefined,
+            { content: a.content },
+            { kind: "agent", ...source },
+          ),
+        );
+        memoryVersions.set(saved.id, saved.revision ?? 1);
+        return saved;
       }),
     ),
     tool(
@@ -245,6 +270,10 @@ export function createTools({
       }, "skills"),
     ),
   ];
+  tools.find((t) => t.name === "search_history")!.parameters = Type.Object(
+    { query: Type.String(), before: Type.Optional(Type.String()) },
+    { additionalProperties: false },
+  );
   const selected = agent
     ? tools.filter((t) => agent.tools.includes(t.name))
     : tools;
@@ -252,7 +281,10 @@ export function createTools({
     ...t,
     execute: async (id: string, args: unknown, signal?: AbortSignal) => {
       signal?.throwIfAborted();
-      await authorize?.(t.name, args, signal);
+      // Snapshot parameters before the first async boundary: approval and execution
+      // must refer to the same operation, even if a caller mutates its object.
+      args = structuredClone(args);
+      let receipt = await authorize?.(t.name, args, signal);
       signal?.throwIfAborted();
       const values = args as Record<string, unknown> | null;
       const target =
@@ -261,6 +293,15 @@ export function createTools({
           .map((k) => values[k])
           .find((v) => typeof v === "string") as string | undefined);
       const operation: ToolOperation = {
+        ...(receipt
+          ? {
+              authorization: {
+                reason: receipt.reason,
+                dangerousCommand: receipt.dangerousCommand,
+                matchedRuleIds: receipt.matchedRuleIds,
+              },
+            }
+          : {}),
         id: randomUUID(),
         name: t.name,
         status: "started",
@@ -271,6 +312,7 @@ export function createTools({
           "shell",
           "remember",
           "update_memory",
+          "manage_memory",
           "save_skill",
           "delegate_task",
         ].includes(t.name),
@@ -280,20 +322,44 @@ export function createTools({
       let executed = false;
       try {
         signal?.throwIfAborted();
-        const output = await t.execute(id, args, signal);
+        const execute = async () => {
+          signal?.throwIfAborted();
+          const updated = await checkToolPermission?.(
+            t.name,
+            args,
+            signal,
+            receipt || undefined,
+          );
+          if (updated) {
+            receipt = updated;
+            operation.authorization = {
+              reason: updated.reason,
+              dangerousCommand: updated.dangerousCommand,
+              matchedRuleIds: updated.matchedRuleIds,
+            };
+          }
+          signal?.throwIfAborted();
+          return t.execute(id, args, signal);
+        };
+        const output = await (executeAuthorizedTool
+          ? executeAuthorizedTool(t.name, execute, signal)
+          : execute());
         executed = true;
         await recordOperation?.({
           ...operation,
           status: "succeeded",
           evidence:
             (output.details.evidence as Evidence | undefined) ||
-            boundedEvidence({
-              output: output.content
-                .map((c) =>
-                  c.type === "text" ? c.text : `[${c.mimeType} image]`,
-                )
-                .join("\n"),
-            }),
+            boundedEvidence(
+              {
+                output: output.content
+                  .map((c) =>
+                    c.type === "text" ? c.text : `[${c.mimeType} image]`,
+                  )
+                  .join("\n"),
+              },
+              runtimeSettings?.outputLimit,
+            ),
           endedAt: new Date().toISOString(),
         });
         return output;

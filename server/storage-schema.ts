@@ -29,6 +29,13 @@ export const runSchema = z
     createdAt: z.string(),
     text: z.string(),
     activity: z.array(z.string()),
+    progress: z
+      .object({
+        kind: z.enum(["message", "reply"]),
+        text: z.string().optional(),
+        updatedAt: z.string(),
+      })
+      .optional(),
     operations: z.array(
       z
         .object({
@@ -67,6 +74,21 @@ export const connectionsSchema = z.array(
       ]),
       model: z.string(),
       models: z.array(z.string()).optional(),
+      modelSettings: z
+        .record(
+          z.string(),
+          z.object({
+            displayName: z.string().optional(),
+            maxOutputTokens: z.number().int().positive().optional(),
+            contextWindowTokens: z
+              .number()
+              .int()
+              .min(2048)
+              .max(10000000)
+              .optional(),
+          }),
+        )
+        .optional(),
       vendor: z
         .enum([
           "ollama",
@@ -99,7 +121,7 @@ const knowledge = z
 export const storageSchema = z
   .object({
     projects: z.array(projectSchema).optional(),
-    schemaVersion: z.literal(2),
+    schemaVersion: z.union([z.literal(2), z.literal(3)]),
     sessions: z.array(
       z
         .object({

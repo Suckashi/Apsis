@@ -1,3 +1,5 @@
+import type { PermissionRule } from "./settings.ts";
+
 export interface Bot {
   id: string;
   sessionId: string;
@@ -11,8 +13,30 @@ export interface Bot {
   connectionId?: string;
   model?: string;
   deletedAt?: string;
+  needsModelSelection?: boolean;
+  skillIds?: string[];
+  connectorIds?: string[];
+  permissionMode?: "workspace" | "readonly";
+  permissionRules?: PermissionRule[];
+}
+export interface BotTemplate {
+  id: string;
+  name: string;
+  description: string;
+  avatar: string;
+  connectionId?: string;
+  model?: string;
+  skillIds: string[];
+  connectorIds: string[];
+  permissionMode: "workspace" | "readonly";
+  permissionRules: PermissionRule[];
 }
 export interface Approval {
+  matchedRuleIds?: string[];
+  reason?: string;
+  dangerousCommand?: string;
+  rememberAllowed?: boolean;
+  fingerprint?: string;
   id: string;
   botId: string;
   runId: string;
@@ -22,6 +46,7 @@ export interface Approval {
   createdAt: string;
 }
 export interface Routine {
+  blockedReason?: string;
   id: string;
   botId: string;
   name: string;
@@ -32,8 +57,12 @@ export interface Routine {
   nextAt: string;
   lastAt?: string;
   history: { at: string; jobId: string }[];
+  permissionBotIds?: string[];
 }
 export interface Job {
+  retryOf?: string;
+  workContextId?: string;
+  contextKind?: "chat" | "routine" | "delegation";
   id: string;
   botId: string;
   prompt: string;
@@ -54,6 +83,7 @@ export interface Job {
   parentJobId?: string;
   rootJobId?: string;
   delegationPath?: string[];
+  permissionBotIds?: string[];
   result?: string;
 }
 export interface Artifact {

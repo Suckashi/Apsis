@@ -1,3 +1,4 @@
+import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "./context-budget.ts";
 import { readFile, writeFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -74,6 +75,21 @@ export class Connections {
       .map(({ apiKey, ...row }) => ({
         ...row,
         models: row.models?.length ? [...row.models] : [row.model],
+        contextProfiles: Object.fromEntries(
+          (row.models?.length ? row.models : [row.model]).map((model) => {
+            const manual = row.modelSettings?.[model]?.contextWindowTokens;
+            const tokens = manual ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
+            return [
+              model,
+              {
+                tokens,
+                source: manual !== undefined
+                  ? ("manual" as const)
+                  : ("default" as const),
+              },
+            ];
+          }),
+        ),
         credentialConfigured:
           !!apiKey || ["ollama", "codex"].includes(row.provider),
       }));
@@ -82,6 +98,8 @@ export class Connections {
     if (typeof connectionId !== "string") error("請選擇模型連線。");
     const connection = this.view().find((row) => row.id === connectionId);
     if (!connection) error("找不到可用的模型連線。");
+    if (connection.provider === "codex")
+      error("Codex 接入已移除，請重新選擇模型。");
     const selectedModel = model === undefined ? connection.model : model;
     if (
       typeof selectedModel !== "string" ||
@@ -95,6 +113,7 @@ export class Connections {
     const saved = this.savedDefault;
     if (saved) {
       const connection = visible.find((row) => row.id === saved.connectionId);
+      if (connection?.provider === "codex") return null;
       if (connection)
         return {
           connectionId: connection.id,
@@ -105,11 +124,12 @@ export class Connections {
     }
     const ready = (row: ModelConnection) =>
       row.provider === "ollama" ||
-      row.provider === "codex" ||
       (row.provider === "openai-compatible"
         ? Boolean(row.url)
         : row.credentialConfigured);
-    const preferred = visible.find((row) => ready(row));
+    const preferred = visible.find(
+      (row) => row.provider !== "codex" && ready(row),
+    );
     return preferred
       ? { connectionId: preferred.id, model: preferred.model }
       : null;
@@ -134,6 +154,7 @@ export class Connections {
     const publicRow = this.view().find((r) => r.id === id);
     if (!publicRow) error("找不到可用的模型連線。");
     const row = this.rows.find((r) => r.id === id)!;
+    if (row.provider === "codex") error("Codex 接入已移除，請重新選擇模型。");
     return {
       MODEL_PROVIDER: row.provider,
       MODEL_ID: model || row.model,
@@ -144,6 +165,21 @@ export class Connections {
           ? { COMPATIBLE_BASE_URL: row.url }
           : {}),
     };
+  }
+  discoveryKey(input: Record<string, unknown>) {
+    if (input.apiKey) return input.apiKey;
+    if (!input.connectionId) return input.apiKey;
+    const row = this.rows.find(
+      (r) => r.id === input.connectionId && !r.archived,
+    );
+    if (!row) error("找不到可用的模型連線。");
+    // Never send a stored credential to a different endpoint or protocol.
+    if (
+      row.provider !== "openai-compatible" ||
+      compatibleUrl(input.url) !== row.url
+    )
+      error("網址已變更，請重新輸入 API key，或先儲存新網址後再取得模型。");
+    return row.apiKey;
   }
   async mutate(fn: (rows: SavedConnection[]) => void) {
     const operation = this.tail.then(async () => {
@@ -177,6 +213,7 @@ export class Connections {
     };
     const provider = input.provider as Provider;
     if (!Object.hasOwn(keys, provider)) error("未知供應商。");
+    if (provider === "codex") error("Codex 接入已移除，請選擇其他供應商。");
     const model = text("model", 200);
     if (provider === "ollama") ollamaModelName(model);
     const suppliedModels = input.models;
@@ -184,9 +221,9 @@ export class Connections {
       suppliedModels !== undefined &&
       (!Array.isArray(suppliedModels) ||
         !suppliedModels.length ||
-        suppliedModels.length > 50)
+        suppliedModels.length > 1000)
     )
-      error("模型清單需包含 1–50 個模型。");
+      error("模型清單需包含 1–1000 個模型。");
     const models =
       suppliedModels === undefined
         ? [
@@ -231,7 +268,7 @@ export class Connections {
     )
       error("API key 格式錯誤。");
     const apiKey =
-      provider === "ollama" || provider === "codex"
+      provider === "ollama"
         ? undefined
         : input.apiKey === null
           ? undefined
@@ -240,6 +277,66 @@ export class Connections {
             : previous?.url === url && previous?.provider === provider
               ? previous?.apiKey
               : undefined;
+    const modelSettings =
+      input.modelSettings === undefined
+        ? previous?.provider === provider && previous.modelSettings
+          ? Object.fromEntries(
+              Object.entries(previous.modelSettings).filter(([id]) =>
+                models.includes(id),
+              ),
+            )
+          : undefined
+        : input.modelSettings;
+    if (modelSettings !== undefined) {
+      if (
+        !modelSettings ||
+        typeof modelSettings !== "object" ||
+        Array.isArray(modelSettings)
+      )
+        error("模型參數格式錯誤。");
+      for (const [modelId, value] of Object.entries(modelSettings)) {
+        if (
+          !models.includes(modelId) ||
+          !value ||
+          typeof value !== "object" ||
+          Array.isArray(value)
+        )
+          error("模型參數必須屬於此連線的模型。");
+        const entry = value as Record<string, unknown>;
+        if (
+          Object.keys(entry).some(
+            (key) =>
+              ![
+                "displayName",
+                "maxOutputTokens",
+                "contextWindowTokens",
+              ].includes(key),
+          )
+        )
+          error("不支援的模型參數。");
+        if (
+          entry.displayName !== undefined &&
+          (typeof entry.displayName !== "string" ||
+            !entry.displayName.trim() ||
+            entry.displayName.length > 100)
+        )
+          error("模型顯示名稱需為 1–100 字。");
+        if (
+          entry.contextWindowTokens !== undefined &&
+          (!Number.isSafeInteger(entry.contextWindowTokens) ||
+            Number(entry.contextWindowTokens) < 2048 ||
+            Number(entry.contextWindowTokens) > 10000000)
+        )
+          error("Context 上限需為 2048–10000000 的整數。");
+        if (
+          entry.maxOutputTokens !== undefined &&
+          (!Number.isSafeInteger(entry.maxOutputTokens) ||
+            Number(entry.maxOutputTokens) < 1 ||
+            Number(entry.maxOutputTokens) > 1000000)
+        )
+          error("模型輸出上限需為 1–1000000 的整數。");
+      }
+    }
     const row: SavedConnection = {
       id: previous?.id || randomUUID(),
       name: text("name", 100),
@@ -249,6 +346,7 @@ export class Connections {
       vendor,
       url,
       apiKey,
+      modelSettings: modelSettings as ModelConnection["modelSettings"],
     };
     await this.mutate((rows) => {
       const index = rows.findIndex((r) => r.id === row.id);
@@ -268,7 +366,10 @@ export class Connections {
     });
   }
   fingerprint(id: string) {
-    return JSON.stringify(this.environment(id));
+    return JSON.stringify({
+      environment: this.environment(id),
+      modelSettings: this.rows.find((row) => row.id === id)?.modelSettings,
+    });
   }
   async verified(
     id: string,

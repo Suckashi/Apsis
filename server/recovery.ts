@@ -3,6 +3,12 @@ import type { RunStore } from "./runs.ts";
 export function recoveryContext(runs: RunStore, session: Session) {
   const pending: TaskRun[] = [];
   for (const run of runs.list(session.id)) {
+    if (
+      session.workContextId &&
+      run.workContextId &&
+      run.workContextId !== session.workContextId
+    )
+      continue;
     if (run.status === "completed") break;
     if (run.status !== "running") pending.push(run);
   }

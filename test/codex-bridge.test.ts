@@ -3,141 +3,101 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { createApp } from "../server/app.ts";
-import type { Job } from "../shared/product.ts";
 
-test("Codex MCP bridge exposes real Apsis delegation", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "apsis-codex-test-"));
+async function fixture(t: TestContext) {
+  const directory = await mkdtemp(join(tmpdir(), "apsis-codex-retired-"));
   const app = await createApp({
     dataDir: join(directory, "data"),
     workspaceDir: join(directory, "work"),
-    runner: async () => ({ text: "17 × 19 = 323" }),
+    runner: async () => {
+      assert.fail("Retired Codex must never dispatch to another runner");
+    },
   });
-  try {
-    await new Promise<void>((resolve) =>
-      app.server.listen(0, "127.0.0.1", resolve),
-    );
-    const connection = await app.connections.save({
-      name: "Test Ollama",
-      provider: "ollama",
-      model: "qwen3.5:9b",
-      url: "http://127.0.0.1:11434",
-    });
-    await app.connections.setDefault({
-      connectionId: connection.id,
-      model: connection.model,
-    });
-    const worker = await app.product.create("計算助理");
-    const secretary = await app.product.create("秘書");
-    const runId = randomUUID();
-    app.product.db.put<Job>("job", {
-      id: randomUUID(),
-      botId: secretary.id,
-      prompt: "派工",
-      createdAt: new Date().toISOString(),
-      status: "running",
-      runId,
-    });
-    const token = randomUUID();
-    app.codex.active.set(token, {
-      tools: app.product.tools(secretary, runId),
-      signal: new AbortController().signal,
-    });
-    const base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}/api/codex/mcp/`;
-    const rpc = async (id: number, method: string, params: unknown) => {
-      const response = await fetch(base + token, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-        },
-        body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
-      });
-      assert.equal(response.status, 200);
-      return (await response.json()) as { result: any };
-    };
-    await rpc(1, "initialize", {
-      protocolVersion: "2025-11-25",
-      capabilities: {},
-      clientInfo: { name: "test", version: "1" },
-    });
-    const listed = await rpc(2, "tools/list", {});
-    assert.ok(
-      listed.result.tools.some(
-        (tool: { name: string }) => tool.name === "delegate_task",
-      ),
-    );
-    const bots = await rpc(3, "tools/call", {
-      name: "list_bots",
-      arguments: {},
-    });
-    assert.match(bots.result.content[0].text, /計算助理/);
-    const delegated = await rpc(4, "tools/call", {
-      name: "delegate_task",
-      arguments: { botId: worker.id, prompt: "計算 17 乘以 19" },
-    });
-    assert.match(delegated.result.content[0].text, /323/);
-    assert.ok(
-      app.product.db
-        .all<Job>("job")
-        .some(
-          (job) =>
-            job.parentJobId &&
-            job.botId === worker.id &&
-            job.status === "completed",
-        ),
-    );
-    assert.equal(
-      (await fetch(base + randomUUID(), { method: "POST" })).status,
-      404,
-    );
-  } finally {
+  t.after(async () => {
     await new Promise<void>((resolve) => app.server.close(() => resolve()));
     await app.product.close();
+  });
+  await new Promise<void>((resolve) =>
+    app.server.listen(0, "127.0.0.1", resolve),
+  );
+  const base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  return { app, base };
+}
+
+const headers = {
+  "content-type": "application/json",
+  "x-apsis-client": "1",
+};
+
+test("Codex runtime and routes are removed, including the MCP header exemption", async (t) => {
+  const { app, base } = await fixture(t);
+  assert.equal("codex" in app, false);
+  assert.equal("codex" in app.tasks, false);
+  const status = await fetch(base + "/api/status");
+  assert.equal(status.status, 200);
+  assert.deepEqual((await status.json()).runtimes, ["deepagents"]);
+
+  for (const [path, method] of [
+    ["/api/codex/status", "GET"],
+    ["/api/codex/login", "POST"],
+    [`/api/codex/mcp/${randomUUID()}`, "POST"],
+  ]) {
+    const response = await fetch(base + path, {
+      method,
+      headers,
+      ...(method === "POST" ? { body: "{}" } : {}),
+    });
+    assert.equal(response.status, 404, path);
+    assert.match((await response.json()).error, /找不到此頁面/);
   }
+
+  const mcp = await fetch(base + "/api/codex/mcp/" + randomUUID(), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(mcp.status, 403);
+  assert.match((await mcp.json()).error, /請求標頭/);
 });
 
-test("Codex Bot requires ChatGPT sign-in and never asks for an API key", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "apsis-codex-auth-test-"));
-  const app = await createApp({
-    dataDir: join(directory, "data"),
-    workspaceDir: join(directory, "work"),
+test("Codex connections remain readable but cannot be created, tested, or selected", async (t) => {
+  const { app, base } = await fixture(t);
+  const id = randomUUID();
+  // Model the persisted legacy row without enabling a new Codex connection.
+  app.connections.rows.push({
+    id,
+    name: "Legacy Codex",
+    provider: "codex",
+    model: "legacy-model",
   });
-  try {
-    app.codex.inspect = async () => ({
-      connected: false,
-      plan: null,
-      login: { state: "idle" },
-      models: [],
+  const listed = await fetch(base + "/api/connections");
+  assert.equal(listed.status, 200);
+  assert.ok((await listed.json()).some((row: { id: string }) => row.id === id));
+
+  for (const [path, method, body] of [
+    [
+      "/api/connections",
+      "POST",
+      { name: "Codex", provider: "codex", model: "legacy-model" },
+    ],
+    [`/api/connections/${id}/test`, "POST", {}],
+    [
+      "/api/connections/default",
+      "PUT",
+      { connectionId: id, model: "legacy-model" },
+    ],
+  ] as const) {
+    const response = await fetch(base + path, {
+      method,
+      headers,
+      body: JSON.stringify(body),
     });
-    const connection = await app.connections.save({
-      name: "ChatGPT Codex",
-      provider: "codex",
-      model: "gpt-5.6-sol",
-    });
-    assert.equal(connection.credentialConfigured, true);
-    assert.equal(
-      app.connections.rows.find((row) => row.id === connection.id)?.apiKey,
-      undefined,
-    );
-    await app.connections.setDefault({
-      connectionId: connection.id,
-      model: connection.model,
-    });
-    const bot = await app.product.create("秘書");
-    const job = await app.product.submit(bot.id, {
-      requestId: randomUUID(),
-      prompt: "派工",
-    });
-    const deadline = Date.now() + 5000;
-    while (app.product.active.size && Date.now() < deadline)
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    const finished = app.product.db.get<Job>("job", job.id);
-    assert.equal(finished?.status, "failed");
-    assert.match(finished?.error || "", /登入 ChatGPT/);
-  } finally {
-    await app.product.close();
-    app.server.close();
+    assert.equal(response.status, 400, path);
+    assert.match((await response.json()).error, /Codex.*(?:移除|停止支援)/);
   }
+  assert.equal(app.connections.rows.length, 1);
+  assert.equal(app.connections.rows[0].provider, "codex");
+  assert.equal(app.connections.savedDefault, null);
 });

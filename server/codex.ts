@@ -11,6 +11,7 @@ import {
 import { agentContext } from "./context.ts";
 import { createTools, type AgentTool } from "./tools.ts";
 import type { RunOptions } from "./runtime.ts";
+import { codexProgress, codexTurnNotifications } from "./codex-progress.ts";
 
 type RpcMessage = {
   id?: number;
@@ -275,27 +276,28 @@ export class CodexRuntime {
       client.close();
     };
     options.signal.addEventListener("abort", abort, { once: true });
-    client.listeners.add((message) => {
+    const progress = codexProgress(options);
+    const notifications = codexTurnNotifications((method, params) => {
+      progress.receive(method, params);
       if (
-        message.method === "item/completed" &&
-        message.params?.item?.type === "agentMessage"
+        method === "item/completed" &&
+        params?.item?.type === "agentMessage"
       ) {
-        const item = message.params.item;
+        const item = params.item;
         if (item.phase === "final_answer") final = item.text || "";
         else latest = item.text || latest;
       }
-      if (
-        message.method === "turn/completed" &&
-        (!message.params?.threadId || message.params.threadId === threadId) &&
-        (!turnId || message.params?.turn?.id === turnId)
-      ) {
-        const state = message.params.turn;
+      if (method === "turn/completed") {
+        const state = params.turn;
         if (state.status === "completed") completed(final || latest);
         else
           failed(
             new Error(state.error?.message || `Codex 任務${state.status}。`),
           );
       }
+    });
+    client.listeners.add((message) => {
+      if (message.method) notifications.receive(message.method, message.params);
     });
     try {
       const system =
@@ -328,6 +330,7 @@ export class CodexRuntime {
         },
       });
       threadId = started.thread.id;
+      notifications.thread(threadId);
       const history = options.session.messages
         .filter((m) => m.status === "complete")
         .slice(-12)
@@ -345,14 +348,20 @@ export class CodexRuntime {
         ],
       });
       turnId = startedTurn.turn.id;
+      notifications.turn(turnId);
       const text = await turn;
+      await progress.flush();
       if (!text.trim()) throw new Error("Codex 未回傳內容。");
       options.emit({ type: "delta", text });
       return { text };
     } finally {
-      options.signal.removeEventListener("abort", abort);
-      this.active.delete(token);
-      client.close();
+      try {
+        await progress.flush();
+      } finally {
+        options.signal.removeEventListener("abort", abort);
+        this.active.delete(token);
+        client.close();
+      }
     }
   }
   close() {

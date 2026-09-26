@@ -1,4 +1,6 @@
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { dirname, join } from "node:path";
+import { findBash, shellMissing } from "./shell.ts";
 import { createTwoFilesPatch } from "diff";
 import { Type } from "typebox";
 import {
@@ -38,40 +40,117 @@ async function runShell(
   command: string,
   cwd: string,
   timeoutSeconds: number,
+  outputLimit: number,
   signal?: AbortSignal,
 ) {
   const windows = process.platform === "win32";
-  const child = spawn(
-    windows ? "powershell.exe" : "/bin/bash",
-    windows
-      ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command]
-      : ["-lc", command],
-    {
-      cwd,
-      env: visibleEnvironment(),
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
+  signal?.throwIfAborted();
+  const executable = findBash();
+  if (!executable) throw new Error(shellMissing);
+  const env = visibleEnvironment();
+  if (windows) {
+    const key =
+      Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+    env[key] = [
+      dirname(executable),
+      join(dirname(executable), "../usr/bin"),
+      env[key],
+    ]
+      .filter(Boolean)
+      .join(";");
+  }
+  const child = spawn(executable, ["--noprofile", "--norc", "-c", command], {
+    cwd,
+    env,
+    detached: !windows,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let output = "";
   let truncated = false;
   const capture = (chunk: Buffer) => {
     const text = chunk.toString("utf8");
-    truncated ||= output.length + text.length > evidenceLimit;
-    output = (output + text).slice(0, evidenceLimit);
+    truncated ||= output.length + text.length > outputLimit;
+    output = (output + text).slice(0, outputLimit);
   };
   child.stdout.on("data", capture);
   child.stderr.on("data", capture);
-  const stop = () => child.kill();
+  let stopping = false;
+  const stop = () => {
+    if (stopping) return;
+    stopping = true;
+    if (!child.pid) return;
+    if (windows) {
+      const pid = child.pid;
+      const fallback = () => {
+        if (child.exitCode !== null) return;
+        const killer = spawn(
+          "taskkill.exe",
+          ["/pid", String(pid), "/T", "/F"],
+          { windowsHide: true, stdio: "ignore" },
+        );
+        killer.on("error", () => child.kill());
+        killer.on("exit", (code) => {
+          if (code) child.kill();
+        });
+      };
+      // MSYS forks can escape the Windows parent tree; kill the precise Bash
+      // process group, including descendants that still own output pipes.
+      execFile(
+        executable,
+        ["--noprofile", "--norc", "-c", "/usr/bin/ps -W"],
+        { env, windowsHide: true, timeout: 3000 },
+        (error, output) => {
+          const row = output
+            .split("\n")
+            .map((line) => line.trim().split(/\s+/))
+            .find((parts) => parts[3] === String(pid));
+          const group = row?.[2];
+          if (
+            error ||
+            !group ||
+            !/^[1-9]\d*$/.test(group) ||
+            row?.[0] !== group
+          ) {
+            fallback();
+            return;
+          }
+          execFile(
+            executable,
+            ["--noprofile", "--norc", "-c", `kill -KILL -- -${group}`],
+            { env, windowsHide: true, timeout: 3000 },
+            (error) => {
+              if (error) fallback();
+            },
+          );
+        },
+      );
+    } else {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill();
+      }
+    }
+  };
   signal?.addEventListener("abort", stop, { once: true });
-  const timer = setTimeout(stop, timeoutSeconds * 1000);
+  if (signal?.aborted) stop();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    stop();
+  }, timeoutSeconds * 1000);
   try {
     const exitCode = await new Promise<number | null>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", resolve);
     });
-    const evidence = boundedEvidence({ command, output, exitCode, truncated });
+    const evidence = boundedEvidence(
+      { command, output, exitCode, truncated },
+      outputLimit,
+    );
     if (signal?.aborted) throw new ToolExecutionError("命令已停止。", evidence);
+    if (timedOut) throw new ToolExecutionError("命令執行逾時。", evidence);
     if (exitCode !== 0)
       throw new ToolExecutionError(`命令結束碼：${exitCode}`, evidence);
     return {
@@ -88,6 +167,7 @@ export function codingTools({
   workspace,
   permissions,
   allowWrites,
+  runtimeSettings,
 }: ToolOptions): AgentTool[] {
   const canWrite = () => {
     if (!(permissions ? permissions.files : allowWrites))
@@ -167,12 +247,13 @@ export function codingTools({
         });
       },
     },
-    ...(permissions?.shell && permissions.files
+    ...(permissions?.shell && permissions.files && findBash()
       ? [
           {
             name: "shell",
             label: "執行命令",
-            description: `Run ${process.platform === "win32" ? "PowerShell" : "Bash"} on the host from the workspace. Requires owner approval. Timeout 1–120 seconds.`,
+            description:
+              "Run Bash on the host from the workspace (Git Bash on Windows). Approval follows the selected permission mode. Timeout 1–120 seconds.",
             parameters: Type.Object(
               { command: Type.String(), timeout: Type.Optional(Type.Number()) },
               { additionalProperties: false },
@@ -188,7 +269,20 @@ export function codingTools({
               return runShell(
                 command,
                 workspace.root,
-                Math.max(1, Math.min(120, timeout || 60)),
+                Math.max(
+                  1,
+                  Math.min(
+                    120,
+                    Number.isFinite(timeout)
+                      ? timeout!
+                      : Number.isFinite(runtimeSettings?.shellTimeoutSeconds)
+                        ? runtimeSettings!.shellTimeoutSeconds
+                        : 60,
+                  ),
+                ),
+                Number.isFinite(runtimeSettings?.outputLimit)
+                  ? Math.max(1, Math.floor(runtimeSettings!.outputLimit))
+                  : evidenceLimit,
                 signal,
               );
             },

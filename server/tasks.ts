@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { runAgent } from "./agent.ts";
+import { rejectLegacyCodex, runAgent } from "./agent.ts";
 import type { RunOptions } from "./runtime.ts";
 import type { Store } from "./store.ts";
 import type { Workspace } from "./workspace.ts";
@@ -16,11 +16,11 @@ import { RunStore } from "./runs.ts";
 import type { Connections } from "./connections.ts";
 import type { RunPermissions, TaskRun } from "../shared/types.ts";
 import { Projects } from "./projects.ts";
+import { findBash, shellContext, shellMissing } from "./shell.ts";
 import { recoveryContext } from "./recovery.ts";
 
 export type AgentRunner = typeof runAgent;
 export class TaskService {
-  codex?: import("./codex.ts").CodexRuntime;
   store: Store;
   workspace: Workspace;
   runner: AgentRunner;
@@ -77,6 +77,8 @@ export class TaskService {
     const live = this.running.get(id);
     return {
       ...view,
+      ...this.store.conversations.page(id),
+      context: this.store.conversations.context(id),
       running: !!live,
       activeRunId: live?.runId,
       ...(live
@@ -97,10 +99,9 @@ export class TaskService {
     onEvent: (event: RunEvent) => void = () => {},
     signal?: AbortSignal,
     permissions?: RunPermissions,
+    workContextId?: string,
   ) {
-    const session = structuredClone(
-      this.store.state.sessions.find((s) => s.id === id),
-    );
+    const session = this.store.conversations.load(id, workContextId);
     if (!session)
       throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
     if (this.running.has(id))
@@ -111,6 +112,9 @@ export class TaskService {
       throw Object.assign(new Error("訊息需為 1–16000 字。"), { status: 400 });
     const controller = new AbortController();
     const runId = randomUUID();
+    const extensions = this.extensions?.(session, runId);
+    const timeoutMs =
+      extensions?.runtimeSettings?.taskTimeoutMs ?? this.timeoutMs;
     const grants = permissions || {
       files: allowWrites,
       memory: allowWrites,
@@ -128,7 +132,7 @@ export class TaskService {
       const tick = Date.now();
       if (!this.isWaiting?.(id)) activeMs += tick - lastTick;
       lastTick = tick;
-      if (activeMs >= this.timeoutMs) {
+      if (activeMs >= timeoutMs) {
         timedOut = true;
         abort();
       }
@@ -136,6 +140,7 @@ export class TaskService {
     let env: Environment = {};
     const userId = randomUUID();
     const run: TaskRun = {
+      workContextId: session.workContextId,
       project: session.project || this.projects.get(),
       id: runId,
       sessionId: id,
@@ -157,8 +162,20 @@ export class TaskService {
         .filter((v): v is string => !!v)
         .reduce((text, key) => text.replaceAll(key, "[redacted]"), value);
     const emit = (event: RunEvent) => {
+      if ("text" in event && typeof event.text === "string")
+        event = { ...event, text: redact(event.text) };
       if (event.type === "delta") live.text += event.text;
       if (event.type === "activity") live.activity.push(event.text);
+      if (event.type === "delta" || event.type === "progress") {
+        run.progress = {
+          kind: event.type === "delta" ? "reply" : "message",
+          text:
+            event.type === "progress"
+              ? event.text?.replace(/\s+/g, " ").slice(0, 120)
+              : undefined,
+          updatedAt: new Date().toISOString(),
+        };
+      }
       run.text = live.text;
       try {
         onEvent(event);
@@ -168,6 +185,7 @@ export class TaskService {
     };
     try {
       await initialSave;
+      rejectLegacyCodex({ session });
       const workspace = await this.projects.workspace(session);
       const recovery = recoveryContext(this.runs, session);
       run.recoveryRunIds = recovery.ids;
@@ -187,12 +205,15 @@ export class TaskService {
           throw new Error("連線供應商已變更，請建立新對話。");
         run.model = env.MODEL_ID || "";
       }
+      rejectLegacyCodex({ session, env });
       await this.store.mutate((s) => {
         const row = s.sessions.find((x) => x.id === id)!;
         if (!row.messages.length) row.title = prompt.slice(0, 44);
         row.messages.push({
+          createdAt: new Date().toISOString(),
           id: userId,
           runId,
+          workContextId: session.workContextId,
           role: "user",
           content: prompt,
           status: "pending",
@@ -200,23 +221,23 @@ export class TaskService {
       });
       controller.signal.throwIfAborted();
       emit({ type: "activity", text: "Apsis 正在處理任務。" });
-      const extensions = this.extensions?.(session, runId);
+      if (grants.shell && !findBash())
+        emit({ type: "activity", text: shellMissing });
       const result = await this.runner({
-        codex: this.codex,
         ...extensions,
         mode: session.mode,
         prompt,
         session,
         store: this.store,
         workspace,
-        executionContext: `Current project: ${JSON.stringify(run.project)}. All relative file tools and shell start in ${JSON.stringify(workspace.root)}. A project directory is not an OS sandbox. Before reporting completion, distinguish actual tool results, checks performed and remaining unverified work.\n${recovery.context}\n${extensions?.executionContext || ""}`,
+        executionContext: `Current project: ${JSON.stringify(run.project)}. All relative file tools and shell start in ${JSON.stringify(workspace.root)}. ${shellContext(workspace.root)} A project directory is not an OS sandbox. Before reporting completion, distinguish actual tool results, checks performed and remaining unverified work.\n${recovery.context}\n${extensions?.executionContext || ""}`,
         allowWrites,
         emit,
         signal: controller.signal,
         env,
         agent: session.agent,
         permissions: grants,
-        source: { sessionId: id, runId },
+        source: { sessionId: id, runId, messageId: userId },
         recordOperation: async (operation) => {
           const index = run.operations.findIndex((o) => o.id === operation.id);
           const safe = {
@@ -246,25 +267,44 @@ export class TaskService {
           if (index < 0) run.operations.push(safe);
           else run.operations[index] = safe;
           await this.runs.save(run);
+          emit({ type: "operation" });
         },
       } satisfies RunOptions);
       controller.signal.throwIfAborted();
       await this.store.mutate((s) => {
         const row = s.sessions.find((x) => x.id === id)!;
-        row.messages.find((m) => m.id === userId)!.status = "complete";
+        const user =
+          row.messages.find((m) => m.id === userId) ||
+          this.store.conversations.message(id, userId);
+        if (user) {
+          user.status = "complete";
+          this.store.conversations.append(id, user, session.workContextId);
+        }
         row.messages.push({
+          createdAt: new Date().toISOString(),
           id: randomUUID(),
           role: "assistant",
           content: result.text,
           runId,
+          workContextId: session.workContextId,
           status: "complete",
           activity: live.activity,
         });
         if (result.engineState !== undefined)
-          row.engineState = result.engineState;
+          this.store.conversations.saveCheckpoint(
+            id,
+            session.workContextId!,
+            result.engineState,
+          );
       });
       run.text = result.text;
       run.status = "completed";
+      for (const operation of run.operations) {
+        if (operation.status === "started") {
+          operation.status = "unknown";
+          operation.endedAt = new Date().toISOString();
+        }
+      }
       run.endedAt = new Date().toISOString();
       run.usage = result.usage;
       await this.runs.save(run);
@@ -284,13 +324,19 @@ export class TaskService {
         message = message.replaceAll(key, "[redacted]");
       await this.store.mutate((s) => {
         const row = s.sessions.find((x) => x.id === id)!;
-        const user = row.messages.find((m) => m.id === userId);
-        if (user) user.status = "failed";
+        const user =
+          row.messages.find((m) => m.id === userId) ||
+          this.store.conversations.message(id, userId);
+        if (user) {
+          user.status = "failed";
+          this.store.conversations.append(id, user, session.workContextId);
+        }
         row.messages.push({
           id: randomUUID(),
           role: "assistant",
           content: live.text ? live.text + "\n\n" + message : message,
           runId,
+          workContextId: session.workContextId,
           status: "error",
           activity: live.activity,
         });
@@ -298,6 +344,12 @@ export class TaskService {
       emit({ type: "error", text: message });
       run.status =
         controller.signal.aborted && !timedOut ? "cancelled" : "failed";
+      for (const operation of run.operations) {
+        if (operation.status === "started") {
+          operation.status = "unknown";
+          operation.endedAt = new Date().toISOString();
+        }
+      }
       run.error = message;
       run.endedAt = new Date().toISOString();
       await this.runs.save(run);

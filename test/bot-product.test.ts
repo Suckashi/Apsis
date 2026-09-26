@@ -10,6 +10,8 @@ import { createApp } from "../server/app.ts";
 import type { RunOptions } from "../server/runtime.ts";
 import type { Job, Approval, Draft } from "../shared/product.ts";
 import { createTools } from "../server/tools.ts";
+import { randomUUID } from "node:crypto";
+import type { TaskRun } from "../shared/types.ts";
 
 async function until(fn: () => boolean, timeout = 5000) {
   const start = Date.now();
@@ -46,6 +48,7 @@ async function fixture(
     name: "Fixture",
     provider: "openai-compatible",
     model: "fixture-model",
+    modelSettings: { "fixture-model": { contextWindowTokens: 128000 } },
     url: "http://127.0.0.1:1/v1",
   });
   await app.tasks.connections!.setDefault({
@@ -60,6 +63,127 @@ async function fixture(
   };
   return { ...app, dir, base, request, close, product: app.product! };
 }
+
+test("task summaries cover old runs while scoped history loads only on request", async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const owner = await f.product.create("owner"),
+    other = await f.product.create("other");
+  const records: TaskRun[] = [];
+  for (let i = 0; i < 32; i++) {
+    const record: TaskRun = {
+      id: randomUUID(),
+      sessionId: owner.sessionId,
+      engine: "deepagents",
+      agentName: owner.name,
+      model: "test",
+      permissions: { files: true, memory: true, skills: true },
+      createdAt: new Date(i * 1000).toISOString(),
+      endedAt: new Date(i * 1000 + 500).toISOString(),
+      status: "completed",
+      text: "result",
+      activity: [],
+      operations: [
+        {
+          id: randomUUID(),
+          name: "read_file",
+          status: "succeeded",
+          startedAt: new Date(i * 1000).toISOString(),
+          mutating: false,
+          evidence: { output: "historic evidence" },
+        },
+      ],
+    };
+    records.push(record);
+    await f.tasks.runs.save(record);
+  }
+  const detail = await f.request(`/api/v2/bots/${owner.id}?view=summary`);
+  assert.equal(detail.data.runSummaries.length, 32);
+  assert.equal(detail.data.runs.length, 0);
+  assert.doesNotMatch(JSON.stringify(detail.data), /historic evidence/);
+  assert.equal(
+    (await f.request(`/api/v2/bots/${owner.id}`)).data.runs.length,
+    30,
+  );
+  const history = await f.request(
+    `/api/v2/bots/${owner.id}/runs/${records[0].id}`,
+  );
+  assert.equal(history.response.status, 200);
+  assert.equal(
+    history.data.run.operations[0].evidence.output,
+    "historic evidence",
+  );
+  assert.equal(
+    (await f.request(`/api/v2/bots/${other.id}/runs/${records[0].id}`)).response
+      .status,
+    404,
+  );
+});
+
+test("durable tool boundaries notify SSE subscribers before the task finishes", async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = await fixture(async (o) => {
+    await o.recordOperation!({
+      id: "long-read",
+      name: "read_file",
+      target: "report.pdf",
+      status: "started",
+      startedAt: new Date().toISOString(),
+      mutating: false,
+    });
+    await gate;
+    await o.recordOperation!({
+      id: "long-read",
+      name: "read_file",
+      target: "report.pdf",
+      status: "succeeded",
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      mutating: false,
+    });
+    return { text: "done" };
+  });
+  t.after(async () => {
+    release();
+    await f.close();
+  });
+  const owner = await f.product.create("owner");
+  const controller = new AbortController();
+  const response = await fetch(`${f.base}/api/v2/events`, {
+    signal: controller.signal,
+  });
+  const reader = response.body!.getReader();
+  await reader.read();
+  const before = Number(f.product.db.events(0).at(-1)!.id);
+  await f.product.submit(owner.id, { requestId: randomUUID(), prompt: "read" });
+  await until(
+    () =>
+      f.product.detail(owner.id).currentProgress?.label ===
+      "正在讀取文件 report.pdf",
+  );
+  assert.equal(f.product.detail(owner.id).runSummaries[0].status, "running");
+  assert.ok(f.product.db.events(before).length > 0);
+  const event = await reader.read();
+  assert.match(new TextDecoder().decode(event.value), /data:/);
+  controller.abort();
+  release();
+  await until(() => !f.product.active.size);
+  const reconnect = new AbortController();
+  const resumed = await fetch(`${f.base}/api/v2/events`, {
+    headers: { "Last-Event-ID": String(before) },
+    signal: reconnect.signal,
+  });
+  const resumedReader = resumed.body!.getReader();
+  assert.match(
+    new TextDecoder().decode((await resumedReader.read()).value),
+    /data:/,
+  );
+  assert.equal(f.product.detail(owner.id).runSummaries[0].status, "completed");
+  reconnect.abort();
+});
 
 test("Bot customization validates before creation and persists edits", async (t) => {
   const f = await fixture();
@@ -138,6 +262,14 @@ test("deleting Bot cancels approval and queue, removes owned data and leaves oth
     return { text: "done" };
   });
   t.after(f.close);
+  f.product.settings.update(
+    {
+      permissionRules: [
+        { id: "fixture-shell", scope: "global", tool: "shell", effect: "ask" },
+      ],
+    },
+    f.product.settings.read().revision,
+  );
   const bot = await f.product.create("刪除測試");
   const other = await f.product.create("保留");
   await f.product.routine(bot.id, {
@@ -242,6 +374,14 @@ test("secretary delegates through real tools, waits for approval and receives on
     return { text: "verified-research-result" };
   });
   t.after(f.close);
+  f.product.settings.update(
+    {
+      permissionRules: [
+        { id: "fixture-shell", scope: "global", tool: "shell", effect: "ask" },
+      ],
+    },
+    f.product.settings.read().revision,
+  );
   const secretary = await f.product.create("Secretary");
   const worker = await f.product.create("Researcher");
   workerId = worker.id;
@@ -301,6 +441,14 @@ test("stopping secretary cancels its delegated work and releases approval", asyn
     return { text: "done" };
   });
   t.after(f.close);
+  f.product.settings.update(
+    {
+      permissionRules: [
+        { id: "fixture-shell", scope: "global", tool: "shell", effect: "ask" },
+      ],
+    },
+    f.product.settings.read().revision,
+  );
   const secretary = await f.product.create("Secretary");
   workerId = (await f.product.create("Worker")).id;
   await f.product.submit(secretary.id, {
@@ -432,6 +580,7 @@ test("persistent Bot uses one conversation, queues and deduplicates requests, in
     name: "Second",
     provider: "openai-compatible",
     model: "next-model",
+    modelSettings: { "next-model": { contextWindowTokens: 128000 } },
     url: "http://127.0.0.1:2/v1",
   });
   await f.tasks.connections!.setDefault({
@@ -476,6 +625,14 @@ test("approval gates actual tool execution, supports exact allow rules, denial, 
     return { text: "執行完成" };
   });
   t.after(f.close);
+  f.product.settings.update(
+    {
+      permissionRules: [
+        { id: "fixture-shell", scope: "global", tool: "shell", effect: "ask" },
+      ],
+    },
+    f.product.settings.read().revision,
+  );
   const bot = await f.product.create();
   await f.product.submit(bot.id, {
     prompt: "same-command",
@@ -671,6 +828,7 @@ test("MCP drafts edit arguments, call the connector once, hide credentials and n
     token: "connector-secret",
   });
   assert.equal(added.response.status, 200);
+  await f.product.update(bot.id, { connectorIds: [added.data.id] });
   assert.ok(!JSON.stringify(f.product.snapshot()).includes("connector-secret"));
   const tool = f.product
     .tools(bot, "run")

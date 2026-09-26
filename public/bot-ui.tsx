@@ -1,3 +1,5 @@
+import { uiText } from "./settings-dictionary.ts";
+import { useSettingsLocale } from "./settings-locale.ts";
 import {
   useEffect,
   useId,
@@ -78,12 +80,13 @@ export function AvatarPicker({
   value: string;
   onChange: (value: string) => void;
 }) {
+  useSettingsLocale();
   return (
     <fieldset className="avatar-picker">
-      <legend>Bot 圖示</legend>
+      <legend>{uiText("Bot 圖示")}</legend>
       <div>
         {botAvatars.map((avatar) => (
-          <label key={avatar.id} title={avatar.label}>
+          <label key={avatar.id} title={uiText(avatar.label)}>
             <input
               type="radio"
               name="bot-avatar"
@@ -93,7 +96,7 @@ export function AvatarPicker({
             />
             <span>
               <BrandMark avatar={avatar.id} size={36} />
-              <span className="avatar-label">{avatar.label}</span>
+              <span className="avatar-label">{uiText(avatar.label)}</span>
             </span>
           </label>
         ))}
@@ -350,10 +353,11 @@ export function useDrawer(
 }
 
 export function CopyButton({ text }: { text: string }) {
-  const [status, setStatus] = useState("複製");
+  useSettingsLocale();
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
   useEffect(() => {
-    if (status === "複製") return;
-    const timer = setTimeout(() => setStatus("複製"), 2000);
+    if (status === "idle") return;
+    const timer = setTimeout(() => setStatus("idle"), 2000);
     return () => clearTimeout(timer);
   }, [status]);
   return (
@@ -361,14 +365,18 @@ export function CopyButton({ text }: { text: string }) {
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
-          setStatus("已複製");
+          setStatus("copied");
         } catch {
-          setStatus("複製失敗");
+          setStatus("failed");
         }
       }}
       aria-live="polite"
     >
-      {status}
+      {status === "copied"
+        ? uiText("已複製")
+        : status === "failed"
+          ? uiText("複製失敗")
+          : uiText("複製")}
     </button>
   );
 }

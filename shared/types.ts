@@ -25,10 +25,26 @@ export interface AgentDefinition {
 }
 export type Environment = Record<string, string | undefined>;
 export interface Memory {
+  tier?: "core" | "reference";
+  locked?: boolean;
+  revision?: number;
   enabled?: boolean;
   updatedAt?: string;
-  source?: { sessionId?: string; runId?: string; kind: "agent" | "manual" };
-  revisions?: { content: string; at: string }[];
+  source?: {
+    sessionId?: string;
+    runId?: string;
+    messageId?: string;
+    kind: "agent" | "manual";
+  };
+  revisions?: {
+    content: string;
+    at: string;
+    revision?: number;
+    source?: Memory["source"];
+    tier?: Memory["tier"];
+    locked?: boolean;
+    enabled?: boolean;
+  }[];
   mergedInto?: string;
   agentId?: string;
   id: string;
@@ -39,6 +55,9 @@ export interface Skill extends Memory {
   name: string;
 }
 export interface ChatMessage {
+  createdAt?: string;
+  workContextId?: string;
+  sequence?: number;
   runId?: string;
   id: string;
   role: "user" | "assistant";
@@ -47,6 +66,7 @@ export interface ChatMessage {
   activity?: string[];
 }
 export interface Session {
+  workContextId?: string;
   project?: Project;
   agent?: AgentDefinition;
   connectionId?: string;
@@ -61,6 +81,8 @@ export interface Session {
   messages: ChatMessage[];
 }
 export type SessionView = Omit<Session, "engineState"> & {
+  olderCursor?: number;
+  context?: WorkContext;
   activeRunId?: string;
   running?: boolean;
   live?: { text: string; activity: string[] };
@@ -79,6 +101,8 @@ export interface StoreState {
 }
 export type RunEvent =
   | { type: "delta" | "activity" | "error"; text: string; tool?: string }
+  | { type: "progress"; text?: string }
+  | { type: "operation" }
   | { type: "done" };
 export interface RunResult {
   usage?: { inputTokens: number; outputTokens: number };
@@ -92,6 +116,11 @@ export interface RunPermissions {
   skills: boolean;
 }
 export interface ToolOperation {
+  authorization?: {
+    reason: string;
+    dangerousCommand?: string;
+    matchedRuleIds?: string[];
+  };
   evidence?: {
     command?: string;
     output?: string;
@@ -109,6 +138,8 @@ export interface ToolOperation {
   error?: string;
 }
 export interface TaskRun {
+  workContextId?: string;
+  progress?: { kind: "message" | "reply"; text?: string; updatedAt: string };
   project?: Project;
   recoveryRunIds?: string[];
   id: string;
@@ -133,11 +164,23 @@ export interface Project {
   path: string;
 }
 export interface ModelConnection {
+  contextProfiles?: Record<
+    string,
+    { tokens?: number; source: "manual" | "default" }
+  >;
   id: string;
   name: string;
   provider: Provider;
   model: string;
   models?: string[];
+  modelSettings?: Record<
+    string,
+    {
+      displayName?: string;
+      maxOutputTokens?: number;
+      contextWindowTokens?: number;
+    }
+  >;
   vendor?: string;
   url?: string;
   credentialConfigured: boolean;
@@ -151,6 +194,22 @@ export interface ModelConnection {
     tools: boolean;
     message: string;
   };
+}
+export interface ContextUsage {
+  inputTokens: number;
+  inputBudget: number;
+  windowTokens: number;
+  source: "provider" | "estimate";
+  omittedCoreIds: string[];
+  updatedAt: string;
+}
+export interface WorkContext {
+  id: string;
+  sessionId: string;
+  kind: "chat" | "routine" | "delegation";
+  createdAt: string;
+  endedAt?: string;
+  usage?: ContextUsage;
 }
 export interface ConnectionSelection {
   connectionId: string;

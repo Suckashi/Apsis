@@ -84,6 +84,7 @@ test("Deep Agents streams, reads a real workspace file, and continues saved hist
     agent,
   };
   const base = {
+    modelSettings: { contextWindowTokens: 128000 },
     mode: "deepagents" as const,
     session,
     agent,
@@ -177,6 +178,7 @@ test("Deep Agents rejects a blank final response", async (t) => {
   };
   await assert.rejects(
     runAgent({
+      modelSettings: { contextWindowTokens: 128000 },
       mode: "deepagents",
       session,
       store,

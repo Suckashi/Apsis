@@ -12,13 +12,15 @@
     "start": "npm run build && node --env-file-if-exists=.env server/index.ts",
     "test": "node --test test/*.test.ts",
     "test:bots:browser": "npm run build && node scripts/verify-bots.ts",
+    "test:settings:browser": "npm run build && node scripts/verify-settings.ts",
     "test:bots:ollama": "node scripts/test-bot-delegation.ts",
-    "test:bots:codex": "node scripts/test-bot-delegation-codex.ts",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "build": "npm run check && node scripts/build.ts",
-    "dev:share": "npm run check && node --env-file-if-exists=.env scripts/share.ts"
+    "dev:share": "npm run check && node --env-file-if-exists=.env scripts/share.ts",
+    "test:context:browser": "npm run build && node scripts/verify-context.ts",
+    "test:context:model": "node scripts/test-context-model.ts"
   },
   "dependencies": {
     "@langchain/anthropic": "1.5.11",

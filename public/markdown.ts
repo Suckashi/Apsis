@@ -1,10 +1,7 @@
 import MarkdownIt from "markdown-it";
+import { uiText } from "./settings-dictionary.ts";
 
-const t = (message: string, ...args: string[]) =>
-  message.replace(
-    /\{(\d+)\}/g,
-    (_, index: string) => args[Number(index)] || "",
-  );
+const t = (message: string, ...args: string[]) => uiText(message, args);
 
 // Model output is untrusted: raw HTML stays text, and unsafe link schemes are rejected.
 const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });
@@ -30,8 +27,8 @@ const codeLanguages: Record<string, string> = {
   sql: "SQL",
   yaml: "YAML",
   yml: "YAML",
-  text: t("純文字"),
-  plaintext: t("純文字"),
+  text: "純文字",
+  plaintext: "純文字",
 };
 
 // Re-rendering a streamed fence creates one complete block. Code stays escaped
@@ -45,7 +42,7 @@ markdown.renderer.rules.fence = (tokens, index) => {
   const normalizedLanguage = language.toLowerCase();
   const label = language
     ? Object.hasOwn(codeLanguages, normalizedLanguage)
-      ? codeLanguages[normalizedLanguage]
+      ? t(codeLanguages[normalizedLanguage])
       : language
     : t("純文字");
   const languageClass =

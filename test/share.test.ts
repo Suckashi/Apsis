@@ -189,6 +189,7 @@ test("authenticated remote requests reach the Bot workspace and keep CSRF checks
     name: "Test",
     provider: "openai-compatible",
     model: "mock",
+    modelSettings: { mock: { contextWindowTokens: 128000 } },
     url: "http://127.0.0.1:1/v1",
   });
   await app.connections.setDefault({
