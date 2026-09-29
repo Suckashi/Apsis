@@ -8,6 +8,7 @@ import {
   stat,
   symlink,
   rename,
+  realpath,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -477,6 +478,7 @@ test("linked folders are optional projects; system roots stay protected through 
     bot = await f.product.create();
   const context = f.product.detail(bot.id).session.context!;
   const root = join(f.dir, "repository");
+  assert.equal(f.store.directory, await realpath(join(f.dir, "data")));
   await mkdir(join(root, ".git"), { recursive: true });
   let result = await f.request(`/bots/${bot.id}/work-location`, "PUT", {
     contextId: context.id,
@@ -735,7 +737,8 @@ test("versioned legacy migration is repeatable and restart, retry and resumed su
     "Old attachment",
   );
   assert.equal(legacy.kind, "legacy");
-  assert.equal(legacy.path, options.workspaceDir);
+  const canonicalWorkspace = await realpath(options.workspaceDir);
+  assert.equal(legacy.path, canonicalWorkspace);
   assert.equal(app.product.detail(bot.id).memories[0].scopeKey, "legacy");
   assert.equal(
     app.product.detail(bot.id).session.messages[0].content,
@@ -743,14 +746,14 @@ test("versioned legacy migration is repeatable and restart, retry and resumed su
   );
   assert.equal(
     app.product.db.get<Job>("job", "old-job")!.location!.path,
-    options.workspaceDir,
+    canonicalWorkspace,
   );
   assert.equal(
     app.product.db.get<{ location: { path: string } }>(
       "routine",
       "old-routine",
     )!.location.path,
-    options.workspaceDir,
+    canonicalWorkspace,
   );
   const backup = join(
     options.dataDir,

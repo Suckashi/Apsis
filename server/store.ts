@@ -8,6 +8,7 @@ import {
   writeFile,
   copyFile,
   access,
+  realpath,
 } from "node:fs/promises";
 import { storageSchema } from "./storage-schema.ts";
 import { join } from "node:path";
@@ -28,6 +29,9 @@ export class Store {
   }
   async init() {
     await mkdir(this.directory, { recursive: true });
+    // Match Workspace/Projects canonical paths, including Windows 8.3 aliases.
+    // Otherwise containment checks can miss the application's protected data.
+    this.directory = await realpath(this.directory);
     this.file = join(this.directory, "state.json");
     try {
       this.state = JSON.parse(await readFile(this.file, "utf8"));

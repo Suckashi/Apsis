@@ -53,7 +53,7 @@ test("real headless interactions fail an uninvoked IIFE and pass its repaired de
   );
   assert.equal(broken.status, "failed");
   assert.equal(broken.assertions, 0);
-  assert.equal(broken.steps[2].status, "passed");
+  assert.equal(broken.steps[2].status, "passed", JSON.stringify(broken));
   assert.equal(broken.steps[3].status, "failed");
   assert.match(broken.steps[3].error!, /Not calculated/);
 
