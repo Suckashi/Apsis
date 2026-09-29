@@ -109,7 +109,25 @@ export interface StoreState {
   memories: Memory[];
   skills: Skill[];
 }
+export interface SubagentActivity {
+  id: string;
+  name?: string;
+  task: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  progress?: string;
+  resultSummary?: string;
+  startedAt: string;
+  endedAt?: string;
+}
+export interface ExecutionTodo {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+}
+export type ExecutionEvidence =
+  | { kind: "subagent"; activity: SubagentActivity }
+  | { kind: "planning"; todos: ExecutionTodo[]; subagentId?: string };
 export type RunEvent =
+  | { type: "execution"; evidence: ExecutionEvidence }
   | { type: "commentary"; id: string; text: string }
   | { type: "delta" | "activity" | "error"; text: string; tool?: string }
   | { type: "progress"; text?: string }
@@ -127,6 +145,7 @@ export interface RunPermissions {
   skills: boolean;
 }
 export interface ToolOperation {
+  subagentId?: string;
   authorization?: {
     reason: string;
     dangerousCommand?: string;
@@ -149,6 +168,7 @@ export interface ToolOperation {
   error?: string;
 }
 export type RunTimelineEntry =
+  | (ExecutionEvidence & { id: string; at: string })
   | { kind: "commentary"; id: string; at: string; text: string }
   | { kind: "operation"; id: string; at: string; operationId: string };
 export interface TaskRun {
@@ -230,6 +250,8 @@ export interface ContextUsage {
   updatedAt: string;
 }
 export interface WorkContext {
+  git?: import("./coding.ts").ConversationWorkspace["git"];
+  pullRequest?: import("./coding.ts").PullRequestLink;
   location?: WorkLocation;
   locationLockedAt?: string;
   id: string;

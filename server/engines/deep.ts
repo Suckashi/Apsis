@@ -1,3 +1,4 @@
+import { deepObservation } from "../deep-observation.ts";
 import { retryModel } from "../model-retry.ts";
 import { toolFeedback } from "../tool-feedback.ts";
 import { ToolFailureGuard } from "../tool-failure-guard.ts";
@@ -49,11 +50,13 @@ import { connection, executeTool, toolSchema } from "./common.ts";
 
 // deepagents 1.14.0 resolves profiles from the LangChain model provider.
 // Its exclusion middleware hides these tools and rejects unsolicited calls.
-// All host execution and delegation must go through Apsis's guarded tools.
+// Native task stays ephemeral; host execution uses Apsis guarded tools.
 for (const provider of ["openai", "anthropic"]) {
-  registerHarnessProfile(provider, { excludedTools: ["task", "execute"] });
+  registerHarnessProfile(provider, { excludedTools: ["execute"] });
 }
 export async function runDeep(options: RunOptions) {
+  const observation = deepObservation(options);
+  options = observation.options;
   const failureGuard = new ToolFailureGuard();
   const turns = modelTurnBudget(
     options.runtimeSettings?.maxTurns ?? options.maxTurns ?? 48,
@@ -426,21 +429,41 @@ export async function runDeep(options: RunOptions) {
     },
   );
   options.registerSteer?.(steering.enqueue);
+  const feedback = toolFeedback(
+    options,
+    new Set(
+      tools.filter((t) => t.name !== "read_scratch_part").map((t) => t.name),
+    ),
+    failureGuard,
+  );
+  const nativeInstructions =
+    "Use task for internal exploration, research, tests, review and parallel analysis. Use list_bots/delegate_task only for a persistent assignment to another Apsis Bot with its own identity/history. Deep Agents filesystem is private scratch; project files require workspace_* tools. Host execution requires the guarded shell tool. Report public progress and findings, never private reasoning.";
   const agent = createDeepAgent({
+    subagents: [
+      {
+        name: "general-purpose",
+        description:
+          "Ephemeral internal specialist for exploration, research, testing and review.",
+        model,
+        tools,
+        systemPrompt: nativeInstructions,
+        middleware: [
+          observation.middleware,
+          feedback,
+          todoListMiddleware(),
+          turns.middleware,
+          modelRetry,
+          scratchNamespace(),
+        ],
+      },
+    ],
     model,
     tools,
     backend,
     middleware: [
       turns.middleware,
-      toolFeedback(
-        options,
-        new Set(
-          tools
-            .filter((t) => t.name !== "read_scratch_part")
-            .map((t) => t.name),
-        ),
-        failureGuard,
-      ),
+      observation.middleware,
+      feedback,
       steering.middleware,
       todoListMiddleware(),
       createFilesystemMiddleware({
@@ -454,6 +477,8 @@ export async function runDeep(options: RunOptions) {
       scratchNamespace(),
     ],
     systemPrompt:
+      nativeInstructions +
+      "\n" +
       agentContext(
         options.store,
         options.allowWrites,
@@ -507,15 +532,18 @@ export async function runDeep(options: RunOptions) {
       final = undefined;
       const stream = await agent.stream(input, {
         streamMode: ["messages", "values"],
+        subgraphs: true,
         signal: options.signal,
         recursionLimit: turns.recursionLimit,
       });
-      for await (const [kind, value] of stream) {
+      for await (const [namespace, kind, value] of stream) {
+        if (kind === "values" && namespace.length) continue;
         options.signal.throwIfAborted();
         failureGuard.assertActive();
         if (kind === "messages") {
           const [message, metadata] = value;
           if (
+            metadata?.lc_agent_name === "general-purpose" ||
             metadata?.apsis_summary ||
             metadata?.lcSource === "summarization" ||
             metadata?.lc_source === "summarization"

@@ -65,8 +65,6 @@ export interface Routine {
   permissionBotIds?: string[];
 }
 export interface Job {
-  taskId?: string;
-  executionSessionId?: string;
   location?: import("./types.ts").WorkLocation;
   fileReferences?: { locationId: string; path: string; revision: string }[];
   /** Set only when enqueuing work after the collection feature is initialized. */

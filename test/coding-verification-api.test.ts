@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { createApp } from "../server/app.ts";
-import type { CodingTask } from "../shared/coding.ts";
+import type { WorkLocation } from "../shared/types.ts";
+type Topic = { id: string; botId: string; location: WorkLocation };
 import type { WebVerification } from "../shared/coding-verification.ts";
 
 async function fixture(t: TestContext) {
@@ -43,8 +44,10 @@ async function fixture(t: TestContext) {
       method,
       headers: { "x-apsis-client": "1" },
     });
-  const verification = async (task: CodingTask) => {
-    const response = await request(`/coding-tasks/${task.id}/verification`);
+  const verification = async (task: Topic) => {
+    const response = await request(
+      `/bots/${task.botId}/verification?context=${task.id}`,
+    );
     assert.equal(response.status, 200);
     return (await response.json()) as {
       applicable: boolean;
@@ -55,16 +58,18 @@ async function fixture(t: TestContext) {
     botId: string,
     prompt = "API verification fixture",
   ) => {
-    const task = await app.product.coding.create(botId, { prompt });
-    for (let i = 0; app.product.coding.busy(task); i++) {
-      assert.ok(i < 500, "fixture runner should settle");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    const context = app.product.newContext(botId);
+    const bot = app.product.bot(botId);
+    const task: Topic = {
+      id: context.id,
+      botId,
+      location: app.tasks.locations.ensure(bot.sessionId, context.id),
+    };
     await mkdir(task.location.path, { recursive: true });
     return task;
   };
   const receipt = async (
-    task: CodingTask,
+    task: Topic,
     path = "index.html",
     content = "<h1>Ready</h1>",
   ) => {
@@ -72,8 +77,8 @@ async function fixture(t: TestContext) {
     await writeFile(join(task.location.path, path), content);
     const record: WebVerification = {
       id: randomUUID(),
-      taskId: task.id,
-      runId: app.product.coding.detail(task.id).runs[0].id,
+      workContextId: task.id,
+      runId: "fixture-run",
       path,
       checkedAt: new Date().toISOString(),
       status: "passed",
@@ -173,11 +178,13 @@ test("deleting a Bot clears all of its task receipts and preserves other Bots' r
     keptReceipt,
   ]);
   assert.equal(
-    (await f.request(`/coding-tasks/${first.id}/verification`)).status,
+    (await f.request(`/bots/${first.botId}/verification?context=${first.id}`))
+      .status,
     404,
   );
   assert.equal(
-    (await f.request(`/coding-tasks/${second.id}/verification`)).status,
+    (await f.request(`/bots/${second.botId}/verification?context=${second.id}`))
+      .status,
     404,
   );
   assert.deepEqual(await f.verification(retained), {

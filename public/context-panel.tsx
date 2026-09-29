@@ -76,7 +76,7 @@ export function ContextPanel({
     <div className="context-panel">
       {error && <p role="alert">{error}</p>}
       <details>
-        <summary>{t("歷史搜尋與任務")}</summary>
+        <summary>{t("搜尋聊天與話題")}</summary>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -145,14 +145,14 @@ export function ContextPanel({
           </button>
         )}
         <label>
-          {t("瀏覽舊任務")}
+          {t("瀏覽先前話題")}
           <select
             value={selected || ""}
             onChange={(e) => {
               if (e.target.value) void act(() => loadTask(e.target.value));
             }}
           >
-            <option value="">{t("選擇任務")}</option>
+            <option value="">{t("選擇話題")}</option>
             {contexts.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.createdAt} · {c.kind}
@@ -189,7 +189,7 @@ export function ContextPanel({
               )
             }
           >
-            {t("更早的任務")}
+            {t("更早的話題")}
           </button>
         )}
       </details>
@@ -247,7 +247,7 @@ export function ContextPanel({
                   ? "專案記憶"
                   : m.scopeKey === "legacy"
                     ? "既有工作記憶"
-                    : "目前任務記憶",
+                    : "目前話題記憶",
             )}{" "}
             · {t(m.tier === "core" ? "核心" : "參考")} · v{m.revision ?? 1}{" "}
             {m.locked ? "🔒" : ""} {m.enabled === false ? t("已停用") : ""}
@@ -302,7 +302,7 @@ export function ContextPanel({
                 {t(
                   usage?.context.location?.projectId
                     ? "專案記憶"
-                    : "目前任務記憶",
+                    : "目前話題記憶",
                 )}
               </option>
               <option value="global">{t("跨工作偏好")}</option>

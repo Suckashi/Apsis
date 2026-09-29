@@ -12,7 +12,7 @@ export type WebCheckStep = {
 
 export interface WebVerification {
   id: string;
-  taskId: string;
+  workContextId: string;
   runId: string;
   path: string;
   checkedAt: string;

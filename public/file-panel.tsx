@@ -90,6 +90,9 @@ function FolderDialog({
 }) {
   const [locations, setLocations] = useState<WorkLocation[]>([]);
   const [path, setPath] = useState("");
+  const [worktree, setWorktree] = useState(false);
+  const [branch, setBranch] = useState("");
+  const [dirty, setDirty] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -119,6 +122,9 @@ function FolderDialog({
     try {
       await api(`/bots/${botId}/work-location`, "PUT", {
         contextId: context.id,
+        worktree,
+        branch,
+        dirty: dirty || undefined,
         ...(projectId ? { projectId } : { path: folder }),
       });
       await refresh();
@@ -141,12 +147,42 @@ function FolderDialog({
         {context.location?.path || t("自動資料夾")}
       </p>
       {context.locationLockedAt ? (
-        <p>{t("工作位置已固定；變更位置請建立新任務。")}</p>
+        <p>{t("工作位置已固定；變更位置請建立新話題。")}</p>
       ) : (
         <>
           <p className="muted">
             {t("不需設定即可交辦；只有使用既有檔案時才需要選擇。")}
           </p>
+          <label>
+            <input
+              type="checkbox"
+              checked={worktree}
+              onChange={(e) => setWorktree(e.target.checked)}
+            />
+            {t("使用隔離的 Git 工作區")}
+          </label>
+          {worktree && (
+            <>
+              <label>
+                {t("起始分支（留空使用目前分支）")}
+                <input
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                />
+              </label>
+              <label>
+                {t("未提交修改")}
+                <select
+                  value={dirty}
+                  onChange={(e) => setDirty(e.target.value)}
+                >
+                  <option value="">{t("有修改時詢問")}</option>
+                  <option value="include">{t("接續目前修改")}</option>
+                  <option value="exclude">{t("從最後提交開始")}</option>
+                </select>
+              </label>
+            </>
+          )}
           <ul className="file-tree folder-choices">
             {locations
               .filter((l) => l.id !== context.location?.id)

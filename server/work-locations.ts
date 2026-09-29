@@ -27,7 +27,7 @@ export class WorkLocations {
       .slice(0, 24);
     const location: WorkLocation = {
       id: `task-${id}`,
-      name: "任務資料夾",
+      name: "聊天資料夾",
       kind: "task",
       path: join(this.fallback.root, "tasks", id),
       memoryKey: `task:${contextId}`,
@@ -39,7 +39,7 @@ export class WorkLocations {
   bind(sessionId: string, contextId: string, location: WorkLocation) {
     const context = this.store.conversations.context(sessionId, contextId);
     if (context.locationLockedAt)
-      throw Object.assign(new Error("任務已固定工作位置，請建立新任務。"), {
+      throw Object.assign(new Error("任務已固定工作位置，請建立新話題。"), {
         status: 409,
       });
     if (context.location) this.register(context.location);

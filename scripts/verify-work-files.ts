@@ -366,6 +366,8 @@ if (process.argv.includes("--serve")) {
       path: join(output, "desktop-files.png"),
       fullPage: true,
     });
+    await page.locator(".bot-actions-menu > summary").click();
+    await page.getByRole("button", { name: "聊天選項", exact: true }).click();
     await page.getByRole("button", { name: "工作資料夾", exact: true }).click();
     const folderDialog = page.getByRole("dialog", {
       name: "工作資料夾",
@@ -374,10 +376,11 @@ if (process.argv.includes("--serve")) {
     await folderDialog.getByLabel("主機資料夾完整路徑").fill(location.path);
     await folderDialog.getByRole("button", { name: "使用此資料夾" }).click();
     await folderDialog.waitFor({ state: "hidden" });
+    await page.getByRole("button", { name: "完成", exact: true }).click();
     await files
       .getByRole("button", { name: "notes.md", exact: true })
       .waitFor();
-    // Legacy contexts remain accessible through their API; new coding tasks use task cards.
+    // A new topic keeps history and starts a fresh working folder.
     await page.request.post(url + `/api/v2/bots/${bot.id}/contexts`, {
       headers: { "X-Apsis-Client": "1" },
       data: {},
@@ -389,10 +392,13 @@ if (process.argv.includes("--serve")) {
         .count(),
       0,
     );
+    await page.locator(".bot-actions-menu > summary").click();
+    await page.getByRole("button", { name: "聊天選項", exact: true }).click();
     await page.getByRole("button", { name: "工作資料夾", exact: true }).click();
     await folderDialog.getByLabel("主機資料夾完整路徑").fill(location.path);
     await folderDialog.getByRole("button", { name: "使用此資料夾" }).click();
     await folderDialog.waitFor({ state: "hidden" });
+    await page.getByRole("button", { name: "完成", exact: true }).click();
     await files
       .getByRole("button", { name: "notes.md", exact: true })
       .waitFor();

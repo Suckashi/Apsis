@@ -4,6 +4,14 @@
 
 Apsis is a local Bot workspace built with TypeScript and Node.js. Bots run with **Deep Agents** and an API or Ollama model. Each Bot has its own role, model selection, conversation, private memory, schedules, browser tab, and results. Bots can discover teammates and delegate work; Apsis handles the queue, approvals, persistence, and cross-Bot coordination.
 
+## Conversation first
+
+Select a Bot and say what you need. Messages sent while it works become additional instructions; delivery receipts distinguish received, applied, and not applied. Progress, expandable tool evidence, files and replies stay in the same conversation.
+
+The Bot menu contains new topics, chat options, schedules and memory. Model, approval and working-folder controls live in chat options. Code work uses the same conversation, with files and Git changes available on demand.
+
+Old independent coding tasks and their related records are discarded on startup without backup or conversion. Bots, settings, normal chats, schedules and physical files are retained; old task screens and APIs are retired. See [chat workflow](docs/coding-workbench.md).
+
 ## Start
 
 Requires Node.js 22.19 or newer. Shell tools use Git Bash on Windows (install Git for Windows) and system Bash on Linux. `APSIS_SHELL_PATH` can select an absolute Bash executable. Without Bash, other tools remain available.
@@ -13,7 +21,7 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:3100>. In **Settings & Tools → Model connections**, add an OpenAI, Anthropic, Ollama, or OpenAI-compatible endpoint and test its streaming and tool calls. Then create a Bot and give it a task. Settings and model connections live in `.apsis/settings.toml`; MCP servers live in `.apsis/mcp.json`. API keys stay server-side and can also reference named environment variables. Existing settings migrate automatically on startup. See [configuration files](docs/config-files-design.md) for examples, editing and backups.
+Open <http://localhost:3100>. In **Settings & Tools → Model connections**, add an OpenAI, Anthropic, Ollama, or OpenAI-compatible endpoint and test its streaming and tool calls. Then select a Bot and send a message. Settings and model connections live in `.apsis/settings.toml`; MCP servers live in `.apsis/mcp.json`. API keys stay server-side and can also reference named environment variables. Existing settings migrate automatically on startup. See [configuration files](docs/config-files-design.md) for examples, editing and backups.
 
 The Codex connection and ChatGPT sign-in execution path are retired. Existing Codex Bots keep their history and files, but require an explicit choice of a supported model before running again. Their schedules are disabled and must be re-enabled after model selection. Apsis does not automatically switch them to a billed API model, uninstall Codex, or remove its local credentials.
 
@@ -33,7 +41,7 @@ Apsis tools: workspace, memory, skills, browser, documents, MCP, schedules
 approval gate and operation journal
 ```
 
-Deep Agents is the only active runtime and handles planning, context management, and virtual scratch files within one Bot. Its native `task` and `execute` tools are disabled. Apsis owns Bot identity, cross-Bot delegation, permissions, schedules, and saved results. `delegate_task` runs in an independent work context owned by the receiving Bot and returns its result to the sender. Scheduled jobs are also isolated; manual chat keeps its context until **New task** is selected.
+Deep Agents is the only active runtime and handles planning, context management, and virtual scratch files within one Bot. Its native `task` and `execute` tools are disabled. Apsis owns Bot identity, cross-Bot delegation, permissions, schedules, and saved results. `delegate_task` runs in an independent work context owned by the receiving Bot and returns its result to the sender. Scheduled jobs are also isolated; manual chat keeps its context until **Start a new topic** is selected.
 
 The Deep Agents virtual filesystem is conversation scratch space. Real files use `workspace_*` tools in `.apsis/workspace/`. Tool approval follows Kimi-style deterministic rules, with no LLM reviewer. The default `yolo` mode runs ordinary Shell, browser and MCP operations automatically; earlier danger/sensitive-path/permission policies can ask. `manual` and `auto` are also available. Shell runs on the host, and neither the workspace nor a path rule is an operating-system sandbox.
 

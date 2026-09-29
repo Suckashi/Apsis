@@ -169,23 +169,20 @@ try {
   await input.press("Enter");
   assert.equal(await input.inputValue(), "保留我的草稿\n");
   assert.equal(runs, 0, "phone Enter adds newline instead of sending");
-  await page.getByRole("button", { name: "工作選項", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "工作選項", exact: true });
-  await sheet.getByLabel("工作位置").selectOption(project.id);
-  await expect(sheet.getByLabel("起始分支").locator("option")).toHaveCount(1);
-  const branch = await sheet.getByLabel("起始分支").inputValue();
-  await sheet.getByLabel("模式").selectOption("plan");
+  await page.locator(".bot-actions-menu > summary").click();
+  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "聊天選項", exact: true });
+  await expect(
+    sheet.getByRole("button", { name: "工作資料夾", exact: true }),
+  ).toBeVisible();
+  await expect(sheet.getByLabel("模式", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: join(out, "options.png") });
   await sheet.getByRole("button", { name: "完成", exact: true }).click();
   assert.equal(await input.inputValue(), "保留我的草稿\n");
-  await page.getByRole("button", { name: "工作選項", exact: true }).click();
-  await expect(sheet.getByLabel("工作位置")).toHaveValue(project.id);
-  await expect(sheet.getByLabel("起始分支")).toHaveValue(branch);
-  await expect(sheet.getByLabel("模式")).toHaveValue("plan");
-  await sheet.getByLabel("模式").selectOption("work");
-  await sheet.getByRole("button", { name: "完成", exact: true }).click();
   await input.fill("");
   await layout();
+  await page.locator(".bot-actions-menu > summary").click();
+  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   const approval = page.locator(".approval-mode-control summary").first();
   await approval.click();
   const popover = page.locator(
@@ -195,6 +192,7 @@ try {
   const pop = (await popover.boundingBox())!;
   assert.ok(pop.x >= 0 && pop.x + pop.width <= 390);
   await approval.press("Escape");
+  await sheet.getByRole("button", { name: "完成", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 420 });
   await input.fill("鍵盤縮小可視範圍");
   await input.focus();
@@ -214,14 +212,18 @@ try {
     document.documentElement.setAttribute("data-theme", "dark"),
   );
   await page.screenshot({ path: join(out, "dark.png") });
-  await page.getByRole("button", { name: "工作選項", exact: true }).click();
-  await sheet.getByLabel("工作位置").selectOption("");
+  await page.locator(".bot-actions-menu > summary").click();
+  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
+  await expect(
+    sheet.getByRole("button", { name: "工作資料夾", exact: true }),
+  ).toBeVisible();
   await sheet.getByRole("button", { name: "完成", exact: true }).click();
   await input.fill("長任務");
   await page.getByRole("button", { name: "傳送", exact: true }).click();
-  await page.getByRole("button", { name: "停止任務", exact: true }).waitFor();
-  await page.getByRole("button", { name: "工作選項", exact: true }).click();
-  await sheet.getByLabel("傳送方式").selectOption("steer");
+  await page.getByRole("button", { name: "停止回覆", exact: true }).waitFor();
+  await page.locator(".bot-actions-menu > summary").click();
+  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
+  await expect(sheet.getByLabel("傳送方式")).toHaveCount(0);
   await sheet.getByRole("button", { name: "完成", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "補充指示", exact: true }),
@@ -262,7 +264,7 @@ try {
   assert.ok(runningCard.y + runningCard.height <= 420);
   release();
   await page
-    .getByRole("button", { name: "停止任務", exact: true })
+    .getByRole("button", { name: "停止回覆", exact: true })
     .waitFor({ state: "hidden" });
   assert.deepEqual(errors, []);
   await writeFile(

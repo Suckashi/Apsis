@@ -23,7 +23,7 @@
     "test:context:browser": "npm run build && node scripts/verify-context.ts",
     "test:context:model": "node scripts/test-context-model.ts",
     "test:files:browser": "npm run build && node scripts/verify-work-files.ts",
-    "test:coding:browser": "npm run build && node scripts/verify-coding-workspace.ts",
+    "test:chat:browser": "npm run build && node scripts/verify-chat.ts",
     "test:composer:browser": "npm run build && node scripts/verify-mobile-composer.ts",
     "test:workspace:browser": "npm run build && node scripts/verify-workspace-ux.ts"
   },

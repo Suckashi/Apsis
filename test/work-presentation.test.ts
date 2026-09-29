@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   approvalPresentation,
+  nativeSubagents,
   attentionSummary,
   currentWorkStatus,
   operationGroupLabel,
@@ -47,7 +48,7 @@ test("disconnect preserves the last known activity without inventing a stopped t
   assert.equal(presentation.connection, "disconnected");
   assert.equal(presentation.phase, "working");
   assert.equal(presentation.label, "正在讀取文件 app.ts");
-  assert.match(presentation.detail!, /可能仍在執行/);
+  assert.match(presentation.detail!, /Bot 可能仍在處理/);
   assert.equal(currentWorkStatus({ connected: false }).phase, "disconnected");
 });
 
@@ -180,4 +181,64 @@ test("shared status copy translates while preserving arbitrary model text", () =
     taskProgress("en", "模型自己提供的進度 read_file"),
     "模型自己提供的進度 read_file",
   );
+});
+
+test("native children use call identity and never remain running after cancellation or restart", () => {
+  const run = {
+    status: "running",
+    timeline: [
+      {
+        kind: "subagent",
+        id: "e1",
+        at: "1",
+        activity: {
+          id: "a",
+          name: "general-purpose",
+          task: "Analyze auth",
+          status: "running",
+          startedAt: "1",
+        },
+      },
+      {
+        kind: "subagent",
+        id: "e2",
+        at: "2",
+        activity: {
+          id: "b",
+          name: "general-purpose",
+          task: "Analyze tests",
+          status: "running",
+          startedAt: "2",
+        },
+      },
+      {
+        kind: "subagent",
+        id: "e3",
+        at: "3",
+        activity: {
+          id: "a",
+          name: "general-purpose",
+          task: "Analyze auth",
+          status: "completed",
+          resultSummary: "Found race",
+          startedAt: "1",
+        },
+      },
+    ],
+  } as import("../shared/types.ts").TaskRun;
+  assert.deepEqual(
+    nativeSubagents(run).map((c) => c.status),
+    ["completed", "running"],
+  );
+  run.status = "cancelled";
+  assert.deepEqual(
+    nativeSubagents(run).map((c) => c.status),
+    ["completed", "cancelled"],
+  );
+  run.status = "interrupted";
+  assert.deepEqual(
+    nativeSubagents(run).map((c) => c.status),
+    ["completed", "failed"],
+  );
+  assert.equal(nativeSubagents(run)[0].resultSummary, "Found race");
 });

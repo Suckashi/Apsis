@@ -152,6 +152,7 @@ export function Modal({
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const backdropDown = useRef(false);
   useEffect(() => {
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
@@ -190,8 +191,17 @@ export function Modal({
         event.preventDefault();
         close();
       }}
+      onPointerDown={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        backdropDown.current =
+          event.target === event.currentTarget &&
+          (event.clientX < rect.left ||
+            event.clientX > rect.right ||
+            event.clientY < rect.top ||
+            event.clientY > rect.bottom);
+      }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) {
+        if (backdropDown.current && event.target === event.currentTarget) {
           const rect = event.currentTarget.getBoundingClientRect();
           if (
             event.clientX < rect.left ||

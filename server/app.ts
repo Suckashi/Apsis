@@ -77,7 +77,7 @@ export async function createApp({
   const connections = await new Connections(dataDir).init();
   tasks.connections = connections;
   const product = await new ProductService(tasks, connections).init();
-  product.coding.worktreeRoot = worktreeRoot;
+  product.workspaces.worktreeRoot = worktreeRoot;
 
   const server = createServer(async (req, res) => {
     const styleNonce = randomUUID().replaceAll("-", "");

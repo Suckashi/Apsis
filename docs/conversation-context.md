@@ -4,12 +4,12 @@ Apsis 保留 Deep Agents 1.14.0 的執行迴圈；對話生命週期、持久化
 
 ## 使用行為
 
-- Bot 聊天持續使用 active context。按「新任務」建立空白工作狀態，session ID、歷史、Bot 設定、長期記憶與檔案保留。
-- 有執行中、排隊或待核准的工作時，建立新任務回傳 HTTP 409。
+- Bot 聊天持續使用 active context。按「開啟新話題」建立空白工作狀態，session ID、歷史、Bot 設定、長期記憶與檔案保留。
+- 有執行中、排隊或待核准的工作時，建立新話題回傳 HTTP 409。
 - 「重新交辦」會保留原 context 與繼承權限，仍須由使用者送出；不自動重播操作。
 - Job 入隊即固定 context；每次排程（含手動測試）與派工有自己的 context，不修改聊天的 active context。
-- 舊任務只能瀏覽、搜尋、引用；引用由後端按訊息 ID 查詢，只有被引用的內容加入新任務。
-- 聊天初始讀取最新 50 則，向上分頁。詳情的記憶區提供歷史搜尋、舊任務、用量、壓縮紀錄與記憶編輯。
+- 先前話題只能瀏覽、搜尋、引用；引用由後端按訊息 ID 查詢，只有被引用的內容加入新話題。
+- 聊天初始讀取最新 50 則，向上分頁。詳情的記憶區提供歷史搜尋、先前話題、用量、壓縮紀錄與記憶編輯。
 
 ## 資料位置
 
@@ -74,7 +74,7 @@ Scratch 與真實 workspace 分開。Deep Agents 的虛擬檔案工具只操作 
 
 `npm test` 包含可重現 HTTP 模型替身，實際呼叫 Deep Agents middleware。新增測試涵蓋三次壓縮、重啟、steering、todo 保留、摘要串流隔離、overflow 一次重試、摘要失敗、超大輸入、工具卸載與取消、8K/32K/128K 預算、未知模型、縮小模型、10,000 則歷史、遷移重試、中文／英文搜尋、scope、記憶修訂／容量及工作 context 隔離。
 
-瀏覽器流程：`npm run test:bots:browser`、`npm run test:settings:browser`、`npm run test:context:browser`。最後一項專門驗證最新 50 則、向上分頁、新任務、核心記憶與鎖定、中文搜尋、跨 context 引用及行動版。
+瀏覽器流程：`npm run test:bots:browser`、`npm run test:settings:browser`、`npm run test:context:browser`。最後一項專門驗證最新 50 則、向上分頁、新話題、核心記憶與鎖定、中文搜尋、跨 context 引用及行動版。
 
 真實模型抽驗使用手動設定容量，未填寫時使用 256K 預設值；模型替身通過不代表已完成真實供應商驗證。
 

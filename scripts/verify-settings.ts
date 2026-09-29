@@ -134,6 +134,17 @@ async function openSettings(
     .getByRole("button", { name: tab })
     .click();
 }
+async function openChatOptions(p: Page) {
+  const options = p.getByRole("dialog", {
+    name: /聊天選項|Chat options/,
+    exact: true,
+  });
+  if (await options.isVisible()) return;
+  await p.locator(".bot-actions-menu > summary").click();
+  await p
+    .getByRole("button", { name: /聊天選項|Chat options/, exact: true })
+    .click();
+}
 async function check(name: string, run: () => Promise<void>) {
   try {
     await run();
@@ -188,6 +199,7 @@ try {
         bot.id,
       );
       await page.reload();
+      await openChatOptions(page);
       await page
         .locator(".approval-mode-control > .composer-popover > summary")
         .click();
@@ -203,6 +215,7 @@ try {
       await protect(second);
       try {
         await second.goto(url);
+        await openChatOptions(second);
         await second
           .locator(".approval-mode-control > .composer-popover > summary")
           .click();
@@ -232,6 +245,7 @@ try {
           "switching modes must not invoke the model",
         );
         await page.reload();
+        await openChatOptions(page);
         await page
           .locator(".approval-mode-control > .composer-popover > summary")
           .click();
@@ -299,6 +313,7 @@ try {
     "pending mode save disables choices and failed save retains the effective mode",
     async () => {
       await page.reload();
+      await openChatOptions(page);
       const trigger = page.locator(
         ".approval-mode-control > .composer-popover > summary",
       );
@@ -1047,6 +1062,7 @@ try {
               });
             }
             await p.keyboard.press("Escape");
+            await openChatOptions(p);
             const trigger = p.locator(
               ".approval-mode-control > .composer-popover > summary",
             );

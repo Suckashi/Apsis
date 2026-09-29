@@ -1,15 +1,8 @@
 import { ProjectSettings } from "./project-settings.tsx";
-import {
-  useTaskNotifications,
-  TaskNotificationSettings,
-} from "./task-notifications.tsx";
-import {
-  CodingWorkspace,
-  TaskCard,
-  BotTaskList,
-  TaskTags,
-  ProjectControls,
-} from "./coding-workspace.tsx";
+import { api } from "./chat-api.ts";
+import { ChatRoster } from "./chat-roster.tsx";
+import { ProjectControls } from "./project-controls.tsx";
+import { ConversationChanges } from "./conversation-changes.tsx";
 import { FilePanel, WorkFolder } from "./file-panel.tsx";
 import { ComposerPopover } from "./composer-popover.tsx";
 import { AvatarCollectionProvider } from "./avatar-collection.tsx";
@@ -17,12 +10,6 @@ import { ContextPanel } from "./context-panel.tsx";
 import { ApprovalModeControl } from "./approval-mode-control.tsx";
 import { WorkApproval } from "./work-approval.tsx";
 import { currentWorkStatus } from "../shared/work-presentation.ts";
-import {
-  restoreTaskNavigation,
-  TASK_NAVIGATION_KEY,
-} from "./task-navigation.ts";
-import type { CodingTask } from "../shared/coding.ts";
-import { compactTaskTitle } from "./task-display.ts";
 import { ModelPicker, connectionModelOptions } from "./model-picker.tsx";
 import {
   ComposerFrame,
@@ -82,29 +69,6 @@ import type {
 
 type Snapshot = ReturnType<ProductService["snapshot"]>;
 type Detail = ReturnType<ProductService["detail"]>;
-async function api<T>(
-  path: string,
-  method = "GET",
-  body?: unknown,
-): Promise<T> {
-  const response = await fetch(
-    path.startsWith("/api/") ? path : "/api/v2" + path,
-    {
-      method,
-      headers: { "Content-Type": "application/json", "X-Apsis-Client": "1" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    },
-  );
-  const data = await response.json();
-  if (!response.ok)
-    throw Object.assign(
-      new Error(data.error ? uiError(data.error) : uiText("操作失敗")),
-      {
-        status: response.status,
-      },
-    );
-  return data;
-}
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
     moon: <path d="M20 14a8.5 8.5 0 0 1-10-10A8.5 8.5 0 1 0 20 14Z" />,
@@ -189,36 +153,6 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
     </svg>
   );
 }
-const time = (at: string) => {
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return "";
-  const now = new Date();
-  const day = (value: Date) =>
-    Date.UTC(value.getFullYear(), value.getMonth(), value.getDate());
-  const daysAgo = Math.round((day(now) - day(date)) / 86_400_000);
-  if (daysAgo === 0)
-    return date.toLocaleTimeString(getSettingsLocale(), {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  if (daysAgo === 1) return uiText("昨天");
-  if (daysAgo > 1 && daysAgo < 7)
-    return date.toLocaleDateString(getSettingsLocale(), { weekday: "short" });
-  return date.toLocaleDateString(getSettingsLocale(), {
-    year: date.getFullYear() === now.getFullYear() ? undefined : "numeric",
-    month: "numeric",
-    day: "numeric",
-  });
-};
-const chatPreview = (text: string) =>
-  text
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
 function Markdown({ text }: { text: string }) {
   return (
     <div
@@ -310,64 +244,8 @@ function App() {
   }, [smallScreen]);
   const sidebarRef = useRef<HTMLElement>(null);
   const detailsRef = useRef<HTMLElement>(null);
-  const [activeTask, setActiveTask] = useState<string>();
-  const [taskTabs, setTaskTabs] = useState<string[]>([]);
-  const [navigationRestored, setNavigationRestored] = useState(false);
-  const [taskPanel, setTaskPanel] = useState<string>();
-  const [projectId, setProjectId] = useState("");
-  const [startBranch, setStartBranch] = useState("");
-  const [taskMode, setTaskMode] = useState("work");
   const [composeOptions, setComposeOptions] = useState(false);
-  const [dirtyChoice, setDirtyChoice] = useState<string>();
-  const [needsDirtyChoice, setNeedsDirtyChoice] = useState(false);
-  const [projectForm, setProjectForm] = useState(false);
-  const [projectName, setProjectName] = useState("");
-  const [projectPath, setProjectPath] = useState("");
-  const [projectView, setProjectView] = useState<string>();
-  const [projectSettings, setProjectSettings] = useState<string>();
-  const [expandedTaskLists, setExpandedTaskLists] = useState<
-    Record<string, boolean>
-  >({});
-  const openTask = (id: string, panel?: string) => {
-    setTaskTabs((old) => (old.includes(id) ? old : [...old, id]));
-    setActiveTask(id);
-    setProjectView(undefined);
-    setTaskPanel(panel);
-    setPanel(false);
-    setMobileList(false);
-  };
-  useEffect(() => {
-    if (!state || navigationRestored) return;
-    let saved: string | null = null;
-    try {
-      saved = sessionStorage.getItem(TASK_NAVIGATION_KEY);
-    } catch {
-      /* Storage may be disabled. */
-    }
-    const restored = restoreTaskNavigation(saved, state.codingTasks);
-    setTaskTabs(restored.tabs);
-    if (restored.activeTask) {
-      setActiveTask(restored.activeTask);
-      setPanel(false);
-      const owner = state.codingTasks.find(
-        (task) => task.id === restored.activeTask,
-      )?.botId;
-      if (owner) setExpandedTaskLists((old) => ({ ...old, [owner]: true }));
-    }
-    setNavigationRestored(true);
-  }, [state, navigationRestored, setPanel]);
-  useEffect(() => {
-    if (!navigationRestored) return;
-    try {
-      sessionStorage.setItem(
-        TASK_NAVIGATION_KEY,
-        JSON.stringify({ tabs: taskTabs, activeTask }),
-      );
-    } catch {
-      /* Navigation remains usable without persistent storage. */
-    }
-  }, [navigationRestored, activeTask, taskTabs]);
-  useTaskNotifications(state?.codingTasks, openTask);
+  const [projectSettings, setProjectSettings] = useState(false);
   const [creating, setCreating] = useState(false);
   const [text, setText] = useState("");
   const [filesTab, setFilesTab] = useState(true);
@@ -377,7 +255,6 @@ function App() {
   >([]);
   const [caret, setCaret] = useState(0);
   const [dismissedSuggestion, setDismissedSuggestion] = useState(false);
-  const [sendMode, setSendMode] = useState("steer");
   const draftSelection = useRef({ start: 0, end: 0 });
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -404,8 +281,7 @@ function App() {
   const [eventsConnected, setEventsConnected] = useState(false);
   const [connectionLost, setConnectionLost] = useState(false);
   const listDrawer = smallScreen && mobileList;
-  const detailsVisible =
-    panel && !activeTask && !projectView && !!selected && !!detail;
+  const detailsVisible = panel && !!selected && !!detail;
   const detailsDrawer = overlayDetails && detailsVisible && !listDrawer;
   useDrawer(sidebarRef, listDrawer, () => setMobileList(false));
   useDrawer(detailsRef, detailsDrawer, () => setPanel(false));
@@ -530,7 +406,6 @@ function App() {
     setDetail(undefined);
     setText(sessionStorage.getItem(`apsis.bot-draft.${selected}`) || "");
     setFileReferences([]);
-    setSendMode("steer");
     setDismissedSuggestion(false);
     draftSelection.current = { start: 0, end: 0 };
     setAttachments([]);
@@ -539,6 +414,7 @@ function App() {
     setProfile(false);
     setBotSheet(undefined);
     setComposeOptions(false);
+    setProjectSettings(false);
     setAwayFromBottom(false);
     pinnedBottom.current = true;
     if (selected) {
@@ -566,7 +442,7 @@ function App() {
       el.scrollTop = el.scrollHeight;
     }
     setAwayFromBottom(!pinnedBottom.current);
-  }, [detail?.bot.id, selected, activeTask, projectView]);
+  }, [detail?.bot.id, selected]);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && detail?.bot.id === selected && pinnedBottom.current)
@@ -575,16 +451,13 @@ function App() {
   const select = (id: string) => {
     if (selected) sessionStorage.setItem(`apsis.bot-draft.${selected}`, text);
     setSelected(id);
-    setActiveTask(undefined);
-    setProjectView(undefined);
     setMobileList(false);
   };
   const newBot = () => {
     setMobileList(false);
     setCreating(true);
   };
-  const send = async (steer = false) => {
-    if (steer && (retryOf || !text.trim())) return;
+  const send = async () => {
     if (
       !selected ||
       !detail ||
@@ -601,104 +474,53 @@ function App() {
     ]
       .filter(Boolean)
       .join("\n");
+    const scope = JSON.stringify([
+      detail.session.context?.id,
+      replyTo,
+      retryOf,
+      fileReferences,
+      attachments.map((a) => a.id),
+    ]);
     if (
       pendingRequest.current?.prompt !== prompt ||
       pendingRequest.current?.botId !== selected ||
-      pendingRequest.current?.scope !==
-        JSON.stringify([
-          projectId,
-          startBranch,
-          taskMode,
-          attachments.map((a) => a.id),
-        ])
+      pendingRequest.current?.scope !== scope
     )
       pendingRequest.current = {
         prompt,
         botId: selected,
-        scope: JSON.stringify([
-          projectId,
-          startBranch,
-          taskMode,
-          attachments.map((a) => a.id),
-        ]),
+        scope,
         id: crypto.randomUUID(),
       };
     const botId = selected;
-    const queued = !!detail?.session.running && !steer;
     setBusy(true);
     setError("");
-    setActionFeedback({
-      botId,
-      label: steer ? "正在送出補充指示…" : "正在送出訊息…",
-      pending: true,
-    });
+    setActionFeedback({ botId, label: "正在送出訊息…", pending: true });
     try {
-      if (!steer && !retryOf && (projectId || taskMode === "plan")) {
-        const created = await api<CodingTask>("/coding-tasks", "POST", {
-          botId: selected,
-          prompt,
-          requestId: pendingRequest.current.id,
-          projectId,
-          branch: startBranch,
-          mode: taskMode,
-          dirty: dirtyChoice,
-          artifactIds: attachments.map((a) => a.id),
-        });
-        setExpandedTaskLists((old) => ({ ...old, [botId]: true }));
-        setNeedsDirtyChoice(false);
-        setDirtyChoice(undefined);
-        if (selectedRef.current === botId) openTask(created.id);
-      } else {
-        const receipt = await api<{
-          delivery?: { state: "pending" | "applied" | "not-applied" };
-        }>(`/bots/${selected}/${steer ? "steer" : "messages"}`, "POST", {
-          prompt,
-          requestId: pendingRequest.current.id,
-          replyTo,
-          retryOf,
-          fileReferences,
-          workContextId: detail?.session.context?.id,
-        });
-        if (steer && receipt.delivery?.state === "not-applied") {
-          pendingRequest.current = undefined;
-          await refresh();
-          throw new Error(uiText("補充未採用，請重新送出。"));
-        }
-      }
+      await api("/bots/" + botId + "/messages", "POST", {
+        prompt,
+        requestId: pendingRequest.current.id,
+        replyTo,
+        retryOf,
+        fileReferences,
+        artifactIds: attachments.map((a) => a.id),
+        workContextId: detail.session.context?.id,
+      });
       pendingRequest.current = undefined;
       if (selectedRef.current === botId) {
         setText("");
-        sessionStorage.removeItem(`apsis.bot-draft.${botId}`);
-        setSendMode("steer");
-        draftSelection.current = { start: 0, end: 0 };
+        sessionStorage.removeItem("apsis.bot-draft." + botId);
         setAttachments([]);
         setFileReferences([]);
         setReplyTo(undefined);
         setRetryOf(undefined);
         pinnedBottom.current = true;
       }
-      setActionFeedback({
-        botId,
-        label: steer
-          ? "補充指示已送達"
-          : queued
-            ? "已排入下一個任務"
-            : projectId || taskMode === "plan"
-              ? "任務已建立"
-              : "訊息已送達",
-        pending: false,
-      });
       await refresh();
-    } catch (e) {
-      setActionFeedback(undefined);
-      if (steer && (e as { status?: number }).status === 409) {
-        pendingRequest.current = undefined;
-        await refresh();
-      }
-      if ((e as Error).message.includes("未提交修改"))
-        setNeedsDirtyChoice(true);
-      setError((e as Error).message);
+    } catch (error) {
+      setError((error as Error).message);
     } finally {
+      setActionFeedback(undefined);
       setBusy(false);
       input.current?.focus();
     }
@@ -818,7 +640,7 @@ function App() {
   const repairModel = () =>
     modelOptions.length ? setProfile(true) : setSettings(true);
   const queuedCount =
-    detail?.jobs.filter((j) => !j.taskId && j.status === "queued").length || 0;
+    detail?.jobs.filter((j) => j.status === "queued").length || 0;
   const stop = async () => {
     if (!selected || stoppingBot) return;
     setStoppingBot(selected);
@@ -829,7 +651,7 @@ function App() {
   const toggleRun = (id: string) =>
     setExpandedRuns((old) => ({
       ...old,
-      [id]: !(old[id] ?? id === activeSummary?.id),
+      [id]: !old[id],
     }));
   const revealRun = (id: string) => {
     setExpandedRuns((old) => ({ ...old, [id]: true }));
@@ -837,7 +659,7 @@ function App() {
       const element = document.getElementById(`task-${id}`);
       element?.scrollIntoView({ block: "nearest" });
       element
-        ?.querySelector<HTMLButtonElement>(".task-summary")
+        ?.querySelector<HTMLElement>(".execution-tools > summary")
         ?.focus({ preventScroll: true });
     });
   };
@@ -950,148 +772,13 @@ function App() {
             {hidden ? uiText("返回") : uiText("查看隱藏")}
           </button>
         </div>
-        <nav className="roster" aria-label={uiText("Bot 名單")}>
-          {bots.map((b) => {
-            const preview =
-              b.status === "waiting"
-                ? uiText("等待你的核准")
-                : b.status === "working"
-                  ? uiText("正在處理任務…")
-                  : b.status === "error"
-                    ? `${uiText("任務失敗")} · ${chatPreview(b.lastMessage)}`
-                    : chatPreview(b.lastMessage);
-            return (
-              <div className="bot-entry" key={b.id}>
-                <button
-                  aria-current={selected === b.id ? "page" : undefined}
-                  title={b.name}
-                  className={`bot-row ${selected === b.id ? "selected" : ""} ${b.unread ? "has-unread" : ""} status-${b.status}`}
-                  onClick={() => select(b.id)}
-                >
-                  <span className={`avatar tone-${b.id.charCodeAt(0) % 4}`}>
-                    <BrandMark size={24} avatar={b.avatar} />
-                    <i className={b.status} />
-                  </span>
-                  <span className="bot-summary">
-                    <span className="bot-line">
-                      <span className="bot-name">
-                        <strong>{b.name}</strong>
-                        {b.pinned && (
-                          <span className="pin" title={uiText("已釘選")}>
-                            <Icon name="pin" size={13} />
-                            <span className="visually-hidden">
-                              {uiText("已釘選")}
-                            </span>
-                          </span>
-                        )}
-                      </span>
-                      <time dateTime={b.updatedAt}>{time(b.updatedAt)}</time>
-                    </span>
-                    <TaskTags
-                      chat={{
-                        approvalCount: b.status === "waiting" ? 1 : 0,
-                        failed: b.status === "error",
-                        running: b.chatRunning,
-                        unread: !!b.unread,
-                      }}
-                      tasks={
-                        state?.codingTasks.filter((t) => t.botId === b.id) || []
-                      }
-                    />
-                    <span className="bot-preview-line">
-                      <span className="preview" title={preview}>
-                        {preview}
-                      </span>
-                    </span>
-                  </span>
-                </button>
-                <BotTaskList
-                  tasks={
-                    state?.codingTasks.filter((t) => t.botId === b.id) || []
-                  }
-                  botName={b.name}
-                  activeTask={activeTask}
-                  expanded={!!expandedTaskLists[b.id]}
-                  toggle={() =>
-                    setExpandedTaskLists((old) => ({
-                      ...old,
-                      [b.id]: !old[b.id],
-                    }))
-                  }
-                  open={(id) => {
-                    if (selected !== b.id) select(b.id);
-                    openTask(id);
-                  }}
-                />
-              </div>
-            );
-          })}
-          {!bots.length && (
-            <p className="roster-empty">
-              {query
-                ? uiText("找不到符合的 Bot")
-                : hidden
-                  ? uiText("沒有隱藏的 Bot")
-                  : uiText("為你的工作新增一位幫手。")}
-            </p>
-          )}
-        </nav>
-        <section className="cw-project-nav">
-          <header>
-            <strong>{uiText("專案")}</strong>
-            <button
-              aria-label={uiText("加入專案")}
-              onClick={() => setProjectForm(!projectForm)}
-            >
-              <Icon name="plus" size={16} />
-            </button>
-          </header>
-          {state?.projects.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => {
-                setProjectView(p.id);
-                setActiveTask(undefined);
-                setMobileList(false);
-              }}
-            >
-              ▱ {p.name}
-            </button>
-          ))}
-          {projectForm && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void perform(async () => {
-                  const p = await api<{ id: string }>("/projects", "POST", {
-                    name: projectName,
-                    path: projectPath,
-                  });
-                  setProjectId(p.id);
-                  setProjectForm(false);
-                });
-              }}
-            >
-              <label>
-                {uiText("名稱")}
-                <input
-                  required
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                />
-              </label>
-              <label>
-                {uiText("本機 Repo 路徑")}
-                <input
-                  required
-                  value={projectPath}
-                  onChange={(e) => setProjectPath(e.target.value)}
-                />
-              </label>
-              <button className="primary">{uiText("加入")}</button>
-            </form>
-          )}
-        </section>
+        <ChatRoster
+          bots={bots}
+          selected={selected}
+          select={select}
+          hidden={hidden}
+          query={query}
+        />
         <div className="sidebar-bottom">
           <div className="sidebar-actions">
             <button
@@ -1170,149 +857,7 @@ function App() {
             </button>
           </div>
         )}
-        {!!taskTabs.length && (
-          <nav className="cw-tabs" aria-label={uiText("已開啟任務")}>
-            <button
-              onClick={() => {
-                setActiveTask(undefined);
-                setProjectView(undefined);
-              }}
-            >
-              {uiText("Bot 對話")}
-            </button>
-            {taskTabs.map((id) => {
-              const task = state?.codingTasks.find((t) => t.id === id);
-              return (
-                task && (
-                  <span key={id} className={activeTask === id ? "active" : ""}>
-                    <button
-                      onClick={() => {
-                        setActiveTask(id);
-                        setTaskPanel(undefined);
-                        setPanel(false);
-                      }}
-                    >
-                      {compactTaskTitle(task.title)}
-                    </button>
-                    <button
-                      aria-label={uiText("關閉 {0} 頁籤", [task.title])}
-                      onClick={() => {
-                        setTaskTabs((old) => old.filter((t) => t !== id));
-                        if (activeTask === id) setActiveTask(undefined);
-                      }}
-                    >
-                      <Icon name="close" size={14} />
-                    </button>
-                  </span>
-                )
-              );
-            })}
-          </nav>
-        )}
-        {activeTask ? (
-          <CodingWorkspace
-            key={activeTask}
-            id={activeTask}
-            initialPanel={taskPanel}
-            connected={eventsConnected}
-            modelIssue={
-              state?.codingTasks.find((t) => t.id === activeTask)?.botId ===
-              detail?.bot.id
-                ? detail?.contextSetupError
-                : undefined
-            }
-            onModelSettings={() => setProfile(true)}
-            availableBots={availableBots}
-            botNames={Object.fromEntries(
-              (state?.bots || []).map((b) => [b.id, b.name]),
-            )}
-            selectBot={select}
-            settings={approvalSettings}
-            onSettingsSaved={acceptApprovalSettings}
-            onSettingsReload={refresh}
-            api={api}
-            refresh={refresh}
-            skills={state?.skills || []}
-            name={
-              state?.bots.find(
-                (b) =>
-                  b.id ===
-                  state.codingTasks.find((t) => t.id === activeTask)?.botId,
-              )?.name || "Bot"
-            }
-            avatar={
-              state?.bots.find(
-                (b) =>
-                  b.id ===
-                  state.codingTasks.find((t) => t.id === activeTask)?.botId,
-              )?.avatar
-            }
-            back={() => setActiveTask(undefined)}
-          />
-        ) : projectView ? (
-          <section className="cw-project-page">
-            <button onClick={() => setProjectView(undefined)}>
-              ← Bot 對話
-            </button>
-            <h1>{state?.projects.find((p) => p.id === projectView)?.name}</h1>
-            <button onClick={() => setProjectSettings(projectView)}>
-              專案設定
-            </button>
-            <p>{uiText("這個專案的任務與變更")}</p>
-            {[
-              {
-                label: uiText("需要你處理"),
-                phases: ["plan-ready", "review", "blocked", "stopped"],
-              },
-              {
-                label: uiText("進行中"),
-                phases: ["queued", "working", "planning"],
-              },
-              { label: uiText("已完成"), phases: ["done"] },
-            ].map((group) => {
-              const tasks =
-                state?.codingTasks.filter(
-                  (task) =>
-                    task.projectId === projectView &&
-                    group.phases.includes(task.phase),
-                ) || [];
-              return (
-                tasks.length > 0 && (
-                  <section className="project-task-group" key={group.label}>
-                    <h2>
-                      {group.label} <span>{tasks.length}</span>
-                    </h2>
-                    {tasks.map((task) => (
-                      <TaskCard
-                        key={task.id}
-                        task={task}
-                        open={openTask}
-                        api={api}
-                        onRead={() => void refresh()}
-                      />
-                    ))}
-                  </section>
-                )
-              );
-            })}
-            {!state?.codingTasks.some(
-              (task) => task.projectId === projectView,
-            ) && (
-              <p className="empty-section">
-                {uiText("還沒有任務，交辦第一項需求開始工作。")}
-              </p>
-            )}
-            <button
-              onClick={() => {
-                setProjectId(projectView);
-                setProjectView(undefined);
-                input.current?.focus();
-              }}
-            >
-              交辦新需求
-            </button>
-          </section>
-        ) : !selected ? (
+        {!selected ? (
           <div className="welcome">
             <div className="welcome-symbol">
               <BrandMark size={56} />
@@ -1400,18 +945,6 @@ function App() {
                   </small>
                 </span>
               </button>
-              {!smallScreen && detail?.session.context && selected && (
-                <WorkFolder
-                  key={`${selected}:${detail.session.context.id}`}
-                  botId={selected}
-                  context={detail.session.context}
-                  api={api}
-                  refresh={async () => {
-                    setFileReferences([]);
-                    await refresh();
-                  }}
-                />
-              )}
               <div className="header-actions">
                 <ComposerPopover
                   label={
@@ -1421,18 +954,36 @@ function App() {
                   }
                   className="bot-actions-menu"
                 >
-                  {smallScreen && detail?.session.context && selected && (
-                    <WorkFolder
-                      key={`${selected}:${detail.session.context.id}`}
-                      botId={selected}
-                      context={detail.session.context}
-                      api={api}
-                      refresh={async () => {
+                  <button
+                    disabled={
+                      !detail ||
+                      busy ||
+                      running ||
+                      queuedCount > 0 ||
+                      pending.length > 0
+                    }
+                    onClick={() =>
+                      void perform(async () => {
+                        await api(
+                          "/bots/" + selected + "/contexts",
+                          "POST",
+                          {},
+                        );
+                        setAttachments([]);
                         setFileReferences([]);
+                        setReplyTo(undefined);
+                        setRetryOf(undefined);
+                        pendingRequest.current = undefined;
                         await refresh();
-                      }}
-                    />
-                  )}
+                        input.current?.focus();
+                      })
+                    }
+                  >
+                    {uiText("開啟新話題")}
+                  </button>
+                  <button onClick={() => setComposeOptions(true)}>
+                    {uiText("聊天選項")}
+                  </button>
                   <button onClick={() => setBotSheet("routines")}>
                     {uiText("排程")}
                   </button>
@@ -1555,7 +1106,7 @@ function App() {
                       {uiText("更早的訊息")}
                     </button>
                   )}
-                  {!detail.session.messages.length && (
+                  {!detail.session.messages.length && !running && (
                     <div className="bot-intro">
                       <span className="avatar large">
                         <BrandMark size={32} avatar={bot?.avatar} />
@@ -1566,7 +1117,7 @@ function App() {
                         {[
                           uiText("幫我研究一個主題，整理來源與結論"),
                           uiText("讀取我的文件，整理成一份報告"),
-                          uiText("協助我完成一個程式開發任務"),
+                          uiText("幫我修改程式並驗證結果"),
                         ].map((p) => (
                           <button
                             key={p}
@@ -1591,130 +1142,150 @@ function App() {
                       )}
                     </div>
                   )}
-                  {detail.session.messages.map((m) => (
-                    <article
-                      id={`message-${m.id}`}
-                      key={m.id}
-                      className={`message ${m.role} ${m.status === "error" ? "failed" : ""}`}
-                    >
-                      {m.role === "assistant" &&
-                        m.runId &&
-                        summaries.has(m.runId) && (
-                          <RunHistory
-                            botId={detail.bot.id}
-                            summary={summaries.get(m.runId)!}
-                            open={!!expandedRuns[m.runId]}
-                            toggle={() => toggleRun(m.runId!)}
-                            select={select}
-                            available={availableBots}
-                          />
+                  {detail.session.messages.map((m, index) => (
+                    <React.Fragment key={m.id}>
+                      {index > 0 &&
+                        m.workContextId !==
+                          detail.session.messages[index - 1].workContextId && (
+                          <div className="topic-divider" role="separator">
+                            {uiText("新話題")}
+                          </div>
                         )}
-                      <div className="message-body">
-                        {m.role === "user" &&
-                          detail.jobs.find((j) => j.runId === m.runId)
-                            ?.replyTo && (
-                            <a
-                              className="quoted-message"
-                              href={`#message-${detail.jobs.find((j) => j.runId === m.runId)?.replyTo}`}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                document
-                                  .getElementById(
-                                    `message-${detail.jobs.find((j) => j.runId === m.runId)?.replyTo}`,
-                                  )
-                                  ?.scrollIntoView({
-                                    behavior: "smooth",
-                                    block: "center",
-                                  });
+                      <article
+                        id={`message-${m.id}`}
+                        className={`message ${m.role} ${m.status === "error" ? "failed" : ""}`}
+                      >
+                        <div className="message-body">
+                          {m.role === "user" &&
+                            detail.jobs.find((j) => j.runId === m.runId)
+                              ?.replyTo && (
+                              <a
+                                className="quoted-message"
+                                href={`#message-${detail.jobs.find((j) => j.runId === m.runId)?.replyTo}`}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  document
+                                    .getElementById(
+                                      `message-${detail.jobs.find((j) => j.runId === m.runId)?.replyTo}`,
+                                    )
+                                    ?.scrollIntoView({
+                                      behavior: "smooth",
+                                      block: "center",
+                                    });
+                                }}
+                              >
+                                {uiText("回覆：")}
+                                {(
+                                  detail.quotes[
+                                    detail.jobs.find((j) => j.runId === m.runId)
+                                      ?.replyTo || ""
+                                  ] ||
+                                  detail.session.messages.find(
+                                    (original) =>
+                                      original.id ===
+                                      detail.jobs.find(
+                                        (j) => j.runId === m.runId,
+                                      )?.replyTo,
+                                  )?.content
+                                )?.slice(0, 100)}
+                              </a>
+                            )}
+                          {m.status === "error" &&
+                          m.content.trim() === "Connection error." ? (
+                            <div className="message-error">
+                              <strong>{uiText("無法連線至模型供應商")}</strong>
+                              <p>
+                                {uiText(
+                                  "請檢查網路及模型連線設定，再重新送出訊息。",
+                                )}
+                              </p>
+                              <details>
+                                <summary>{uiText("錯誤詳情")}</summary>
+                                <code>{m.content}</code>
+                              </details>
+                            </div>
+                          ) : (
+                            <Markdown text={m.content} />
+                          )}
+                        </div>
+                        {m.role === "assistant" &&
+                          m.runId &&
+                          summaries.has(m.runId) && (
+                            <RunHistory
+                              botId={detail.bot.id}
+                              summary={summaries.get(m.runId)!}
+                              open={!!expandedRuns[m.runId]}
+                              toggle={() => toggleRun(m.runId!)}
+                              select={select}
+                              available={availableBots}
+                            />
+                          )}
+                        {m.role === "assistant" &&
+                          m.runId &&
+                          detail.artifacts
+                            .filter(
+                              (a) => a.kind === "result" && a.runId === m.runId,
+                            )
+                            .map((a) => (
+                              <ArtifactCard
+                                key={a.id}
+                                artifact={a}
+                                reference={() => referenceArtifact(a)}
+                              />
+                            ))}
+                        <div className="message-footer">
+                          {m.delivery?.kind === "steer" && (
+                            <span
+                              className="message-delivery"
+                              data-state={m.delivery.state}
+                              title={
+                                m.delivery.state === "applied"
+                                  ? uiText(
+                                      "補充已帶入下一個模型回合，不代表工作已完成。",
+                                    )
+                                  : m.delivery.state === "pending"
+                                    ? uiText("等待目前模型回合結束後採用。")
+                                    : uiText(
+                                        "這則補充沒有帶入模型回合，請重新送出。",
+                                      )
+                              }
+                            >
+                              {m.delivery.state === "applied"
+                                ? uiText("已採用")
+                                : m.delivery.state === "pending"
+                                  ? uiText("已收到")
+                                  : uiText("未採用")}
+                            </span>
+                          )}
+                          <div className="message-actions">
+                            {m.delivery?.state === "not-applied" && (
+                              <button
+                                onClick={() => {
+                                  pendingRequest.current = undefined;
+                                  setText(m.content);
+                                  input.current?.focus();
+                                }}
+                              >
+                                {uiText("重新傳送")}
+                              </button>
+                            )}
+                            {m.status === "error" &&
+                              !(m.runId && summaries.has(m.runId)) && (
+                                <span>{uiText("執行失敗")}</span>
+                              )}
+                            <button
+                              onClick={() => {
+                                setReplyTo(m.id);
+                                input.current?.focus();
                               }}
                             >
-                              {uiText("回覆：")}
-                              {(
-                                detail.quotes[
-                                  detail.jobs.find((j) => j.runId === m.runId)
-                                    ?.replyTo || ""
-                                ] ||
-                                detail.session.messages.find(
-                                  (original) =>
-                                    original.id ===
-                                    detail.jobs.find((j) => j.runId === m.runId)
-                                      ?.replyTo,
-                                )?.content
-                              )?.slice(0, 100)}
-                            </a>
-                          )}
-                        {m.status === "error" &&
-                        m.content.trim() === "Connection error." ? (
-                          <div className="message-error">
-                            <strong>{uiText("無法連線至模型供應商")}</strong>
-                            <p>
-                              {uiText(
-                                "請檢查網路及模型連線設定，再重新送出訊息。",
-                              )}
-                            </p>
-                            <details>
-                              <summary>{uiText("錯誤詳情")}</summary>
-                              <code>{m.content}</code>
-                            </details>
+                              {uiText("回覆")}
+                            </button>
+                            <CopyButton text={m.content} />
                           </div>
-                        ) : (
-                          <Markdown text={m.content} />
-                        )}
-                      </div>
-                      {m.role === "assistant" &&
-                        m.runId &&
-                        detail.artifacts
-                          .filter(
-                            (a) => a.kind === "result" && a.runId === m.runId,
-                          )
-                          .map((a) => (
-                            <ArtifactCard
-                              key={a.id}
-                              artifact={a}
-                              reference={() => referenceArtifact(a)}
-                            />
-                          ))}
-                      <div className="message-footer">
-                        {m.delivery?.kind === "steer" && (
-                          <span
-                            className="message-delivery"
-                            data-state={m.delivery.state}
-                            title={
-                              m.delivery.state === "applied"
-                                ? uiText(
-                                    "補充已帶入下一個模型回合，不代表工作已完成。",
-                                  )
-                                : m.delivery.state === "pending"
-                                  ? uiText("等待目前模型回合結束後採用。")
-                                  : uiText(
-                                      "這則補充沒有帶入模型回合，請重新送出。",
-                                    )
-                            }
-                          >
-                            {m.delivery.state === "applied"
-                              ? uiText("已帶入下一回合")
-                              : m.delivery.state === "pending"
-                                ? uiText("待採用")
-                                : uiText("未採用")}
-                          </span>
-                        )}
-                        <div className="message-actions">
-                          {m.status === "error" &&
-                            !(m.runId && summaries.has(m.runId)) && (
-                              <span>{uiText("執行失敗")}</span>
-                            )}
-                          <button
-                            onClick={() => {
-                              setReplyTo(m.id);
-                              input.current?.focus();
-                            }}
-                          >
-                            {uiText("回覆")}
-                          </button>
-                          <CopyButton text={m.content} />
                         </div>
-                      </div>
-                    </article>
+                      </article>
+                    </React.Fragment>
                   ))}
                   {running && (
                     <article className="message assistant live">
@@ -1723,7 +1294,7 @@ function App() {
                           key={activeSummary.id}
                           botId={detail.bot.id}
                           summary={activeSummary}
-                          open={expandedRuns[activeSummary.id] ?? true}
+                          open={!!expandedRuns[activeSummary.id]}
                           toggle={() => toggleRun(activeSummary.id)}
                           select={select}
                           available={availableBots}
@@ -1778,12 +1349,12 @@ function App() {
                     />
                   ))}
                   {detail.jobs
-                    .filter((j) => !j.taskId && j.status === "queued")
+                    .filter((j) => j.status === "queued")
                     .map((j) => (
                       <div className="queued" key={j.id}>
                         <Icon name="clock" size={16} />
                         <span>
-                          {uiText("下一個任務：")}
+                          {uiText("接下來：")}
                           {j.prompt}
                         </span>
                       </div>
@@ -1806,7 +1377,6 @@ function App() {
                   {detail.jobs
                     .filter(
                       (j) =>
-                        !j.taskId &&
                         !j.dismissedAt &&
                         ((j.status === "failed" && !j.runId) ||
                           j.status === "interrupted"),
@@ -1818,7 +1388,6 @@ function App() {
                           <button
                             onClick={() => {
                               setRetryOf(j.id);
-                              setSendMode("queue");
                               setText(j.prompt);
                               input.current?.focus();
                             }}
@@ -1826,7 +1395,7 @@ function App() {
                             {uiText("重新交辦")}
                           </button>
                           <button
-                            aria-label={uiText("關閉這則任務提示")}
+                            aria-label={uiText("關閉這則提示")}
                             onClick={() =>
                               perform(() =>
                                 api(
@@ -1842,6 +1411,13 @@ function App() {
                         </div>
                       </div>
                     ))}
+                  {detail.session.messages.length > 0 &&
+                    detail.session.messages.at(-1)?.workContextId !==
+                      detail.session.context?.id && (
+                      <div className="topic-divider" role="separator">
+                        {uiText("新話題")}
+                      </div>
+                    )}
                   <div ref={bottom} />
                 </div>
               )}
@@ -1871,7 +1447,7 @@ function App() {
                       )}
                     {stoppingBot === selected && (
                       <ActionFeedback
-                        label="正在停止任務，等待執行中的操作結束…"
+                        label="正在停止回覆，等待執行中的操作結束…"
                         pending
                       />
                     )}
@@ -1879,9 +1455,9 @@ function App() {
                       <ProgressStrip
                         summary={activeSummary}
                         connected={eventsConnected}
-                        open={expandedRuns[activeSummary.id] ?? true}
+                        open={!!expandedRuns[activeSummary.id]}
                         toggle={() =>
-                          (expandedRuns[activeSummary.id] ?? true)
+                          !!expandedRuns[activeSummary.id]
                             ? toggleRun(activeSummary.id)
                             : revealRun(activeSummary.id)
                         }
@@ -1902,7 +1478,7 @@ function App() {
                     )}
                     {running && !activeSummary && (
                       <ActionFeedback
-                        label="正在準備任務，等待模型回應…"
+                        label="正在準備回覆，等待模型回應…"
                         pending
                       />
                     )}
@@ -1920,8 +1496,8 @@ function App() {
                   {running && (
                     <button
                       className="icon composer-stop"
-                      aria-label={uiText("停止任務")}
-                      title={uiText("停止任務")}
+                      aria-label={uiText("停止回覆")}
+                      title={uiText("停止回覆")}
                       disabled={stoppingBot === selected}
                       onClick={() => void stop()}
                     >
@@ -1932,7 +1508,7 @@ function App() {
                 <div className="composer">
                   {retryOf && (
                     <div className="reply-chip">
-                      {uiText("重新交辦原任務")}
+                      {uiText("重新傳送")}
                       <button
                         className="icon"
                         aria-label={uiText("取消重新交辦")}
@@ -2080,27 +1656,10 @@ function App() {
                         !e.nativeEvent.isComposing
                       ) {
                         e.preventDefault();
-                        void send(running && sendMode === "steer");
+                        void send();
                       }
                     }}
                   />
-                  {needsDirtyChoice && (
-                    <div className="cw-dirty">
-                      <span>{uiText("專案有未提交修改")}</span>
-                      <button
-                        aria-pressed={dirtyChoice === "include"}
-                        onClick={() => setDirtyChoice("include")}
-                      >
-                        {uiText("接續目前修改")}
-                      </button>
-                      <button
-                        aria-pressed={dirtyChoice === "exclude"}
-                        onClick={() => setDirtyChoice("exclude")}
-                      >
-                        {uiText("從最後提交開始")}
-                      </button>
-                    </div>
-                  )}
                   <div className="composer-actions">
                     <div className="composer-tools">
                       <ComposerPopover
@@ -2149,89 +1708,21 @@ function App() {
                           ),
                         )}
                       </ComposerPopover>
-                      <button
-                        type="button"
-                        className="mobile-compose-options work-options-trigger"
-                        aria-label={uiText("工作選項")}
-                        title={uiText("工作位置與模式")}
-                        onClick={() => setComposeOptions(true)}
-                      >
-                        <span>
-                          {uiText(
-                            taskMode === "plan"
-                              ? "先規劃"
-                              : projectId
-                                ? "專案工作"
-                                : "工作選項",
-                          )}
-                        </span>
-                        <svg
-                          aria-hidden="true"
-                          width="14"
-                          height="14"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                        >
-                          <path
-                            d="m4 6 4 4 4-4"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                          />
-                        </svg>
-                      </button>
-                      {!smallScreen && modelPicker}
-                      <ApprovalModeControl
-                        settings={approvalSettings}
-                        api={api}
-                        onSaved={acceptApprovalSettings}
-                        onReload={refresh}
-                      />
                     </div>
                     <div className="composer-send-actions">
-                      {running && !smallScreen && (
-                        <select
-                          aria-label={uiText("傳送方式")}
-                          value={sendMode}
-                          onChange={(e) => setSendMode(e.target.value)}
-                        >
-                          <option value="queue">{uiText("排入下一個")}</option>
-                          <option value="steer" disabled={!!retryOf}>
-                            {uiText("補充指示")}
-                          </option>
-                        </select>
-                      )}
                       <button
                         className={`send ${running ? "queue-send" : ""}`}
                         aria-label={
-                          running
-                            ? uiText(
-                                sendMode === "steer"
-                                  ? "補充指示"
-                                  : "排入下一個任務",
-                              )
-                            : uiText("傳送")
+                          running ? uiText("補充指示") : uiText("傳送")
                         }
-                        title={
-                          running
-                            ? uiText(
-                                sendMode === "steer"
-                                  ? "補充指示"
-                                  : "排入下一個任務",
-                              )
-                            : uiText("傳送")
-                        }
+                        title={running ? uiText("補充指示") : uiText("傳送")}
                         disabled={
                           busy ||
                           !detail ||
                           !!detail.contextSetupError ||
-                          (running &&
-                            sendMode === "steer" &&
-                            (!text.trim() || !!retryOf)) ||
                           (!text.trim() && !attachments.length)
                         }
-                        onClick={() =>
-                          void send(running && sendMode === "steer")
-                        }
+                        onClick={() => void send()}
                       >
                         {busy ? (
                           <ActivityMark />
@@ -2269,14 +1760,14 @@ function App() {
               </ComposerFrame>
               <p className="composer-note">
                 {running
-                  ? uiText("可以補充指示，或將新訊息排入下一個任務。")
+                  ? uiText("直接傳訊息，補充你希望 Bot 做的事。")
                   : uiText("Enter 傳送 · Shift + Enter 換行")}
               </p>
             </div>
           </>
         )}
       </main>
-      {!activeTask && !projectView && selected && panel && detail && (
+      {selected && panel && detail && (
         <aside
           id="bot-details"
           ref={detailsRef}
@@ -2364,81 +1855,59 @@ function App() {
             </>
           ) : (
             <div className="details-body">
-              {detail.codingTasks.filter((t) => t.git).length ? (
-                detail.codingTasks
-                  .filter((t) => t.git)
-                  .map((task) => (
-                    <button
-                      className="cw-change-task"
-                      key={task.id}
-                      onClick={() => openTask(task.id, "changes")}
-                    >
-                      <strong>{task.title}</strong>
-                      <small>{task.git?.branch}</small>
-                      <span>{uiText("查看變更")} →</span>
-                    </button>
-                  ))
-              ) : (
-                <p className="muted">
-                  {uiText("有專案任務後，可在這裡查看修改。")}
-                </p>
-              )}
+              <ConversationChanges
+                botId={selected}
+                context={detail.session.context!}
+                api={api}
+              />
             </div>
           )}
         </aside>
       )}
       {composeOptions && (
         <Modal
-          label={uiText("工作選項")}
+          label={uiText("聊天選項")}
           close={() => setComposeOptions(false)}
         >
           <section className="modal mobile-compose-sheet">
             <header>
-              <h2>{uiText("工作選項")}</h2>
+              <h2>{uiText("聊天選項")}</h2>
               <button
                 className="icon"
-                aria-label={uiText("關閉工作選項")}
+                aria-label={uiText("關閉聊天選項")}
                 onClick={() => setComposeOptions(false)}
               >
                 <Icon name="close" />
               </button>
             </header>
-            <ProjectControls
-              showLabels
-              projects={state?.projects || []}
-              projectId={projectId}
-              setProject={(id) => {
-                setProjectId(id);
-                setDirtyChoice(undefined);
-                setNeedsDirtyChoice(false);
-              }}
-              branch={startBranch}
-              setBranch={setStartBranch}
-              mode={taskMode}
-              setMode={setTaskMode}
+            {detail?.session.context && selected && (
+              <WorkFolder
+                botId={selected}
+                context={detail.session.context}
+                api={api}
+                refresh={refresh}
+              />
+            )}
+            {detail?.session.context?.location?.projectId && (
+              <button
+                onClick={() => {
+                  setComposeOptions(false);
+                  setProjectSettings(true);
+                }}
+              >
+                {uiText("專案設定")}
+              </button>
+            )}
+            <div className="compose-option-field">
+              <span>{uiText("Bot 模型")}</span>
+              {modelPicker}
+            </div>
+            <ApprovalModeControl
+              settings={approvalSettings}
               api={api}
+              onSaved={acceptApprovalSettings}
+              onReload={refresh}
             />
-            {smallScreen && (
-              <div className="compose-option-field">
-                <span>{uiText("Bot 模型")}</span>
-                {modelPicker}
-              </div>
-            )}
-            {running && (
-              <label className="compose-option-field">
-                傳送方式
-                <select
-                  aria-label={uiText("傳送方式")}
-                  value={sendMode}
-                  onChange={(e) => setSendMode(e.target.value)}
-                >
-                  <option value="queue">{uiText("排入下一個")}</option>
-                  <option value="steer" disabled={!!retryOf}>
-                    {uiText("補充指示")}
-                  </option>
-                </select>
-              </label>
-            )}
             <button
               className="primary"
               onClick={() => setComposeOptions(false)}
@@ -2448,6 +1917,21 @@ function App() {
           </section>
         </Modal>
       )}
+      {projectSettings &&
+        state?.projects.find(
+          (p) => p.id === detail?.session.context?.location?.projectId,
+        ) && (
+          <ProjectSettings
+            project={
+              state.projects.find(
+                (p) => p.id === detail?.session.context?.location?.projectId,
+              )!
+            }
+            api={api}
+            refresh={refresh}
+            close={() => setProjectSettings(false)}
+          />
+        )}
       {profile && selected && detail && state && (
         <Modal label={uiText("Bot 詳情")} close={() => setProfile(false)}>
           <section className="modal cw-settings-modal">
@@ -2566,16 +2050,6 @@ function App() {
           </section>
         </Modal>
       )}
-      {projectSettings &&
-        state?.projects.find((p) => p.id === projectSettings) && (
-          <ProjectSettings
-            key={projectSettings}
-            project={state.projects.find((p) => p.id === projectSettings)!}
-            api={api}
-            refresh={refresh}
-            close={() => setProjectSettings(undefined)}
-          />
-        )}
       {creating && state && (
         <Modal label={uiText("建立 Bot")} close={() => setCreating(false)}>
           <section className="modal bot-create-modal">
@@ -2999,7 +2473,7 @@ function Profile({
             <div className="delete-body">
               <p>
                 {uiText(
-                  "此操作無法復原。將停止這位 Bot 的任務，刪除對話、專屬記憶與技能、排程、草稿、核准規則，以及附件與成果清單。",
+                  "此操作無法復原。將停止這位 Bot 的工作，刪除對話、專屬記憶與技能、排程、草稿、核准規則，以及附件與成果清單。",
                 )}
               </p>
               <p>
@@ -3038,7 +2512,7 @@ function Profile({
                     }
                   }}
                 >
-                  {deleting ? uiText("停止任務並刪除中…") : uiText("確認刪除")}
+                  {deleting ? uiText("停止回覆並刪除中…") : uiText("確認刪除")}
                 </button>
               </footer>
             </div>
@@ -3150,9 +2624,6 @@ function RoutineEditor({
             setProject={setRoutineProject}
             branch={routineBranch}
             setBranch={setRoutineBranch}
-            mode="work"
-            hideMode
-            setMode={() => {}}
             api={api}
           />
           <label>
@@ -3293,7 +2764,7 @@ function Settings({
             {tab === "general" && (
               <>
                 <ExecutionSettings api={api} onDirtyChange={setDirty} />
-                <TaskNotificationSettings />
+
                 {!!state.skillDiagnostics?.length && (
                   <details className="settings-advanced">
                     <summary>{uiText("技能載入問題")}</summary>

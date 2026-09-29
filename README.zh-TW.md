@@ -4,6 +4,14 @@
 
 Apsis 是使用 TypeScript 與 Node.js 的本機 Bot 工作空間。Bot 使用 **Deep Agents** 搭配 API／Ollama 模型。每位 Bot 有自己的角色、模型、持續對話、私有記憶、排程、瀏覽器分頁與成果。Bot 可以查找其他 Bot 並派工；Apsis 管理任務佇列、核准、資料保存與跨 Bot 協作。
 
+## 像聊天一樣使用
+
+選一位 Bot，直接傳訊息請它做事。工作中再傳訊息就是補充指示；「已收到／已採用／未採用」表示是否帶入模型，未採用可重新傳送。進度、工具紀錄與成果都留在同一條聊天，細節可展開。
+
+Bot 選單提供「開啟新話題」、聊天選項、排程與記憶。模型、核准模式及工作資料夾放在聊天選項；檔案與 Git 修改按需開啟側面板。程式工作不再建立另一個任務頁面。
+
+啟動時直接刪除舊的獨立程式任務及關聯紀錄，不備份、不封存、不相容舊任務資料。Bot、設定、一般聊天、排程與實體檔案保留。詳見 [聊天工作流程](docs/coding-workbench.md)。
+
 ## 啟動
 
 需要 Node.js 22.19 以上。
@@ -33,7 +41,7 @@ Apsis 工具：工作區、記憶、技能、瀏覽器、文件、MCP、排程
 核准與工具操作紀錄
 ```
 
-Deep Agents 是唯一啟用的執行引擎，負責單一 Bot 內部的規劃、上下文管理與虛擬暫存檔；原生 `task`、`execute` 工具已停用。Apsis 負責 Bot 身分、跨 Bot 派工、權限、排程與成果。`delegate_task` 與每次排程使用接收 Bot 的獨立工作 context；聊天則持續沿用目前 context，按「新任務」才切換。
+Deep Agents 是唯一啟用的執行引擎，負責單一 Bot 內部的規劃、上下文管理與虛擬暫存檔；原生 `task`、`execute` 工具已停用。Apsis 負責 Bot 身分、跨 Bot 派工、權限、排程與成果。`delegate_task` 與每次排程使用接收 Bot 的獨立工作 context；聊天則持續沿用目前 context，按「開啟新話題」才切換。
 
 Deep Agents 的虛擬檔案只供對話暫存；真實檔案使用 `.apsis/workspace/` 的 `workspace_*` 工具。工具核准採 Kimi 式確定性規則，不呼叫 LLM 審查。預設「需要時詢問」（yolo）會自動執行一般 Shell、網頁與 MCP 操作；命中較前面的危險、敏感路徑或權限策略才詢問，另提供 manual 與 auto 模式。Shell 在主機執行；工作區與路徑規則都不是作業系統沙箱。
 
@@ -56,6 +64,7 @@ Bot 可選取共用技能與 MCP 連接器，並使用工作區或唯讀模式�
 ```sh
 npm run build
 npm test
+npm run test:chat:browser
 npm run test:bots:browser
 node scripts/verify-settings.ts
 ```

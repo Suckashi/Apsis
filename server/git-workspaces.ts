@@ -5,7 +5,11 @@ import { mkdir, readFile, lstat, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, relative, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import type { CodingTask, GitChange, GitOverview } from "../shared/coding.ts";
+import type {
+  ConversationWorkspace,
+  GitChange,
+  GitOverview,
+} from "../shared/coding.ts";
 import { Workspace } from "./workspace.ts";
 
 const exec = promisify(execFile);
@@ -219,7 +223,7 @@ export async function createTaskWorktree(
   };
 }
 export async function gitOverview(
-  task: CodingTask,
+  task: ConversationWorkspace,
   selected?: string,
 ): Promise<GitOverview> {
   if (!task.git) fail("此任務沒有 Git 專案。");

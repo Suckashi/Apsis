@@ -2,6 +2,10 @@
 
 Apsis is a single-owner, single-process Node.js application. `npm run dev` builds the React Bot interface and starts the server. Deep Agents is the only active runtime; the model connection selects its provider and model.
 
+## Conversation interface
+
+Chat is the only interactive workflow. ProductService receives messages, routes active-chat follow-ups to steering, and persists idempotency receipts. ChatWorkspaces stores Git/PR evidence on WorkContext. Independent CodingTask sessions, routes and lifecycle UI have been removed. Job/Run/context still implement execution, traceability and isolation. See [upgrade and chat behavior](coding-workbench.md).
+
 ## Boundaries
 
 - **ProductService** (`server/product.ts`) owns Bot profiles, templates, per-Bot queues, cross-Bot delegation, schedules, approvals, results, MCP connectors, and browser tabs. Bots are peers. `list_bots` discovers available peers; `delegate_task` submits a job to a recipient's queue and waits for that job's result. The recipient uses its own role and model while retaining ancestor permission restrictions.

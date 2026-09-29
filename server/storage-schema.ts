@@ -34,6 +34,33 @@ export const runSchema = z
       .array(
         z.discriminatedUnion("kind", [
           z.object({
+            kind: z.literal("subagent"),
+            id: z.string(),
+            at: z.string(),
+            activity: z.object({
+              id: z.string(),
+              name: z.string().optional(),
+              task: z.string(),
+              status: z.enum(["running", "completed", "failed", "cancelled"]),
+              progress: z.string().optional(),
+              resultSummary: z.string().optional(),
+              startedAt: z.string(),
+              endedAt: z.string().optional(),
+            }),
+          }),
+          z.object({
+            kind: z.literal("planning"),
+            id: z.string(),
+            at: z.string(),
+            subagentId: z.string().optional(),
+            todos: z.array(
+              z.object({
+                content: z.string(),
+                status: z.enum(["pending", "in_progress", "completed"]),
+              }),
+            ),
+          }),
+          z.object({
             kind: z.literal("commentary"),
             id: z.string(),
             at: z.string(),

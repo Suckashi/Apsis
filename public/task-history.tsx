@@ -9,7 +9,7 @@ import {
 import type { ToolOperation } from "../shared/types.ts";
 import {
   currentWorkStatus,
-  operationGroupLabel,
+  nativeSubagents,
   runOutcome,
 } from "../shared/work-presentation.ts";
 import { useSettingsLocale } from "./settings-locale.ts";
@@ -22,7 +22,6 @@ import {
   taskOperation,
   taskElapsed,
   taskCount,
-  taskEarlier,
 } from "./task-locale.ts";
 
 export function RunStats({ summary }: { summary: RunSummary }) {
@@ -62,17 +61,11 @@ export function ProgressStrip({
   toggle: () => void;
   approve: (id: string) => void;
 }) {
-  const [now, setNow] = useState(Date.now);
   const locale = useSettingsLocale();
   const t = (text: string) => taskText(locale, text);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
   const progress = summary.progress;
   const current = currentWorkStatus({ connected, active: summary });
   const phase = current.phase;
-  const updatedAt = progress?.updatedAt || summary.createdAt;
   return (
     <section
       className={`task-progress phase-${connected ? phase : "disconnected"}`}
@@ -84,10 +77,6 @@ export function ProgressStrip({
           <span className="task-current-label">
             {taskProgress(locale, current.label)}
           </span>
-        </span>
-        <span className="task-elapsed">
-          {locale === "en" ? "Elapsed" : "已執行"}{" "}
-          {taskElapsed(locale, summary.createdAt, now)}
         </span>
       </div>
       <div className="task-progress-actions">
@@ -105,7 +94,7 @@ export function ProgressStrip({
               ? t("核准或拒絕後，任務才會繼續。")
               : phase === "queued"
                 ? t("等待 Bot 開始")
-                : `${t("距上次更新")} ${taskElapsed(locale, updatedAt, now)}`}
+                : ""}
           {summary.warning && (
             <span className="task-warning">
               {" "}
@@ -363,17 +352,18 @@ export function RunArchive({
         )}
       </summary>
       <div>
-        {summaries.map((summary) => (
-          <RunHistory
-            key={summary.id}
-            botId={botId}
-            summary={summary}
-            open={!!expandedRuns[summary.id]}
-            toggle={() => toggleRun(summary.id)}
-            select={select}
-            available={available}
-          />
-        ))}
+        {open &&
+          summaries.map((summary) => (
+            <RunHistory
+              key={summary.id}
+              botId={botId}
+              summary={summary}
+              open={!!expandedRuns[summary.id]}
+              toggle={() => toggleRun(summary.id)}
+              select={select}
+              available={available}
+            />
+          ))}
       </div>
     </details>
   );
@@ -394,7 +384,7 @@ export function RunHistory({
   toggle: () => void;
   select: (id: string) => void;
   available: Set<string>;
-  /** Task workspaces already have their run journal; main chats load it on demand. */
+  /** Load execution evidence independently of which disclosure is expanded. */
   record?: RunRecord;
 }) {
   const [loadedRecord, setRecord] = useState<RunRecord>();
@@ -403,11 +393,10 @@ export function RunHistory({
   const locale = useSettingsLocale();
   const t = (text: string) => taskText(locale, text);
   const [retry, setRetry] = useState(0);
-  const [count, setCount] = useState(5);
   const live = summary.status === "running";
   const recordVersion = live ? "live" : summary.revision;
   useEffect(() => {
-    if (!open || suppliedRecord) return;
+    if (suppliedRecord) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     setError(false);
@@ -435,213 +424,195 @@ export function RunHistory({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [botId, summary.id, recordVersion, live, open, retry, !!suppliedRecord]);
-  const combinedOperations =
-    record?.run.operations.filter(
-      (operation) =>
-        operation.name === "delegate_task" &&
-        operation.status === "succeeded" &&
-        record.delegations.some(
-          (job) => job.outgoing && job.botId === operation.target,
-        ),
-    ) || [];
-  const timelineEntries = new Map(
-    record?.run.timeline?.map((entry, index) => [
-      entry.id,
-      { ...entry, index },
-    ]),
-  );
-  const entries = record
-    ? [
-        ...record.run.operations
-          .filter((operation) => !combinedOperations.includes(operation))
-          .map((operation) => ({
-            id: `operation-${operation.id}`,
-            at:
-              timelineEntries.get(`operation-${operation.id}`)?.at ||
-              operation.startedAt,
-            operation,
-            job: undefined as DelegationRecord | undefined,
-            commentary: undefined as string | undefined,
-          })),
-        ...record.delegations.map((job) => ({
-          id: `job-${job.id}`,
-          at: job.createdAt,
-          operation: undefined as ToolOperation | undefined,
-          job,
-          commentary: undefined as string | undefined,
-        })),
-        ...(record.run.timeline || [])
-          .filter((entry) => entry.kind === "commentary")
-          .map((entry) => ({
-            id: entry.id,
-            at: entry.at,
-            commentary: entry.text,
-            operation: undefined as ToolOperation | undefined,
-            job: undefined as DelegationRecord | undefined,
-          })),
-      ].sort(
-        (a, b) =>
-          a.at.localeCompare(b.at) ||
-          (timelineEntries.get(a.id)?.index ?? -1) -
-            (timelineEntries.get(b.id)?.index ?? -1) ||
-          a.id.localeCompare(b.id),
-      )
-    : [];
-  const groups: { id: string; entries: typeof entries }[] = [];
-  const visibleEntries = new Set(
-    entries.slice(-count).map((entry) => entry.id),
-  );
-  // Group before paging so the same work keeps its DOM key when older entries
-  // are revealed. Native details retain the user's expanded state on updates.
-  for (const entry of entries) {
-    const previous = groups.at(-1);
-    if (entry.operation && previous?.entries[0].operation)
-      previous.entries.push(entry);
-    else groups.push({ id: entry.id, entries: [entry] });
-  }
+  }, [botId, summary.id, recordVersion, live, retry, !!suppliedRecord]);
+  const timeline = record?.run.timeline || [];
+  const subagents = record ? nativeSubagents(record.run) : [];
+  const working = subagents.filter((c) => c.status === "running").length;
+  const completed = subagents.filter((c) => c.status === "completed").length;
+  const childLabel =
+    working === subagents.length
+      ? `${working} 個子代理正在協作`
+      : working
+        ? `${completed} 個子代理已完成，${working} 個仍在協作`
+        : completed === subagents.length
+          ? `${completed} 個子代理完成`
+          : `${subagents.length} 個子代理已停止`;
+  const notes = timeline.filter((e) => e.kind === "commentary");
+  const plan = timeline.findLast((e) => e.kind === "planning" && !e.subagentId);
+  const todos = plan?.kind === "planning" ? plan.todos : [];
+  const current = notes.at(-1);
   return (
     <section
-      className={`task-history ${record?.run.timeline?.some((entry) => entry.kind === "commentary") ? "has-commentary" : ""}${runOutcome(summary).quiet ? " is-quiet" : ""}`}
+      className="task-history execution-evidence"
       id={`task-${summary.id}`}
-      aria-label={t("任務紀錄")}
+      aria-label={t("執行過程")}
     >
-      <button
-        className="task-summary"
-        aria-expanded={open}
-        aria-controls={`task-record-${summary.id}`}
-        onClick={toggle}
-      >
-        <span aria-hidden="true">{open ? "▾" : "▸"}</span>
-        <span>
-          <RunStats summary={summary} />
-        </span>
-      </button>
-      <div id={`task-record-${summary.id}`} hidden={!open}>
-        <>
-          {error ? (
-            <p role="alert">
-              {t("無法讀取任務紀錄，請重試。")}{" "}
-              <button
-                className="task-load-more"
-                onClick={() => setRetry((r) => r + 1)}
-              >
-                {t("重新載入")}
-              </button>
-            </p>
-          ) : (
-            !record && <p role="status">{t("正在讀取紀錄…")}</p>
+      {live && current?.kind === "commentary" && (
+        <p className="execution-current" role="status">
+          {current.text.slice(0, 240)}
+        </p>
+      )}
+      {!live && summary.status === "cancelled" && <p role="status">已停止</p>}
+      {(notes.length > 0 || todos.length > 0) && (
+        <details className="execution-thinking">
+          <summary>{locale === "en" ? "Thinking" : "思考過程"}</summary>
+          <p className="muted">
+            {locale === "en"
+              ? "Public progress and planning"
+              : "公開進度與工作計畫"}
+          </p>
+          {todos.length > 0 && (
+            <ul>
+              {todos.map((todo, i) => (
+                <li key={i}>
+                  {todo.status === "completed"
+                    ? "✓"
+                    : todo.status === "in_progress"
+                      ? "●"
+                      : "○"}{" "}
+                  {todo.content}
+                </li>
+              ))}
+            </ul>
           )}
-          {record && (
-            <>
-              <div className="work-timeline">
-                {groups
-                  .filter((group) =>
-                    group.entries.some((entry) => visibleEntries.has(entry.id)),
-                  )
-                  .map((group) => {
-                    const first = group.entries[0];
-                    if (first.commentary !== undefined)
-                      return (
-                        <div className="work-commentary" key={group.id}>
-                          <div
-                            dangerouslySetInnerHTML={{
-                              __html: renderMarkdown(first.commentary),
-                            }}
-                          />
-                          <time dateTime={first.at}>
-                            {taskElapsed(locale, summary.createdAt, first.at)}
-                          </time>
-                        </div>
-                      );
-                    if (first.job)
-                      return (
-                        <DelegationRow
-                          key={group.id}
-                          job={first.job}
-                          select={select}
-                          available={available}
-                        />
-                      );
-                    const operations = group.entries
-                      .filter((entry) => visibleEntries.has(entry.id))
-                      .map((entry) => entry.operation!);
-                    const working = operations.some(
-                      (operation) => operation.status === "started",
-                    );
-                    const failed = operations.some((operation) =>
-                      ["failed", "unknown"].includes(operation.status),
-                    );
-                    return (
-                      <details className="task-tool-group" key={group.id}>
-                        <summary>
-                          <ActivityMark
-                            state={
-                              working
-                                ? "working"
-                                : failed
-                                  ? "failed"
-                                  : "completed"
-                            }
-                          />
-                          <span>
-                            {operationGroupLabel(operations)
-                              .slice(0, 3)
-                              .map(
-                                ({ label, count }) =>
-                                  `${t(label)}${count > 1 ? ` × ${count}` : ""}`,
-                              )
-                              .join(" · ")}
-                          </span>
-                          <small>
-                            {taskCount(locale, operations.length, "operations")}
-                          </small>
-                        </summary>
-                        {operations.map((operation) => (
-                          <OperationRow
-                            key={operation.id}
-                            operation={operation}
-                          />
-                        ))}
-                      </details>
-                    );
-                  })}
-              </div>
-              {entries.length > count && (
-                <button
-                  className="task-load-more"
-                  onClick={() => setCount((c) => c + 10)}
-                >
-                  {taskEarlier(locale, entries.length - count)}
-                </button>
-              )}
-              {!entries.length && (
-                <p className="muted">
-                  {t(
-                    live
-                      ? "尚未收到工具操作，模型回報後會顯示在這裡。"
-                      : "這次任務沒有工具操作或 Bot 協作。",
-                  )}
+          {notes.map(
+            (note) =>
+              note.kind === "commentary" && (
+                <div
+                  className="work-commentary"
+                  key={note.id}
+                  dangerouslySetInnerHTML={{
+                    __html: renderMarkdown(note.text),
+                  }}
+                />
+              ),
+          )}
+        </details>
+      )}
+      {subagents.length > 0 && (
+        <details className="execution-subagents">
+          <summary>
+            {locale === "en"
+              ? `${subagents.length} subagents · ${working} working · ${completed} completed`
+              : childLabel}
+          </summary>
+          <div aria-label="子代理">
+            {subagents.map((child) => (
+              <section className="subagent-activity" key={child.id}>
+                <strong>
+                  {child.status === "completed"
+                    ? "✓"
+                    : child.status === "running"
+                      ? "●"
+                      : "○"}{" "}
+                  {child.name === "general-purpose"
+                    ? child.task.split("\n")[0].slice(0, 100)
+                    : child.name || child.task}
+                </strong>
+                <p>{child.task}</p>
+                <p>
+                  {child.status === "cancelled"
+                    ? "已停止"
+                    : child.status === "failed"
+                      ? "失敗"
+                      : child.status === "completed"
+                        ? "已完成"
+                        : "正在處理"}
                 </p>
-              )}
-              {!!combinedOperations.length && (
-                <details className="task-raw-activity">
-                  <summary>{t("派工工具詳情")}</summary>
-                  {combinedOperations.map((operation) => (
-                    <OperationRow key={operation.id} operation={operation} />
-                  ))}
+                {(child.resultSummary || child.progress) && (
+                  <p>
+                    {(child.resultSummary || child.progress)!.slice(0, 600)}
+                  </p>
+                )}
+                {timeline
+                  .filter(
+                    (e) => e.kind === "planning" && e.subagentId === child.id,
+                  )
+                  .slice(-1)
+                  .map(
+                    (e) =>
+                      e.kind === "planning" && (
+                        <ul key={e.id}>
+                          {e.todos.map((todo, i) => (
+                            <li key={i}>
+                              {todo.status === "completed"
+                                ? "✓"
+                                : todo.status === "in_progress"
+                                  ? "●"
+                                  : "○"}{" "}
+                              {todo.content}
+                            </li>
+                          ))}
+                        </ul>
+                      ),
+                  )}
+                <details>
+                  <summary>子代理工作詳情</summary>
+                  {record?.run.operations
+                    .filter((o) => o.subagentId === child.id)
+                    .map((operation) => (
+                      <OperationRow key={operation.id} operation={operation} />
+                    ))}
+                  <details>
+                    <summary>原始子代理紀錄</summary>
+                    <pre>
+                      {JSON.stringify(
+                        timeline.filter(
+                          (e) =>
+                            e.kind === "subagent" && e.activity.id === child.id,
+                        ),
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
                 </details>
-              )}
-              {!!record.run.activity.length && (
-                <details className="task-raw-activity">
-                  <summary>{t("原始活動紀錄")}</summary>
-                  <pre>{record.run.activity.join("\n")}</pre>
-                </details>
-              )}
-            </>
-          )}
-        </>
-      </div>
+              </section>
+            ))}
+          </div>
+        </details>
+      )}
+      {record?.delegations.map((job) => (
+        <details className="execution-delegation" key={job.id}>
+          <summary>
+            {job.peerName}{" "}
+            {job.status === "completed"
+              ? "已完成協助"
+              : job.status === "running" || job.status === "queued"
+                ? "正在協助"
+                : taskStatus(locale, job.status)}
+          </summary>
+          <DelegationRow job={job} select={select} available={available} />
+        </details>
+      ))}
+      <details
+        id={`task-record-${summary.id}`}
+        className="execution-tools"
+        open={open}
+        onToggle={(event) => {
+          if (event.currentTarget.open !== open) toggle();
+        }}
+      >
+        <summary>{locale === "en" ? "Work details" : "工作詳情"}</summary>
+        {error && (
+          <p role="alert">
+            {t("無法讀取任務紀錄，請重試。")}{" "}
+            <button onClick={() => setRetry((r) => r + 1)}>
+              {t("重新載入")}
+            </button>
+          </p>
+        )}
+        {!record && !error && <p role="status">{t("正在讀取紀錄…")}</p>}
+        {record?.run.operations
+          .filter((o) => !o.subagentId)
+          .map((operation) => (
+            <OperationRow key={operation.id} operation={operation} />
+          ))}
+        <details className="task-raw-activity">
+          <summary>原始執行紀錄</summary>
+          <pre>{JSON.stringify(record?.run, null, 2)}</pre>
+        </details>
+      </details>
     </section>
   );
 }

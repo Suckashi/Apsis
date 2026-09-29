@@ -239,7 +239,9 @@ try {
     0,
   );
   await details.getByRole("button", { name: "變更", exact: true }).click();
-  await details.getByText("有專案任務後，可在這裡查看修改。").waitFor();
+  await details
+    .getByText("選擇 Git 工作資料夾後，可在這裡查看修改。")
+    .waitFor();
   await details.getByRole("button", { name: "檔案", exact: true }).click();
   await page.getByRole("button", { name: "進入專注模式" }).click();
   assert.equal(await roster.isVisible(), false);
@@ -339,6 +341,8 @@ try {
       .evaluate((el) => el === document.activeElement),
     true,
   );
+  await page.locator(".bot-actions-menu > summary").click();
+  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   await page
     .locator(".approval-mode-control > .composer-popover > summary")
     .click();
@@ -346,6 +350,7 @@ try {
   await page
     .locator(".approval-mode-control > .composer-popover > summary")
     .press("Escape");
+  await page.getByRole("button", { name: "完成", exact: true }).click();
   await page.screenshot({
     path: join(output, "integrated-composer.png"),
     fullPage: true,
@@ -374,7 +379,7 @@ try {
   await page.getByRole("button", { name: "移除 ui-check.txt" }).click();
   assert.equal(await page.locator(".attachment-chips").count(), 0);
   assert.equal(app.product!.snapshot().bots[0].avatar, "cloud");
-  await page.getByRole("button", { name: /新 Bot 隨時可以交辦/ }).click();
+  await page.getByRole("button", { name: /新 Bot 想做什麼/ }).click();
   await page.getByLabel("名稱", { exact: true }).fill("研究助理");
   await page.locator(".profile-avatar-disclosure > summary").click();
   await page.getByRole("radio", { name: "橘色星星" }).check();
@@ -434,9 +439,7 @@ try {
     fullPage: true,
   });
   await page.getByRole("textbox", { name: "傳送訊息" }).fill("請保留來源。");
-  await page.getByRole("combobox", { name: "傳送方式" }).selectOption("steer");
   await page.getByRole("button", { name: "補充指示" }).click();
-  await page.getByRole("combobox", { name: "傳送方式" }).selectOption("queue");
   await page.getByRole("button", { name: "核准並繼續" }).click();
   await page
     .getByText("報告已完成，驗證命令成功。", { exact: false })
@@ -780,14 +783,14 @@ try {
   await page.getByText("需要你的核准", { exact: true }).waitFor();
   await page.getByRole("button", { name: "核准並繼續", exact: true }).click();
   await page
-    .locator(".message.assistant")
+    .locator(".message.assistant > .message-body")
     .getByText("協作結果：42", { exact: true })
     .waitFor();
-  await page.locator(".task-history .task-summary").last().click();
+  await page.locator(".execution-delegation > summary").last().click();
   await page.locator(".task-row > summary").filter({ hasText: "來自" }).click();
   await page.getByRole("button", { name: "開啟 Bot 對話" }).click();
   await page
-    .locator(".message.assistant")
+    .locator(".message.assistant > .message-body")
     .getByText("秘書彙整：協作結果：42", { exact: true })
     .waitFor();
   await page.screenshot({
@@ -825,7 +828,7 @@ try {
   // A quiet model must not be presented as disconnected or falsely finished.
   await page.clock.install();
   await page.clock.fastForward(35000);
-  await progress.getByText(/距上次更新/).waitFor();
+  assert.equal(await progress.getByText(/距上次更新/).count(), 0);
   assert.equal(
     await progress.locator(".task-progress-hint.is-quiet").count(),
     0,
@@ -837,24 +840,18 @@ try {
   await page.clock.setFixedTime(new Date());
   const liveHistory = page.locator(".message.live .task-history");
   assert.equal(
-    await liveHistory.locator(".task-summary").getAttribute("aria-expanded"),
-    "true",
+    await liveHistory.locator(".execution-tools").getAttribute("open"),
+    null,
   );
-  await liveHistory.locator(".task-summary").click();
   await progress.getByRole("button", { name: "查看過程" }).click();
-  await liveHistory.locator(".task-tool-group > summary").first().waitFor();
-  for (const summary of await liveHistory
-    .locator(".task-tool-group:not([open]) > summary")
-    .all())
-    await summary.click();
-  await liveHistory.locator(".task-row:visible").nth(4).waitFor();
-  assert.equal(await liveHistory.locator(".task-row:visible").count(), 5);
-  await liveHistory.getByRole("button", { name: /顯示更早紀錄/ }).click();
-  for (const summary of await liveHistory
-    .locator(".task-tool-group:not([open]) > summary")
-    .all())
-    await summary.click();
-  assert.equal(await liveHistory.locator(".task-row:visible").count(), 14);
+  await liveHistory
+    .locator(".execution-tools .task-row:visible")
+    .nth(13)
+    .waitFor();
+  assert.equal(
+    await liveHistory.locator(".execution-tools .task-row:visible").count(),
+    14,
+  );
   await page.screenshot({
     path: join(output, "desktop-progress-expanded.png"),
     fullPage: true,
@@ -902,7 +899,7 @@ try {
   });
   finishProgress!();
   await page
-    .locator(".message.assistant")
+    .locator(".message.assistant > .message-body")
     .getByText("多項操作與協作已完成。", { exact: true })
     .waitFor();
   await page.waitForFunction(() => !document.querySelector(".task-progress"));
@@ -912,30 +909,28 @@ try {
     .filter({ hasText: "多項操作與協作已完成。" })
     .locator(".task-history");
   assert.equal(
-    await finishedHistory
-      .locator(".task-summary")
-      .getAttribute("aria-expanded"),
-    "true",
+    await finishedHistory.locator(".execution-tools").getAttribute("open"),
+    "",
   );
-  await finishedHistory.locator(".task-summary").click();
-  assert.ok((await finishedHistory.boundingBox())!.height <= 90);
+  await finishedHistory.locator(".execution-tools > summary").click();
+  assert.equal(
+    await finishedHistory.locator(".execution-tools").getAttribute("open"),
+    null,
+  );
   assert.equal(await page.locator(".delegation-card").count(), 0);
   await page.reload();
   await page
-    .locator(".message.assistant")
+    .locator(".message.assistant > .message-body")
     .getByText("多項操作與協作已完成。", { exact: true })
     .waitFor();
   assert.equal(
-    await finishedHistory
-      .locator(".task-summary")
-      .getAttribute("aria-expanded"),
-    "false",
+    await finishedHistory.locator(".execution-tools").getAttribute("open"),
+    null,
   );
-  await finishedHistory.locator(".task-summary").focus();
+  await finishedHistory.locator(".execution-tools > summary").focus();
   await page.keyboard.press("Enter");
-  await finishedHistory.locator(".task-tool-group > summary").first().click();
   await finishedHistory.locator(".task-row:visible").first().waitFor();
-  await finishedHistory.locator(".task-summary").click();
+  await finishedHistory.locator(".execution-tools > summary").click();
   await page.screenshot({
     path: join(output, "mobile-compact-history.png"),
     fullPage: true,
@@ -960,16 +955,15 @@ try {
   await page.getByRole("button", { name: "傳送", exact: true }).click();
   await progress.getByText("等待模型回應", { exact: true }).waitFor();
   await page.getByRole("textbox", { name: "傳送訊息" }).fill("progress-worker");
-  await page.getByRole("button", { name: "工作選項", exact: true }).click();
+  await page.locator(".bot-actions-menu > summary").click();
+  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   const sendOptions = page.getByRole("dialog", {
-    name: "工作選項",
+    name: "聊天選項",
     exact: true,
   });
-  await sendOptions.getByLabel("傳送方式").selectOption("queue");
+  assert.equal(await sendOptions.getByLabel("傳送方式").count(), 0);
   await sendOptions.getByRole("button", { name: "完成", exact: true }).click();
-  await page
-    .getByRole("button", { name: "排入下一個任務", exact: true })
-    .click();
+  await page.getByRole("button", { name: "補充指示", exact: true }).click();
   await page
     .locator(".queue-feedback")
     .getByText(/1 個任務排隊中/)
@@ -983,20 +977,20 @@ try {
     await stopGate;
     await route.continue();
   });
-  await page.getByRole("button", { name: "停止任務", exact: true }).click();
+  await page.getByRole("button", { name: "停止回覆", exact: true }).click();
   await page
-    .getByText("正在停止任務，等待執行中的操作結束…", { exact: true })
+    .getByText("正在停止回覆，等待執行中的操作結束…", { exact: true })
     .waitFor();
   assert.equal(
     await page
-      .getByRole("button", { name: "停止任務", exact: true })
+      .getByRole("button", { name: "停止回覆", exact: true })
       .isDisabled(),
     true,
   );
   releaseStop();
   await page
-    .locator(".task-summary")
-    .filter({ hasText: "已取消" })
+    .locator(".execution-evidence > p")
+    .filter({ hasText: "已停止" })
     .first()
     .waitFor();
   await page.locator(".queue-feedback").waitFor({ state: "detached" });
@@ -1075,7 +1069,7 @@ try {
           "image tool",
           "delete confirmation, cancellation and reload persistence",
           "Bot delegation, approval navigation and secretary summary",
-          "live progress, per-run compact history, 5-item disclosure, keyboard and retained expansion",
+          "live progress, separate Bot delegation, collapsed work details, keyboard and retained expansion",
           "no browser console errors",
         ],
         artifacts: output,

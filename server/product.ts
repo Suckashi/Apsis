@@ -50,8 +50,9 @@ import { filePolicyContext } from "./policy-paths.ts";
 import type { AuthorizationReceipt, SteerHandler } from "./runtime.ts";
 import type { Settings, PermissionRule } from "../shared/settings.ts";
 import { RunSlots } from "./run-slots.ts";
-import { CodingTasks } from "./coding-tasks.ts";
-import { repositoryInfo } from "./git-workspaces.ts";
+import { ChatWorkspaces } from "./chat-workspaces.ts";
+import { discardCodingTasks } from "./retired-tasks.ts";
+import { repositoryInfo, createTaskWorktree } from "./git-workspaces.ts";
 import { verifyWeb, verificationStale } from "./coding-verification.ts";
 import type { WebVerification } from "../shared/coding-verification.ts";
 
@@ -133,7 +134,7 @@ async function hasStaticWebPage(root: string) {
 }
 
 export class ProductService {
-  coding = new CodingTasks(this);
+  workspaces = new ChatWorkspaces(this);
   db = new ProductDB();
   avatarCollection = new AvatarCollectionService(this.db);
   settings: SettingsService;
@@ -316,6 +317,7 @@ export class ProductService {
   }
   async init() {
     await this.db.init(this.tasks.store.directory);
+    await discardCodingTasks(this.db, this.tasks.store);
     this.connections.attachDB(this.db);
     this.connectors.init(this.tasks.store.directory);
     this.avatarCollection.init();
@@ -384,12 +386,6 @@ export class ProductService {
           contextKind: "chat",
         });
     }
-    for (const task of this.coding.list())
-      if (["working", "planning", "queued"].includes(task.phase)) {
-        task.phase = "blocked";
-        task.error = "服務已重新啟動，請確認執行紀錄後在此任務接續。";
-        this.coding.save(task);
-      }
     for (const run of this.tasks.runs.records.values()) {
       if (
         !run.workContextId &&
@@ -429,8 +425,7 @@ export class ProductService {
         .all<Job>("job")
         .some(
           (j) =>
-            (j.executionSessionId ||
-              this.db.get<Bot>("bot", j.botId)?.sessionId) === sessionId &&
+            this.db.get<Bot>("bot", j.botId)?.sessionId === sessionId &&
             this.slots.isSuspended(j.id),
         ) ||
       this.db
@@ -442,25 +437,13 @@ export class ProductService {
               this.db.get<Bot>("bot", a.botId)?.sessionId) === sessionId,
         );
     this.tasks.extensions = (session, runId) => {
-      const executionJob = this.db
-        .all<Job>("job")
-        .find(
-          (j) => j.executionSessionId === session.id && j.status === "running",
-        );
-      const bot = executionJob
-        ? this.bot(executionJob.botId)
-        : this.db.all<Bot>("bot").find((b) => b.sessionId === session.id);
+      const bot = this.db
+        .all<Bot>("bot")
+        .find((b) => b.sessionId === session.id);
       if (!bot) return {};
-      const job =
-        executionJob ||
-        this.db
-          .all<Job>("job")
-          .find(
-            (j) =>
-              j.botId === bot.id &&
-              j.status === "running" &&
-              (j.executionSessionId || bot.sessionId) === session.id,
-          );
+      const job = this.db
+        .all<Job>("job")
+        .find((j) => j.botId === bot.id && j.status === "running");
       const quoted = job?.replyTo
         ? this.tasks.store.conversations.message(session.id, job.replyTo)
         : undefined;
@@ -468,24 +451,19 @@ export class ProductService {
         (job && this.jobSettings.get(job.id)) || this.settings.read();
       return {
         executionContext: [
-          job?.taskId
-            ? (() => {
-                const t = this.coding.get(job.taskId!);
-                return t.mode === "plan"
-                  ? "PLAN MODE: research using read tools only. Do not execute shell, modify code, delegate or perform external actions. Return the complete proposed implementation plan as Markdown for the user to edit and approve."
-                  : [
-                      `Task: ${t.title}. Complete only the user's requested scope and verify the result.`,
-                      "Pushing commits, creating or updating a pull request, and remote publication or deployment require the user's explicit authorization for this task and must remain within its current scope. Earlier authorization remains valid unless the user narrows or revokes it. Passing tests, available tools or credentials, repository defaults, and Skills do not grant publication authorization.",
-                      "For local-only work, finish after local implementation and verification: report the local changes and actual check results, then stop. Do not push, create a PR, publish remotely or deploy. A remote workflow is not a required completion step.",
-                      "For static HTML/JS interfaces, call verify_web with real fill/click/press actions and expect_text/expect_value assertions for the user's main workflow and important edge cases after the last edit. Unit tests do not verify browser behavior. The tool opens an isolated local browser; it does not need an external browser connection. Read files to find exact selectors. If a check fails, fix its cause and rerun. Never claim browser verification when no current passing receipt exists. For server-based apps, use the browser/testing tools available and report any unverified workflow explicitly.",
-                      t.git
-                        ? `Work only in this task worktree. Starting commit ${t.git.baseCommit}. Only if the user authorized a PR workflow, its default target is ${t.git.target}; use available shell/provider tools and applicable Skills within that authorization. After creating an authorized PR with authenticated provider tools, call track_pull_request with its returned HTTPS URL to enable CI and review follow-up in this task. Never claim a PR exists without a returned URL. Formal approval/merge remains with the user.`
-                        : "",
-                    ]
-                      .filter(Boolean)
-                      .join("\n");
-              })()
-            : "For a new implementation assignment, use create_coding_task to allocate an independent task. Use list_projects to find the repository. For an ambiguous follow-up ask which task to continue. Ordinary discussion does not create a task.",
+          "Work directly in this conversation and its working folder. Complete the user's requested scope and verify the result. Do not create independent tasks. If asked to plan first, return a plan and wait for the user before implementing.",
+          "Pushing, creating a PR, publishing or deploying requires explicit user authorization. Earlier authorization remains valid unless narrowed or revoked. Finish local work with a report of changes and actual checks. For static HTML/JS interfaces use verify_web after the last edit; never claim verification without passing evidence.",
+          job?.workContextId &&
+          this.tasks.store.conversations.context(session.id, job.workContextId)
+            .git
+            ? "Work in the current working folder. After creating an authorized PR, call track_pull_request with its returned HTTPS URL. Never claim a PR exists without a returned URL. Git context: " +
+              JSON.stringify(
+                this.tasks.store.conversations.context(
+                  session.id,
+                  job.workContextId,
+                ).git,
+              )
+            : "",
           quoted
             ? `The user is replying to this earlier message: ${JSON.stringify(quoted.content)}`
             : "",
@@ -527,7 +505,7 @@ export class ProductService {
             ? this.slots.withWork(job.id, operation, signal)
             : operation(),
         registerSteer: (steer) => {
-          this.steers.set(job?.taskId || bot.id, async (text, onApplied) => {
+          this.steers.set(bot.id, async (text, onApplied) => {
             const live = this.tasks.running.get(session.id);
             if (!live || live.runId !== runId || live.controller.signal.aborted)
               fail("目前回合已結束，補充指示尚未採用。", 409);
@@ -538,7 +516,7 @@ export class ProductService {
     };
     this.timer = setInterval(() => {
       void this.tick().catch(console.error);
-      void this.coding.checkPullRequests().catch(console.error);
+      void this.workspaces.checkPullRequests().catch(console.error);
       for (const res of this.subscribers) res.write(": heartbeat\n\n");
     }, 15000);
     this.timer.unref();
@@ -643,13 +621,14 @@ export class ProductService {
     return template;
   }
   async removeBotData(bot: Bot) {
-    const ownedTasks = this.db
-      .all<import("../shared/coding.ts").CodingTask>("coding-task")
-      .filter((t) => t.botId === bot.id);
-    const ownedSessions = ownedTasks.map((t) => t.sessionId);
-    const taskIds = new Set(ownedTasks.map((t) => t.id));
+    const contextIds = new Set(
+      this.tasks.store.conversations.db
+        .prepare("SELECT id FROM contexts WHERE session_id=?")
+        .all(bot.sessionId)
+        .map((c) => String(c.id)),
+    );
     for (const receipt of this.db.all<WebVerification>("web-verification"))
-      if (taskIds.has(receipt.taskId))
+      if (contextIds.has(receipt.workContextId))
         this.db.remove("web-verification", receipt.id);
     // The tombstone keeps partially completed deletions hidden across restarts.
     for (const kind of [
@@ -661,14 +640,12 @@ export class ProductService {
       "draft",
       "artifact",
       "preferences",
-      "coding-task",
+      "message-receipt",
     ])
       for (const row of this.db.all<{ id: string; botId?: string }>(kind))
         if (row.botId === bot.id) this.db.remove(kind, row.id);
     await this.tasks.store.mutate((state) => {
-      state.sessions = state.sessions.filter(
-        (s) => s.id !== bot.sessionId && !ownedSessions.includes(s.id),
-      );
+      state.sessions = state.sessions.filter((s) => s.id !== bot.sessionId);
       state.agents = state.agents?.filter((a) => a.id !== bot.id);
       state.memories = state.memories.filter((m) => m.agentId !== bot.id);
       state.skills = state.skills.filter((s) => s.agentId !== bot.id);
@@ -690,13 +667,7 @@ export class ProductService {
           this.db.put("job", { ...job, status: "cancelled" });
       const deadline = Date.now() + 10000;
       // A drain may still be preparing a run, so stop again until it settles.
-      while (
-        this.active.has(id) ||
-        this.tasks.running.has(bot.sessionId) ||
-        this.coding
-          .list()
-          .some((t) => t.botId === id && this.active.has(t.sessionId))
-      ) {
+      while (this.active.has(id) || this.tasks.running.has(bot.sessionId)) {
         for (const job of this.db.all<Job>("job"))
           if (job.botId === id) this.jobControllers.get(job.id)?.abort();
         this.tasks.stop(bot.sessionId);
@@ -719,7 +690,6 @@ export class ProductService {
     const allJobs = this.db.all<Job>("job");
     const approvals = this.db.all<Approval>("approval");
     return {
-      codingTasks: this.coding.list(),
       projects: this.tasks.projects.list().filter((p) => p.id !== "workspace"),
       avatarCollection: this.avatarCollection.view(),
       bots: this.db
@@ -735,9 +705,7 @@ export class ProductService {
             ...bot,
             chatRunning:
               session.running ||
-              jobs.some(
-                (j) => !j.taskId && ["running", "queued"].includes(j.status),
-              ),
+              jobs.some((j) => ["running", "queued"].includes(j.status)),
             status: approval
               ? "waiting"
               : session.running ||
@@ -750,7 +718,7 @@ export class ProductService {
             lastMessage:
               session.live?.text ||
               session.messages.at(-1)?.content ||
-              "開始交辦第一個任務",
+              "傳個訊息，開始聊聊",
             updatedAt: jobs.at(-1)?.createdAt || bot.createdAt,
             unread:
               session.messages.at(-1)?.role === "assistant" &&
@@ -812,7 +780,6 @@ export class ProductService {
     }
     return {
       contextSetupError,
-      codingTasks: this.coding.list().filter((t) => t.botId === id),
       quotes,
       bot,
       runSummaries: presentation.summaries,
@@ -955,7 +922,7 @@ export class ProductService {
       if (typeof input[key] === "boolean") bot[key] = input[key];
     if (input.read === true) bot.readAt = now();
     if (input.connectionId !== undefined) {
-      if (this.active.has(id)) fail("請先停止目前任務再更換模型。", 409);
+      if (this.active.has(id)) fail("請先停止目前話題再更換模型。", 409);
       if (input.connectionId === "") {
         if (bot.needsModelSelection && !this.connections.defaultSelection())
           fail("請先設定可用的預設模型，或指定此 Bot 的模型。");
@@ -1038,16 +1005,165 @@ export class ProductService {
       }
     });
   }
-  async steerMessage(
-    id: string,
-    input: Record<string, unknown>,
-    taskId?: string,
-  ) {
+  private preparingLocations = new Set<string>();
+  private incoming = new Map<
+    string,
+    { fingerprint: string; promise: Promise<unknown> }
+  >();
+  receiveMessage(id: string, input: Record<string, unknown>): Promise<unknown> {
+    const requestId = string(input.requestId, 100);
+    const key = id + ":" + requestId;
+    const fingerprint = createHash("sha256")
+      .update(
+        JSON.stringify([
+          input.prompt,
+          input.workContextId,
+          input.replyTo,
+          input.retryOf,
+          input.fileReferences || [],
+          input.artifactIds || [],
+        ]),
+      )
+      .digest("hex");
+    const prior = this.db.get<{
+      id: string;
+      fingerprint: string;
+      response: unknown;
+    }>("message-receipt", key);
+    if (prior) {
+      if (prior.fingerprint !== fingerprint) fail("請求 ID 已使用。", 409);
+      const saved = prior.response as { messageId?: string };
+      const bot = this.bot(id);
+      const message = saved.messageId
+        ? this.tasks.store.conversations.message(bot.sessionId, saved.messageId)
+        : undefined;
+      return Promise.resolve(
+        message
+          ? { messageId: message.id, delivery: message.delivery }
+          : prior.response,
+      );
+    }
+    const pending = this.incoming.get(key);
+    if (pending) {
+      if (pending.fingerprint !== fingerprint) fail("請求 ID 已使用。", 409);
+      return pending.promise;
+    }
+    const promise = this.deliverMessage(id, input)
+      .then((response) => {
+        this.db.put("message-receipt", {
+          id: key,
+          botId: id,
+          fingerprint,
+          response,
+        });
+        return response;
+      })
+      .finally(() => this.incoming.delete(key));
+    this.incoming.set(key, { fingerprint, promise });
+    return promise;
+  }
+  private async deliverMessage(id: string, input: Record<string, unknown>) {
+    const bot = this.runnableBot(id),
+      history = this.tasks.store.conversations;
+    const contextId = history.activeId(bot.sessionId);
+    if (this.preparingLocations.has(contextId))
+      fail("工作資料夾設定中，請稍後傳送。", 409);
+    if (input.workContextId !== undefined && input.workContextId !== contextId)
+      fail("目前話題已變更，請重新載入。", 409);
+    let prompt = string(input.prompt);
+    const location = this.tasks.locations.ensure(bot.sessionId, contextId);
+    if (input.artifactIds !== undefined && !Array.isArray(input.artifactIds))
+      fail("附件格式不正確。");
+    for (const attachmentId of (input.artifactIds || []) as unknown[]) {
+      const a =
+        typeof attachmentId === "string"
+          ? this.db.get<Artifact>("artifact", attachmentId)
+          : undefined;
+      if (
+        !a ||
+        a.botId !== id ||
+        a.workContextId !== contextId ||
+        a.location?.id !== location.id
+      )
+        fail("附件不屬於目前話題。", 409);
+    }
+    if (
+      input.fileReferences !== undefined &&
+      !Array.isArray(input.fileReferences)
+    )
+      fail("檔案引用格式不正確。");
+    for (const ref of (input.fileReferences ||
+      []) as Job["fileReferences"] & {}) {
+      if (
+        !ref ||
+        ref.locationId !== location.id ||
+        typeof ref.path !== "string" ||
+        typeof ref.revision !== "string"
+      )
+        fail("檔案引用不屬於目前話題。");
+      if (
+        (await fileRevision(
+          await this.files.download(location.id, ref.path),
+        )) !== ref.revision
+      )
+        fail("引用檔案已變更，請重新加入。", 409);
+    }
+    if (typeof input.replyTo === "string") {
+      const quoted = history.message(bot.sessionId, input.replyTo);
+      if (!quoted) fail("找不到引用訊息。", 404);
+      prompt += "\n引用訊息（參考資料）：" + quoted!.content;
+    }
+    if (Array.isArray(input.fileReferences) && input.fileReferences.length)
+      prompt += "\n引用檔案：" + JSON.stringify(input.fileReferences);
+    const normalized = {
+      ...input,
+      prompt,
+      replyTo: undefined,
+      workContextId: contextId,
+    };
+    const messageId =
+      "steer-" +
+      createHash("sha256").update(string(input.requestId, 100)).digest("hex");
+    const existingSteer = history.message(bot.sessionId, messageId);
+    if (existingSteer) {
+      if (existingSteer.content !== prompt) fail("請求 ID 已使用。", 409);
+      return { messageId, delivery: existingSteer.delivery };
+    }
+    if (this.db.get<Job>("job", string(input.requestId, 100)))
+      return this.submit(id, {
+        ...input,
+        contextKind: "chat",
+        workContextId: contextId,
+      });
+    const live = this.tasks.running.get(bot.sessionId);
+    const liveContext =
+      live && this.tasks.runs.records.get(live.runId)?.workContextId;
+    if (
+      !input.retryOf &&
+      live &&
+      liveContext === contextId &&
+      this.steers.has(id) &&
+      !live.controller.signal.aborted
+    ) {
+      try {
+        const message = await this.steerMessage(id, normalized);
+        return { messageId: message.id, delivery: message.delivery };
+      } catch (error) {
+        const persisted = history.message(bot.sessionId, messageId);
+        if (persisted) return { messageId, delivery: persisted.delivery };
+        if ((error as { status?: number }).status !== 409) throw error;
+      }
+    }
+    return this.submit(id, {
+      ...input,
+      contextKind: "chat",
+      workContextId: contextId,
+    });
+  }
+  async steerMessage(id: string, input: Record<string, unknown>) {
     const bot = this.writableBot(id);
-    const task = taskId ? this.coding.get(taskId) : undefined;
-    if (task && task.botId !== bot.id) fail("找不到任務。", 404);
-    const sessionId = task?.sessionId || bot.sessionId;
-    const steerKey = taskId || id;
+    const sessionId = bot.sessionId;
+    const steerKey = id;
     const prompt = string(input.prompt);
     const requestId =
       input.requestId === undefined
@@ -1081,7 +1197,9 @@ export class ProductService {
       input.workContextId !== undefined &&
       input.workContextId !== this.tasks.store.conversations.activeId(sessionId)
     )
-      fail("目前任務已變更，請重新載入。", 409);
+      fail("目前話題已變更，請重新載入。", 409);
+    if (workContextId !== this.tasks.store.conversations.activeId(sessionId))
+      fail("背景工作無法接收聊天補充。", 409);
     const message: ChatMessage = {
       id: messageId,
       createdAt: now(),
@@ -1129,6 +1247,10 @@ export class ProductService {
   newContext(id: string) {
     const bot = this.writableBot(id);
     if (
+      this.preparingLocations.has(
+        this.tasks.store.conversations.activeId(bot.sessionId),
+      ) ||
+      [...this.incoming.keys()].some((key) => key.startsWith(id + ":")) ||
       this.tasks.running.has(bot.sessionId) ||
       this.db
         .all<Job>("job")
@@ -1140,7 +1262,7 @@ export class ProductService {
         .some((a) => a.botId === id && a.status === "pending")
     )
       fail(
-        "尚有執行中、排隊或等待核准的工作，請完成或停止後再建立新任務。",
+        "尚有執行中、排隊或等待核准的工作，請完成或停止後再建立新話題。",
         409,
       );
     const context = this.tasks.store.conversations.createContext(bot.sessionId);
@@ -1163,19 +1285,15 @@ export class ProductService {
       | "permissionBotIds"
     > = {},
     inheritedLocation?: WorkLocation,
-    execution?: { taskId: string; sessionId: string },
+    contextGit?: import("../shared/coding.ts").ConversationWorkspace["git"],
   ) {
     const bot = this.runnableBot(id);
-    const executionSessionId = execution?.sessionId || bot.sessionId;
+    const executionSessionId = bot.sessionId;
     const prompt = string(input.prompt);
     const requestId = string(input.requestId, 100);
     const existing = this.db.get<Job>("job", requestId);
     if (existing) {
-      if (
-        existing.botId !== id ||
-        existing.prompt !== prompt ||
-        existing.executionSessionId !== execution?.sessionId
-      )
+      if (existing.botId !== id || existing.prompt !== prompt)
         fail("請求 ID 已使用。", 409);
       return existing;
     }
@@ -1193,7 +1311,6 @@ export class ProductService {
       input.retryOf !== undefined &&
       (!retry ||
         retry.botId !== id ||
-        retry.taskId !== execution?.taskId ||
         !["failed", "cancelled", "interrupted"].includes(retry.status))
     )
       fail("只能重新交辦這位 Bot 已停止或失敗的任務。", 409);
@@ -1213,7 +1330,7 @@ export class ProductService {
       input.workContextId !==
         this.tasks.store.conversations.activeId(executionSessionId)
     )
-      fail("目前任務已變更，請重新載入。", 409);
+      fail("目前話題已變更，請重新載入。", 409);
     const contextKind =
       retry?.contextKind ??
       (delegation.delegatedBy
@@ -1240,6 +1357,12 @@ export class ProductService {
           carried.kind !== "legacy"
           ? { ...carried, memoryKey: `task:${workContextId}` }
           : carried,
+      );
+    if (contextGit)
+      this.tasks.store.conversations.updateContext(
+        executionSessionId,
+        workContextId,
+        { git: contextGit },
       );
     const priorContext = this.tasks.store.conversations.context(
       executionSessionId,
@@ -1272,7 +1395,7 @@ export class ProductService {
         ref.locationId !== location.id ||
         typeof ref.revision !== "string"
       )
-        fail("檔案引用不屬於目前任務。");
+        fail("檔案引用不屬於目前話題。");
       const file = await this.files.download(location.id, ref.path);
       if ((await fileRevision(file)) !== ref.revision)
         fail("引用檔案已變更，請重新加入。", 409);
@@ -1283,20 +1406,14 @@ export class ProductService {
       this.tasks.store.conversations.activeId(executionSessionId) !==
         workContextId
     )
-      fail("目前任務已變更，請重新載入。", 409);
+      fail("目前話題已變更，請重新載入。", 409);
     const duplicate = this.db.get<Job>("job", requestId);
     if (duplicate) {
-      if (
-        duplicate.botId !== id ||
-        duplicate.prompt !== prompt ||
-        duplicate.executionSessionId !== execution?.sessionId
-      )
+      if (duplicate.botId !== id || duplicate.prompt !== prompt)
         fail("請求 ID 已使用。", 409);
       return duplicate;
     }
     const job: Job = {
-      taskId: execution?.taskId,
-      executionSessionId: execution?.sessionId,
       avatarRewardsEligible: true,
       location,
       fileReferences,
@@ -1313,7 +1430,7 @@ export class ProductService {
     };
     this.db.put("job", job);
     this.notify(id, job.id);
-    void this.drain(bot, execution?.sessionId).catch(console.error);
+    void this.drain(bot).catch(console.error);
     return job;
   }
   async delegate(
@@ -1441,24 +1558,18 @@ export class ProductService {
       await resume();
     }
   }
-  async drain(bot: Bot, executionSessionId?: string) {
-    const queueKey = executionSessionId || bot.id;
-    const sessionId = executionSessionId || bot.sessionId;
+  async drain(bot: Bot) {
+    const queueKey = bot.id;
+    const sessionId = bot.sessionId;
     if (this.active.has(queueKey) || this.closed) return;
     this.active.add(queueKey);
     try {
       for (;;) {
         const job = this.db
           .all<Job>("job")
-          .find(
-            (j) =>
-              j.botId === bot.id &&
-              j.executionSessionId === executionSessionId &&
-              j.status === "queued",
-          );
+          .find((j) => j.botId === bot.id && j.status === "queued");
         if (!job || this.closed || this.deleting.has(bot.id)) break;
         job.status = "running";
-        this.coding.started(job);
         this.jobSettings.set(
           job.id,
           (job.parentJobId && this.jobSettings.get(job.parentJobId)) ||
@@ -1573,10 +1684,9 @@ export class ProductService {
           this.slots.forgetRoot(job.rootJobId || job.id);
           this.jobControllers.delete(job.id);
           this.jobSettings.delete(job.id);
-          this.steers.delete(job.taskId || bot.id);
+          this.steers.delete(bot.id);
           await this.finishSteering(sessionId, job.runId);
           this.db.put("job", job);
-          this.coding.finished(job);
           this.avatarCollection.finish(job);
           this.notify(bot.id, job.id);
         }
@@ -1633,33 +1743,12 @@ export class ProductService {
     const job = this.db
       .all<Job>("job")
       .find((j) => j.botId === botId && j.runId === runId);
-    if (
-      job?.taskId &&
-      this.coding.get(job.taskId).mode === "plan" &&
-      ![
-        "read_file",
-        "list_files",
-        "search_files",
-        "glob",
-        "grep",
-        "read_history",
-        "search_history",
-        "list_projects",
-        "read_memory",
-        "search_memory",
-        "list_skills",
-        "read_skill",
-        "write_todos",
-      ].includes(tool)
-    )
-      return {
-        effect: "deny",
-        reason: "readonly",
-        explicitAsk: false,
-        matchedRuleIds: [],
-      };
     const confirmKnowledge =
-      !!job?.taskId &&
+      !!job?.workContextId &&
+      !!this.tasks.store.conversations.context(
+        this.bot(botId).sessionId,
+        job.workContextId,
+      ).git &&
       !!job.location?.projectId &&
       ["remember", "update_memory", "manage_memory"].includes(tool);
     const a = (args && typeof args === "object" ? args : {}) as Record<
@@ -1985,6 +2074,7 @@ export class ProductService {
       lastAt: old?.lastAt,
       permissionBotIds: old?.permissionBotIds || permissionBotIds,
       location:
+        (projectId ? this.tasks.locations.project(projectId) : undefined) ||
         old?.location ||
         location ||
         this.tasks.locations.lock(
@@ -1994,6 +2084,40 @@ export class ProductService {
     });
     this.notify(botId);
     return routine;
+  }
+  async runRoutine(r: Routine, requestId: string) {
+    const existing = this.db.get<Job>("job", requestId);
+    if (existing) return existing;
+    let location = r.location;
+    let gitContext: import("../shared/coding.ts").ConversationWorkspace["git"];
+    if (r.projectId) {
+      this.validateContextModel(this.runnableBot(r.botId));
+      const project = this.tasks.projects.get(r.projectId);
+      const work = await createTaskWorktree(
+        this.tasks.store.directory,
+        project.path,
+        createHash("sha256").update(requestId).digest("hex").slice(0, 32),
+        r.branch,
+        "exclude",
+        this.workspaces.worktreeRoot,
+      );
+      location = {
+        ...this.tasks.locations.project(project.id),
+        id:
+          "routine-" +
+          createHash("sha256").update(requestId).digest("hex").slice(0, 24),
+        path: work.path,
+        kind: "worktree",
+      };
+      gitContext = work.git;
+    }
+    return this.submit(
+      r.botId,
+      { requestId, prompt: r.prompt, contextKind: "routine" },
+      { permissionBotIds: r.permissionBotIds },
+      location,
+      gitContext,
+    );
   }
   async tick() {
     for (const r of this.db.all<Routine>("routine"))
@@ -2022,44 +2146,13 @@ export class ProductService {
           "9999";
         r.history = [...r.history, { at: r.lastAt, jobId: id }].slice(-100);
         this.db.put("routine", r);
-        if (r.projectId) {
-          const active = this.coding
-            .list()
-            .find(
-              (t) =>
-                r.history.some((h) => h.jobId === t.id) &&
-                (this.coding.busy(t) ||
-                  (t.pullRequest && !["done", "stopped"].includes(t.phase))),
-            );
-          if (active) {
-            r.history[r.history.length - 1].jobId = active.id;
-            this.db.put("routine", r);
-          }
-          if (!active)
-            await this.coding
-              .create(r.botId, {
-                requestId: createHash("sha256").update(id).digest("hex"),
-                prompt: r.prompt,
-                projectId: r.projectId,
-                branch: r.branch,
-                dirty: "exclude",
-              })
-              .then((task) => {
-                r.history[r.history.length - 1].jobId = task.id;
-                this.db.put("routine", r);
-              })
-              .catch((error) => {
-                r.blockedReason = (error as Error).message;
-                this.db.put("routine", r);
-              });
-          continue;
+        try {
+          await this.runRoutine(r, id);
+        } catch (error) {
+          r.blockedReason = (error as Error).message;
+          this.db.put("routine", r);
+          this.notify(r.botId);
         }
-        await this.submit(
-          r.botId,
-          { requestId: id, prompt: r.prompt, contextKind: "routine" },
-          { permissionBotIds: r.permissionBotIds },
-          r.location,
-        );
       }
   }
   tools(bot: Bot, runId: string): AgentTool[] {
@@ -2072,11 +2165,11 @@ export class ProductService {
           const job = this.db
             .all<Job>("job")
             .find((j) => j.runId === runId && j.botId === bot.id);
-          if (!job?.taskId) fail("請在開發任務中驗證網頁。");
-          const task = this.coding.get(job!.taskId!);
+          if (!job?.workContextId) fail("找不到目前話題。");
+          const location = this.workLocation(bot, runId);
           const receipt = await verifyWeb(
-            task.location.path,
-            task.id,
+            location.path,
+            job!.workContextId!,
             runId,
             input.path,
             input.steps,
@@ -2093,14 +2186,14 @@ export class ProductService {
       ),
       makeTool(
         "track_pull_request",
-        "After actually creating or finding the task PR using gh/glab/az or MCP, register its HTTPS URL here. Verifies its repository and fetches real status. Continues CI failures and requested changes in this same task, at most 3 follow-up runs. Does not merge.",
+        "After actually creating or finding the conversation PR using gh/glab/az or MCP, register its HTTPS URL here. Verifies its repository and fetches real status. Continues CI failures and requested changes in this same conversation, at most 3 follow-up runs. Does not merge.",
         ["url"],
         async (input) => {
           const job = this.db
             .all<Job>("job")
             .find((j) => j.runId === runId && j.botId === bot.id);
-          if (!job?.taskId) fail("請先建立獨立開發任務。");
-          return this.coding.track(job!.taskId!, input.url);
+          if (!job?.workContextId) fail("找不到目前話題。");
+          return this.workspaces.track(bot.id, job!.workContextId!, input.url);
         },
       ),
       makeTool(
@@ -2109,12 +2202,6 @@ export class ProductService {
         [],
         async () =>
           this.tasks.projects.list().filter((p) => p.id !== "workspace"),
-      ),
-      makeTool(
-        "create_coding_task",
-        "Create an independent implementation task and worktree. Use an existing projectId, or empty string for a task without a repository. mode is work or plan. Do not call for ordinary discussion. Return its task id; work continues in the task.",
-        ["prompt", "projectId", "mode"],
-        async (input) => this.coding.create(bot.id, input),
       ),
       makeTool(
         "list_bots",
@@ -2223,7 +2310,7 @@ export class ProductService {
           const job = this.db
             .all<Job>("job")
             .find((j) => j.botId === bot.id && j.runId === runId);
-          return this.browser.act(job?.taskId || bot.id, a, !!job?.taskId);
+          return this.browser.act(bot.id, a, !!job?.location?.projectId);
         },
       ),
       makeTool(
@@ -2259,13 +2346,7 @@ export class ProductService {
             .find((j) => j.runId === runId && j.botId === bot.id);
           return this.routine(
             bot.id,
-            job?.taskId && this.coding.get(job.taskId).git
-              ? {
-                  ...a,
-                  projectId: job.location?.projectId,
-                  branch: this.coding.get(job.taskId).git!.base,
-                }
-              : a,
+            a,
             undefined,
             job?.permissionBotIds || job?.delegationPath,
             this.workLocation(bot, runId),
@@ -2535,68 +2616,6 @@ export class ProductService {
       await this.bootstrap();
       return reply(res, { ok: true });
     }
-    if (path === "/coding-tasks") {
-      if (req.method === "GET") return reply(res, this.coding.list());
-      if (req.method === "POST") {
-        const input = await body(req);
-        return reply(
-          res,
-          await this.coding.create(string(input.botId, 100), input),
-          201,
-        );
-      }
-    }
-    const codingMatch = path.match(
-      /^\/coding-tasks\/([^/]+)(?:\/(changes|read|message|plan|start|stop|branch|branches|target|complete|rename|retry|steer|verification))?$/,
-    );
-    if (codingMatch) {
-      const [, id, action] = codingMatch;
-      if (req.method === "GET" && !action)
-        return reply(res, this.coding.detail(id));
-      if (req.method === "GET" && action === "verification") {
-        const task = this.coding.get(id);
-        const receipt = this.db
-          .all<WebVerification>("web-verification")
-          .filter((r) => r.taskId === id)
-          .at(-1);
-        const applicable =
-          !!receipt || (await hasStaticWebPage(task.location.path));
-        return reply(res, {
-          applicable,
-          receipt: receipt
-            ? {
-                ...receipt,
-                stale: await verificationStale(task.location.path, receipt),
-              }
-            : null,
-        });
-      }
-      if (req.method === "POST" && action === "steer") {
-        const task = this.coding.get(id);
-        return reply(
-          res,
-          await this.steerMessage(task.botId, await body(req), id),
-        );
-      }
-      if (req.method === "GET" && action === "branches")
-        return reply(
-          res,
-          await repositoryInfo(this.coding.get(id).location.path),
-        );
-      if (req.method === "GET" && action === "changes")
-        return reply(
-          res,
-          await this.coding.changes(
-            id,
-            url.searchParams.get("path") || undefined,
-          ),
-        );
-      if (req.method === "POST" && action)
-        return reply(
-          res,
-          await this.coding.action(id, action, await body(req)),
-        );
-    }
     const repoMatch = path.match(/^\/projects\/([^/]+)\/git$/);
     if (repoMatch && req.method === "GET")
       return reply(
@@ -2844,6 +2863,36 @@ export class ProductService {
       const id = match[1],
         action = match[2] || "";
       const bot = this.bot(id);
+      if (action === "verification" && method === "GET") {
+        const context = this.tasks.store.conversations.context(
+          bot.sessionId,
+          url.searchParams.get("context") || undefined,
+        );
+        const location = this.tasks.locations.ensure(bot.sessionId, context.id);
+        const receipt = this.db
+          .all<WebVerification>("web-verification")
+          .filter((r) => r.workContextId === context.id)
+          .at(-1);
+        return reply(res, {
+          applicable: !!receipt || (await hasStaticWebPage(location.path)),
+          receipt: receipt
+            ? {
+                ...receipt,
+                stale: await verificationStale(location.path, receipt),
+              }
+            : null,
+        });
+      }
+      if (action === "changes" && method === "GET")
+        return reply(
+          res,
+          await this.workspaces.changes(
+            id,
+            url.searchParams.get("context") ||
+              this.tasks.store.conversations.activeId(bot.sessionId),
+            url.searchParams.get("path") || undefined,
+          ),
+        );
       if (action === "work-location") {
         const history = this.tasks.store.conversations;
         if (method === "GET") {
@@ -2854,65 +2903,123 @@ export class ProductService {
           const input = await body(req);
           const context = history.context(bot.sessionId);
           if (input.contextId !== context.id)
-            fail("目前任務已變更，請重新載入。", 409);
-          const location: WorkLocation =
-            input.projectId !== undefined
-              ? this.tasks.locations.project(string(input.projectId, 100))
-              : {
-                  id: `folder-${randomUUID()}`,
-                  name:
-                    typeof input.name === "string" && input.name.trim()
-                      ? string(input.name, 100)
-                      : basename(string(input.path, 4096)),
-                  path: await this.tasks.projects.resolvePath(
-                    string(input.path, 4096),
-                  ),
-                  kind: "folder",
-                  memoryKey: `task:${context.id}`,
+            fail("目前話題已變更，請重新載入。", 409);
+          if (
+            context.locationLockedAt ||
+            this.preparingLocations.has(context.id) ||
+            [...this.incoming.keys()].some((key) => key.startsWith(id + ":"))
+          )
+            fail("工作位置已固定或正在設定，請完成後開啟新話題。", 409);
+          this.preparingLocations.add(context.id);
+          try {
+            let location: WorkLocation =
+              input.projectId !== undefined
+                ? this.tasks.locations.project(string(input.projectId, 100))
+                : {
+                    id: `folder-${randomUUID()}`,
+                    name:
+                      typeof input.name === "string" && input.name.trim()
+                        ? string(input.name, 100)
+                        : basename(string(input.path, 4096)),
+                    path: await this.tasks.projects.resolvePath(
+                      string(input.path, 4096),
+                    ),
+                    kind: "folder",
+                    memoryKey: `task:${context.id}`,
+                  };
+            let gitContext: import("../shared/coding.ts").ConversationWorkspace["git"];
+            if (input.worktree === true) {
+              const project = location.projectId
+                ? this.tasks.projects.get(location.projectId)
+                : await this.tasks.projects.add({
+                    name: location.name,
+                    path: location.path,
+                  });
+              const work = await createTaskWorktree(
+                this.tasks.store.directory,
+                location.path,
+                createHash("sha256")
+                  .update(context.id)
+                  .digest("hex")
+                  .slice(0, 32),
+                typeof input.branch === "string" && input.branch
+                  ? input.branch
+                  : undefined,
+                typeof input.dirty === "string" ? input.dirty : undefined,
+                this.workspaces.worktreeRoot,
+              );
+              location = {
+                ...location,
+                id: "worktree-" + context.id,
+                path: work.path,
+                kind: "worktree",
+                projectId: project.id,
+                memoryKey: "project:" + project.id,
+              };
+              gitContext = work.git;
+            } else {
+              const info = await repositoryInfo(location.path).catch(
+                () => undefined,
+              );
+              if (info)
+                gitContext = {
+                  repository: location.path,
+                  base: info.branch,
+                  baseCommit: info.commit,
+                  branch: info.branch,
+                  target: info.branch,
                 };
-          await this.tasks.locations.workspace(location).ready();
-          if (context.locationLockedAt)
-            fail("任務已固定工作位置，請建立新任務。", 409);
-          this.tasks.locations.register(location);
-          const attachments = this.db
-            .all<Artifact>("artifact")
-            .filter(
-              (a) =>
-                a.botId === bot.id &&
-                a.workContextId === context.id &&
-                a.kind === "attachment",
-            );
-          for (const a of attachments) {
-            if (a.location?.id === location.id) continue;
-            const source = a.snapshotPath
-              ? await new Workspace(
-                  join(this.tasks.store.directory, "artifacts"),
-                ).resolve(a.snapshotPath)
-              : await this.tasks.workspace.resolve(a.path);
-            const data = await readFile(source);
-            try {
-              await this.files.upload(location.id, a.path, data);
-            } catch (e) {
-              if (
-                (e as { status?: number }).status !== 409 ||
-                (await fileRevision(
-                  await this.files.download(location.id, a.path),
-                )) !== createHash("sha256").update(data).digest("hex")
-              )
-                throw e;
             }
+            await this.tasks.locations.workspace(location).ready();
+            if (context.locationLockedAt)
+              fail("話題已固定工作位置，請建立新話題。", 409);
+            this.tasks.locations.register(location);
+            const attachments = this.db
+              .all<Artifact>("artifact")
+              .filter(
+                (a) =>
+                  a.botId === bot.id &&
+                  a.workContextId === context.id &&
+                  a.kind === "attachment",
+              );
+            for (const a of attachments) {
+              if (a.location?.id === location.id) continue;
+              const source = a.snapshotPath
+                ? await new Workspace(
+                    join(this.tasks.store.directory, "artifacts"),
+                  ).resolve(a.snapshotPath)
+                : await this.tasks.workspace.resolve(a.path);
+              const data = await readFile(source);
+              try {
+                await this.files.upload(location.id, a.path, data);
+              } catch (e) {
+                if (
+                  (e as { status?: number }).status !== 409 ||
+                  (await fileRevision(
+                    await this.files.download(location.id, a.path),
+                  )) !== createHash("sha256").update(data).digest("hex")
+                )
+                  throw e;
+              }
+            }
+            if (history.activeId(bot.sessionId) !== context.id)
+              fail("目前話題已變更，請重新載入。", 409);
+            const result = this.tasks.locations.bind(
+              bot.sessionId,
+              context.id,
+              location,
+            );
+            for (const a of attachments)
+              this.db.put("artifact", { ...a, location });
+            const updated = history.updateContext(bot.sessionId, context.id, {
+              git: gitContext,
+              pullRequest: undefined,
+            });
+            this.notify(id);
+            return reply(res, updated);
+          } finally {
+            this.preparingLocations.delete(context.id);
           }
-          if (history.activeId(bot.sessionId) !== context.id)
-            fail("目前任務已變更，請重新載入。", 409);
-          const result = this.tasks.locations.bind(
-            bot.sessionId,
-            context.id,
-            location,
-          );
-          for (const a of attachments)
-            this.db.put("artifact", { ...a, location });
-          this.notify(id);
-          return reply(res, result);
         }
       }
       if (!action && method === "DELETE") {
@@ -2937,7 +3044,7 @@ export class ProductService {
               input.workContextId !==
                 this.tasks.store.conversations.activeId(bot.sessionId)
             )
-              fail("目前任務已變更，請重新載入。", 409);
+              fail("目前話題已變更，請重新載入。", 409);
             const key = this.workLocation(bot).memoryKey;
             const existing = input.id
               ? state.memories.find(
@@ -3036,7 +3143,7 @@ export class ProductService {
         return;
       }
       if (action === "messages" && method === "POST") {
-        reply(res, await this.submit(id, await body(req)), 202);
+        reply(res, await this.receiveMessage(id, await body(req)), 202);
         return;
       }
       const dismiss = action.match(/^jobs\/([^/]+)\/dismiss$/);
@@ -3107,7 +3214,7 @@ export class ProductService {
           bot.sessionId,
         );
         if (input.contextId !== contextId)
-          fail("目前任務已變更，請重新載入。", 409);
+          fail("目前話題已變更，請重新載入。", 409);
         const artifact =
           this.db.get<Artifact>("artifact", string(input.artifactId, 100)) ||
           fail("找不到成果。", 404);
@@ -3121,7 +3228,7 @@ export class ProductService {
         if (
           this.tasks.store.conversations.activeId(bot.sessionId) !== contextId
         )
-          fail("目前任務已變更，請重新載入。", 409);
+          fail("目前話題已變更，請重新載入。", 409);
         const location = this.tasks.locations.ensure(bot.sessionId, contextId);
         const path = `references/${randomUUID()}/${basename(artifact.path)}`;
         await this.files.upload(location.id, path, data);
@@ -3140,7 +3247,7 @@ export class ProductService {
           url.searchParams.has("contextId") &&
           url.searchParams.get("contextId") !== uploadContextId
         )
-          fail("目前任務已變更，請重新載入。", 409);
+          fail("目前話題已變更，請重新載入。", 409);
         const name = string(
           decodeURIComponent(String(req.headers["x-file-name"] || "")),
           200,
@@ -3172,7 +3279,7 @@ export class ProductService {
           uploadContextId !==
           this.tasks.store.conversations.activeId(bot.sessionId)
         )
-          fail("目前任務已變更，請重新載入。", 409);
+          fail("目前話題已變更，請重新載入。", 409);
         const location = this.tasks.locations.ensure(
           bot.sessionId,
           uploadContextId,
@@ -3184,7 +3291,7 @@ export class ProductService {
           this.tasks.locations.ensure(bot.sessionId, uploadContextId).id !==
             location.id
         )
-          fail("目前任務已變更，請重新上傳附件。", 409);
+          fail("目前話題已變更，請重新上傳附件。", 409);
         reply(
           res,
           await this.publish(
@@ -3273,27 +3380,7 @@ export class ProductService {
         return;
       }
       if (method === "POST" && routine[2]) {
-        if (r.projectId) {
-          const task = await this.coding.create(r.botId, {
-            prompt: r.prompt,
-            projectId: r.projectId,
-            branch: r.branch,
-            dirty: "exclude",
-          });
-          r.history.push({ at: now(), jobId: task.id });
-          this.db.put("routine", r);
-          return reply(res, task);
-        }
-        const job = await this.submit(
-          r.botId,
-          {
-            contextKind: "routine",
-            prompt: r.prompt,
-            requestId: randomUUID(),
-          },
-          { permissionBotIds: r.permissionBotIds },
-          r.location,
-        );
+        const job = await this.runRoutine(r, randomUUID());
         r.history.push({ at: now(), jobId: job.id });
         this.db.put("routine", r);
         reply(res, job);

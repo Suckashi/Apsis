@@ -39,6 +39,29 @@ test("work log persists commentary and tool order without duplicate terminal upd
       id: "second-note",
       text: "已確認檔案存在，接著驗證內容。",
     });
+    options.emit({
+      type: "execution",
+      evidence: {
+        kind: "planning",
+        todos: [{ content: "確認檔案", status: "completed" }],
+      },
+    });
+    options.emit({
+      type: "execution",
+      evidence: {
+        kind: "subagent",
+        activity: {
+          id: "child",
+          name: "general-purpose",
+          task: "分析檔案",
+          status: "completed",
+          progress: "檢查內容",
+          resultSummary: "已確認",
+          startedAt: op.startedAt,
+          endedAt: op.startedAt,
+        },
+      },
+    });
     options.emit({ type: "delta", text: "完成驗證。" });
     return { text: "完成驗證。" };
   });
@@ -49,8 +72,9 @@ test("work log persists commentary and tool order without duplicate terminal upd
   const run = reloaded.list(session.id)[0];
   assert.deepEqual(
     run.timeline?.map((e) => e.kind),
-    ["commentary", "operation", "commentary"],
+    ["commentary", "operation", "commentary", "planning", "subagent"],
   );
+  assert.equal(run.timeline?.at(-1)?.kind, "subagent");
   assert.equal(run.operations.length, 1);
   assert.equal(run.operations[0].status, "succeeded");
   assert.equal(run.text, "完成驗證。");

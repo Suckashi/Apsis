@@ -45,7 +45,7 @@ export function currentWorkStatus(input: {
     queued: "排隊中",
     waiting: "等待模型回應",
     reply: "正在產生回覆",
-    ready: "隨時可以交辦任務",
+    ready: "想做什麼，直接告訴我",
     unavailable: "模型需要設定",
     disconnected: "連線中斷，正在重新連線",
   };
@@ -64,7 +64,7 @@ export function currentWorkStatus(input: {
           ? progress.label
           : labels[phase],
     detail: !input.connected
-      ? "目前顯示最後收到的狀態，任務可能仍在執行。"
+      ? "目前顯示最後收到的狀態，Bot 可能仍在處理。"
       : input.modelIssue,
     attention: awaitingApproval || !!input.modelIssue,
   };
@@ -177,4 +177,24 @@ export function approvalPresentation(
               ? "這項操作會存取外部服務，實際動作請查看技術詳情。"
               : "請確認操作對象與參數後再核准。";
   return { action: operationLabel({ name: approval.tool }), target, impact };
+}
+
+/** Runtime children are derived from run evidence, never from persistent Jobs. */
+export function nativeSubagents(run: import("./types.ts").TaskRun) {
+  const children = new Map<string, import("./types.ts").SubagentActivity>();
+  for (const entry of run.timeline || [])
+    if (entry.kind === "subagent")
+      children.set(entry.activity.id, entry.activity);
+  return [...children.values()].map((child) =>
+    child.status === "running" && run.status !== "running"
+      ? {
+          ...child,
+          status:
+            run.status === "cancelled"
+              ? ("cancelled" as const)
+              : ("failed" as const),
+          progress: run.status === "cancelled" ? "已停止" : "執行已中斷",
+        }
+      : child,
+  );
 }

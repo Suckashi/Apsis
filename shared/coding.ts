@@ -1,15 +1,6 @@
 import type { WorkLocation } from "./types.ts";
 
-export interface CodingTask {
-  id: string;
-  botId: string;
-  sessionId: string;
-  contextId: string;
-  title: string;
-  prompt: string;
-  createdAt: string;
-  updatedAt: string;
-  projectId?: string;
+export interface ConversationWorkspace {
   location: WorkLocation;
   git?: {
     repository: string;
@@ -18,25 +9,6 @@ export interface CodingTask {
     branch: string;
     target: string;
   };
-  mode: "work" | "plan";
-  phase:
-    | "queued"
-    | "working"
-    | "planning"
-    | "plan-ready"
-    | "review"
-    | "blocked"
-    | "stopped"
-    | "done";
-  plan: string;
-  planVersion: number;
-  replyVersion: number;
-  readVersion: number;
-  jobId?: string;
-  error?: string;
-  summary?: string;
-  pullRequest?: PullRequestLink;
-  requestFingerprint?: string;
 }
 export interface GitChange {
   path: string;

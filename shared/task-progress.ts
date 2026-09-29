@@ -14,6 +14,7 @@ export const taskStatusLabels = {
 } as const;
 
 const toolLabels: Record<string, string> = {
+  task: "建立子代理",
   model_retry: "重試模型連線",
   scratch_write_file: "寫入暫存檔",
   scratch_read_file: "讀取暫存檔",

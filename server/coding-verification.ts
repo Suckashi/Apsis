@@ -110,7 +110,7 @@ export async function verificationStale(
 /** A disposable browser with only this workspace's static assets accessible. */
 export async function verifyWeb(
   root: string,
-  taskId: string,
+  workContextId: string,
   runId: string,
   path: string,
   input: unknown,
@@ -126,7 +126,7 @@ export async function verifyWeb(
     );
   const receipt: WebVerification = {
     id: randomUUID(),
-    taskId,
+    workContextId,
     runId,
     path,
     checkedAt: new Date().toISOString(),

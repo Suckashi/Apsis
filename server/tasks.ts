@@ -182,8 +182,22 @@ export class TaskService {
     const emit = (event: RunEvent) => {
       if ("text" in event && typeof event.text === "string")
         event = { ...event, text: redact(event.text) };
+      if (event.type === "execution") {
+        const evidence = JSON.parse(redact(JSON.stringify(event.evidence)));
+        run.timeline!.push({
+          ...evidence,
+          id: randomUUID(),
+          at: new Date().toISOString(),
+        });
+        void this.runs.save(run).catch(() => {});
+      }
       if (event.type === "delta") live.text += event.text;
       if (event.type === "commentary") {
+        run.progress = {
+          kind: "message",
+          text: event.text,
+          updatedAt: new Date().toISOString(),
+        };
         if (!run.timeline!.some((entry) => entry.id === event.id))
           run.timeline!.push({
             kind: "commentary",

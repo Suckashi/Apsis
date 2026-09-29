@@ -10,7 +10,7 @@ const english = new Map<string, string>([
   ["需處理", "Action needed"],
   ["未讀", "Unread"],
   ["正在執行操作", "Running an operation"],
-  ["隨時可以交辦任務", "Ready for your next task"],
+  ["想做什麼，直接告訴我", "Tell me what you would like to do"],
   ["模型需要設定", "Set up a model"],
   ["回覆結束", "Reply finished"],
   ["回覆紀錄", "Reply history"],
@@ -79,7 +79,7 @@ const english = new Map<string, string>([
   ["Bot 協作中", "Collaborating"],
   ["核准或拒絕後，任務才會繼續。", "Approve or deny the request to continue."],
   [
-    "目前顯示最後收到的狀態，任務可能仍在執行。",
+    "目前顯示最後收到的狀態，Bot 可能仍在處理。",
     "Showing the last known status. The task may still be running.",
   ],
   [
@@ -122,7 +122,7 @@ const english = new Map<string, string>([
     "正在停止任務，等待執行中的操作結束…",
     "Stopping task. Waiting for active operations to finish…",
   ],
-  ["正在準備任務，等待模型回應…", "Preparing task. Waiting for the model…"],
+  ["正在準備回覆，等待模型回應…", "Preparing task. Waiting for the model…"],
   ["排隊中", "Queued"],
   ["執行中", "Running"],
   ["已完成", "Completed"],

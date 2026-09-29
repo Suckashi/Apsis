@@ -144,7 +144,7 @@ test("shell retains the legacy timeout and clamps overrides to 1–120 seconds",
   }
 });
 
-test("DeepAgents applies model budgets, excludes bypass tools, and retains private scratch", async (t) => {
+test("DeepAgents applies model budgets, enables native task and excludes host execute, and retains private scratch", async (t) => {
   const requests: Record<string, any>[] = [];
   let nextTool: string | undefined;
   const upstream = createServer(async (req, res) => {
@@ -234,7 +234,7 @@ test("DeepAgents applies model budgets, excludes bypass tools, and retains priva
     assert.ok(!names.includes(name));
   }
   assert.ok(names.includes("shell"));
-  assert.ok(!names.includes("task"));
+  assert.ok(names.includes("task"));
   assert.ok(!names.includes("execute"));
   assert.equal(requests[0].reasoning_effort, undefined);
   for (const name of ["task", "execute", "scratch_write_file"]) {
@@ -251,7 +251,7 @@ test("DeepAgents applies model budgets, excludes bypass tools, and retains priva
     const result = await runDeep(options);
     assert.equal(requests[start].model, "fixture");
     assert.equal(requests[start].max_tokens, 8192);
-    assert.equal(requests.length - start, 2);
+    assert.equal(requests.length - start, name === "task" ? 3 : 2);
     if (name === "scratch_write_file") {
       assert.equal(result.engineState?.version, 1);
       assert.ok(
@@ -266,7 +266,7 @@ test("DeepAgents applies model budgets, excludes bypass tools, and retains priva
         ),
       );
       await assert.rejects(base.workspace.read("private.txt"));
-    } else {
+    } else if (name === "execute") {
       assert.match(
         JSON.stringify(requests.at(-1)?.messages),
         /not available|not a valid tool/,

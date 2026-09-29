@@ -2,6 +2,41 @@ import { getSettingsLocale } from "./settings-locale.ts";
 
 // Source messages are stable dictionary keys. User content is never translated.
 export const english: Record<string, string> = {
+  專案設定: "Project settings",
+  "正在處理…": "Working…",
+  處理失敗: "Could not finish",
+  開啟新話題: "Start a new topic",
+  聊天選項: "Chat options",
+  新話題: "New topic",
+  已採用: "Applied",
+  已收到: "Received",
+  重新傳送: "Send again",
+  "接下來：": "Up next:",
+  停止回覆: "Stop response",
+  "直接傳訊息，補充你希望 Bot 做的事。":
+    "Send a message to add instructions while your Bot works.",
+  關閉聊天選項: "Close chat options",
+  "停止回覆並刪除中…": "Stopping and deleting…",
+  "工作位置已固定；變更位置請建立新話題。":
+    "The working folder is fixed. Start a new topic to change it.",
+  "使用隔離的 Git 工作區": "Use an isolated Git worktree",
+  "起始分支（留空使用目前分支）":
+    "Starting branch (leave blank for current branch)",
+  未提交修改: "Uncommitted changes",
+  有修改時詢問: "Ask if there are changes",
+  重新整理: "Refresh",
+  下載: "Download",
+  瀏覽先前話題: "Browse earlier topics",
+  儲存: "Save",
+  "選擇 Git 工作資料夾後，可在這裡查看修改。":
+    "Choose a Git working folder to view changes here.",
+  "開啟 PR": "Open PR",
+  "載入中…": "Loading…",
+  尚無修改: "No changes yet",
+  "此檔案無法顯示文字差異，請從檔案面板下載。":
+    "Text differences are unavailable. Download this file from the files panel.",
+  修改前: "Before",
+  修改後: "After",
   專案: "Projects",
   這個專案的任務與變更: "Tasks and changes in this project",
   "Bot 設定": "Bot settings",
@@ -100,7 +135,7 @@ export const english: Record<string, string> = {
     "Saved the submitted version; newer edits remain in your draft.",
   專案記憶: "Project memory",
   既有工作記憶: "Legacy work memory",
-  目前任務記憶: "Current task memory",
+  目前話題記憶: "Current task memory",
   連結本機資料夾: "Link local folder",
   主機資料夾完整路徑: "Absolute folder path on the host",
   連結: "Link",
@@ -337,18 +372,18 @@ export const english: Record<string, string> = {
   "未填寫時預設 256K（262,144 tokens）":
     "Defaults to 256K (262,144 tokens) when blank",
   互動聊天: "Chat",
-  更早的任務: "Earlier tasks",
+  更早的話題: "Earlier tasks",
   需設定: "Setup required",
   "Context token 上限": "Context token limit",
   "官方模型可自動判定；自訂端點需設定":
     "Official models use known profiles; custom endpoints require a limit",
-  歷史搜尋與任務: "History and tasks",
+  搜尋聊天與話題: "History and tasks",
   搜尋歷史: "Search history",
   引用: "Quote",
   前後文: "Surrounding messages",
   更早的搜尋結果: "Earlier results",
   瀏覽舊任務: "Browse previous tasks",
-  選擇任務: "Select a task",
+  選擇話題: "Select a task",
   更早的訊息: "Earlier messages",
   "Context 用量": "Context usage",
   實際回報: "Reported",
@@ -513,7 +548,7 @@ export const english: Record<string, string> = {
   "開啟 Bot 名單": "Open Bot list",
   關閉錯誤: "Dismiss error",
   載入中: "Loading",
-  隨時可以交辦任務: "Ready for your next task",
+  "想做什麼，直接告訴我": "Tell me what you would like to do",
   正在工作: "Working",
   等待核准: "Awaiting approval",
   "自訂 Bot：名稱、圖示、角色與模型":
@@ -530,7 +565,7 @@ export const english: Record<string, string> = {
   "幫我研究一個主題，整理來源與結論":
     "Research a topic and summarize the sources and findings",
   "讀取我的文件，整理成一份報告": "Read my documents and put together a report",
-  協助我完成一個程式開發任務: "Help me complete a coding task",
+  幫我修改程式並驗證結果: "Help me complete a coding task",
   "先連接一個模型，即可開始對話": "Connect a model to start a conversation",
   "回覆：": "Reply to:",
   無法連線至模型供應商: "Unable to connect to the model provider",
@@ -542,7 +577,7 @@ export const english: Record<string, string> = {
   "下一個任務：": "Next task:",
   重新交辦: "Retry task",
   關閉: "Close",
-  關閉這則任務提示: "Dismiss this task notice",
+  關閉這則提示: "Dismiss this task notice",
   "載入對話…": "Loading conversation…",
   取消回覆: "Cancel reply",
   "移除 {0}": "Remove {0}",
@@ -644,7 +679,7 @@ export const english: Record<string, string> = {
   "隱藏不會暫停排程。": "Hiding a Bot does not pause its schedules.",
   "刪除 Bot": "Delete Bot",
   "刪除「": "Delete “",
-  "此操作無法復原。將停止這位 Bot 的任務，刪除對話、專屬記憶與技能、排程、草稿、核准規則，以及附件與成果清單。":
+  "此操作無法復原。將停止這位 Bot 的工作，刪除對話、專屬記憶與技能、排程、草稿、核准規則，以及附件與成果清單。":
     "This cannot be undone. It stops this Bot’s tasks and deletes its conversation, private memory and skills, schedules, drafts, approval rules, and attachment and result lists.",
   "工作區實體檔案與執行日誌會保留；已完成的外部操作不會撤銷。":
     "Workspace files and execution logs are kept. Completed external actions are not undone.",

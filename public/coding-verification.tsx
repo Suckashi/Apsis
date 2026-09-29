@@ -3,11 +3,13 @@ import type { WebVerification } from "../shared/coding-verification.ts";
 
 export function CodingVerification({
   api,
-  taskId,
+  botId,
+  contextId,
   updateKey,
 }: {
   api: <T>(path: string, method?: string, body?: unknown) => Promise<T>;
-  taskId: string;
+  botId: string;
+  contextId: string;
   updateKey?: string | number;
 }) {
   const [receipt, setReceipt] = useState<WebVerification | null>(null);
@@ -20,7 +22,7 @@ export function CodingVerification({
       if (pending) return;
       pending = true;
       void api<{ applicable: boolean; receipt: WebVerification | null }>(
-        `/coding-tasks/${taskId}/verification`,
+        `/bots/${botId}/verification?context=${encodeURIComponent(contextId)}`,
       )
         .then((value) => {
           if (active) {
@@ -42,7 +44,7 @@ export function CodingVerification({
       active = false;
       clearInterval(timer);
     };
-  }, [api, taskId, updateKey]);
+  }, [api, botId, contextId, updateKey]);
   if (!applicable && !error) return null;
   const title =
     error ||

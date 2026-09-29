@@ -84,7 +84,9 @@ try {
   });
   app.product.notify(bot.id);
   await expect(page.locator(".model-setup-notice")).toHaveCount(0);
-  const picker = page.locator(".composer-tools .model-picker");
+  await page.locator(".bot-actions-menu > summary").click();
+  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
+  const picker = page.locator(".mobile-compose-sheet .model-picker");
   await picker.locator("summary").click();
   const search = picker.getByRole("combobox", {
     name: "搜尋模型",
@@ -105,9 +107,14 @@ try {
   await search.press("Escape");
   await expect(picker).not.toHaveAttribute("open", "");
   await picker.locator("summary").click();
-  await page.locator(".chat-header").click({ position: { x: 5, y: 5 } });
+  await page
+    .getByRole("dialog", { name: "聊天選項", exact: true })
+    .locator("h2")
+    .click();
   await expect(picker).not.toHaveAttribute("open", "");
   await page.reload();
+  await page.locator(".bot-actions-menu > summary").click();
+  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   await expect(picker.locator("summary")).toContainText("Beta writer");
   await expect(input).toHaveValue("保留我的草稿");
 
@@ -124,6 +131,7 @@ try {
     document.documentElement.setAttribute("data-theme", "dark"),
   );
   await page.screenshot({ path: join(output, "desktop-dark.png") });
+  await page.getByRole("button", { name: "完成", exact: true }).click();
   await input.fill("hold adoption");
   await page.getByRole("button", { name: "傳送", exact: true }).click();
   await page.locator(".task-progress").waitFor();
@@ -131,12 +139,12 @@ try {
   await page.getByRole("button", { name: "補充指示", exact: true }).click();
   await expect(
     page.locator('.message-delivery[data-state="pending"]'),
-  ).toHaveText("待採用");
+  ).toHaveText("已收到");
   assert.ok(adopt);
   await adopt();
   await expect(
     page.locator('.message-delivery[data-state="applied"]'),
-  ).toHaveText("已帶入下一回合");
+  ).toHaveText("已採用");
   finishRun?.();
   await page.locator(".task-progress").waitFor({ state: "hidden" });
   await input.fill("hold cancellation");
@@ -147,7 +155,7 @@ try {
   await expect(
     page.locator('.message-delivery[data-state="pending"]'),
   ).toBeVisible();
-  await page.getByRole("button", { name: "停止任務", exact: true }).click();
+  await page.getByRole("button", { name: "停止回覆", exact: true }).click();
   await expect(
     page.locator('.message-delivery[data-state="not-applied"]'),
   ).toHaveText("未採用");

@@ -181,6 +181,7 @@ export function taskPresentation(
             current,
             run.operations.map((o) => [o.id, o.status, o.endedAt]),
             run.activity.length,
+            run.timeline?.length,
             children.map((j) => [
               j.id,
               j.status,
