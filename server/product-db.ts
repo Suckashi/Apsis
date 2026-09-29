@@ -19,6 +19,18 @@ export class ProductDB {
       .all(kind)
       .map((row) => JSON.parse(String(row.value)) as T);
   }
+  /** Synchronous only: no asynchronous work may run inside a transaction. */
+  transaction<T>(work: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = work();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   get<T>(kind: string, id: string): T | undefined {
     const row = this.db
       .prepare("SELECT value FROM records WHERE kind=? AND id=?")

@@ -12,6 +12,34 @@ export function browserExecutable() {
 }
 
 export class BotBrowser {
+  external?: import("playwright").Browser;
+  externalOpening?: Promise<import("playwright").Browser>;
+  externalPages = new Map<string, Page>();
+  async externalPage(key: string) {
+    const endpoint = process.env.APSIS_BROWSER_CDP_URL;
+    if (!endpoint)
+      throw new Error(
+        "尚未連接外部瀏覽器。請使用已設定的 Chrome DevTools MCP，或設定 APSIS_BROWSER_CDP_URL 指向使用者的瀏覽器。",
+      );
+    if (!this.external?.isConnected()) {
+      this.externalOpening ||= chromium.connectOverCDP(endpoint, {
+        timeout: 15000,
+      });
+      try {
+        this.external = await this.externalOpening;
+      } finally {
+        this.externalOpening = undefined;
+      }
+    }
+    let page = this.externalPages.get(key);
+    if (!page || page.isClosed()) {
+      const context = this.external.contexts()[0];
+      if (!context) throw new Error("外部瀏覽器沒有可用的工作階段。");
+      page = await context.newPage();
+      this.externalPages.set(key, page);
+    }
+    return page;
+  }
   directory: string;
   context?: BrowserContext;
   opening?: Promise<BrowserContext>;
@@ -41,8 +69,10 @@ export class BotBrowser {
     }
     return page;
   }
-  async act(botId: string, input: Record<string, string>) {
-    const page = await this.page(botId);
+  async act(botId: string, input: Record<string, string>, external = false) {
+    const page = external
+      ? await this.externalPage(botId)
+      : await this.page(botId);
     page.setDefaultTimeout(15000);
     if (input.action === "navigate") {
       const url = new URL(input.url);
@@ -107,5 +137,7 @@ export class BotBrowser {
   }
   async close() {
     await this.context?.close();
+    // Disconnect CDP. Never close the user's default BrowserContext.
+    await this.external?.close();
   }
 }

@@ -1,39 +1,58 @@
 # Apsis interface
 
-## Direction
+## Product direction
 
-Persistent, conversation-first Bot workspace. Use low-saturation neutral surfaces, restrained Apsis purple and three semantic approval-mode colors. Preserve colorful Bot avatars. Use whitespace, aligned content and fine separators instead of nested cards. Primary tasks stay visible; supporting information is progressively disclosed. Preserve navigation, public settings values and permission rules. This refinement follows UI UX Pro Max's general guidelines; its local database search was unavailable in this session.
+Apsis is a conversation-first workspace for a team of Bots. Every work surface should make four things clear: the current Bot and task, the current action, whether the user needs to respond, and where to inspect the result. Preserve colorful Bot avatars, independent tasks, projects, shared Skills and permission enforcement. Use short summaries with expandable, chronological evidence.
 
-## Tokens and hierarchy
+Keep the existing neutral surfaces, Apsis purple and system fonts. UI UX Pro Max's dashboard search supports restrained typography, minimal surfaces, visible focus and purposeful motion. Its marketing-page layout suggestions do not apply to this workspace. The approved Apsis direction takes precedence over generated palette or font suggestions.
 
-Source of truth: `public/bot.css` semantic variables, independently defined for light and dark themes. Purple identifies primary actions, the current navigation selection and keyboard focus. Light mode uses `#6D28D9` actions and `#EDE9FE` selections; dark mode uses `#B59AFF` actions and `#302640` selections. Composer surfaces remain neutral, with a soft border and purple focus treatment. Body/chat text is 16px, controls 14px, supporting text at least 12px. Chinese system fonts include Microsoft JhengHei UI, Microsoft JhengHei and PingFang TC. Use 4/8px spacing increments and restrained borders. No remote font requirement.
+## Layout and navigation
 
-## Approval modes
+- The desktop roster is 256px. It identifies Bots and their nested tasks, and offers project navigation. Show one highest-priority status: needs attention, running, then unread. Project task groups point to the same tasks; do not add a separate overview or inbox.
+- The central conversation and composer share an 800px maximum outer width. Use 32px horizontal gutters on desktop, 24px on small tablets and 16px on phones. The conversation has relaxed spacing; task and file lists are denser.
+- The inspector starts closed. Its primary entries are Files and Changes. Open files, diffs and plan documents in this same inspection area. Desktop width starts at 380px, is adjustable between 300px and 640px, and must leave at least 480px for the discussion. At less than 1150px the inspector overlays the workspace; on phones it fills the width and provides a close/return action.
+- Preserve desktop roster and inspector visibility preferences, temporary focus mode, per-conversation draft and reading position, and task inspection state. Temporary phone drawers must not overwrite desktop choices.
+- Settings have three primary categories: General, Models and Templates. Advanced controls, remembered approvals, MCP and shared Skills remain available through their existing secondary surfaces. Do not restore removed navigation categories.
 
-`public/approval-mode-picker.tsx` owns the shared mode labels, icons, help and selection component used by conversation and settings. Colors are semantic CSS tokens, never a substitute for names, icons or the selected check mark.
+## Conversation and composition
 
-| Value    | Label                        | Icon                      | Light / dark foreground |
-| -------- | ---------------------------- | ------------------------- | ----------------------- |
-| `manual` | 一般核准 / Manual            | Shield                    | `#2563EB` / `#93C5FD`   |
-| `yolo`   | 需要時詢問 / Ask when needed | Shield with question mark | `#A16207` / `#FCD34D`   |
-| `auto`   | 不要求核准 / Never ask       | Lightning                 | `#BE123C` / `#FDA4AF`   |
+Reading order is the user's request, Bot commentary, expandable work evidence, final answer, then relevant results and verification. Tool commands, raw output and JSON remain accessible in details. Do not collapse the final answer into work history. Keep manually expanded history open and preserve reading position when streaming or loading history.
 
-Use mode color only on mode icons, labels and selected/hovered options; do not tint the entire composer. The composer trigger displays icon, current mode and chevron. Its popover directly exposes three rows with a selected check, then “所有 Bot · 下次操作生效” and collapsed “模式說明”. Settings uses the same three rows. Long permission details remain available on demand; errors and pending approvals stay visible.
+The current progress strip has two rows: current action and elapsed time; last update or required response and the appropriate action buttons. A connection interruption is independent of execution state. Say that the task may still be running and retain its last known status. Never infer failure from a quiet period or invent a percentage.
 
-Composer selection saves immediately, prevents duplicate submissions and closes only after success. Settings selections remain drafts until Save. Failed saves keep the error and actual effective mode visible; conflicts reload current settings through the existing flow. Arrow/Home/End keys move focus; Enter/Space confirms; Escape dismisses and returns focus to the trigger. Keep `manual / yolo / auto`, settings revisions and API contracts unchanged.
+Use shared conversation primitives, progress, run history and approval presentation for the Bot conversation and task discussion. Completion of a response is distinct from verified success. Missing verification means “尚未驗證 / Not verified”; operation warnings remain visible. Ordinary replies have a quiet history entry instead of a prominent completion badge.
 
-## Interaction
+The idle composer targets 112–144px on desktop and 96–120px on phones, excluding error, approval or active-work notices. Its text grows up to 180px or 25dvh (120px on phones), then scrolls internally. The control row contains tools, Work options, searchable model selection, approval mode and send. Phones move model selection into the compact Work options bottom sheet. Work options explicitly label Work location and Mode: direct execution or plan first. Retain attachment, Skill and connector access.
 
-Desktop defaults to roster + conversation, with details closed. Store desktop roster/details visibility in `apsis.layout.v1` as `{ list: boolean, panel: boolean }`. Focus mode temporarily hides both sides and restores their previous visibility on exit; it never writes preferences. Explicitly opening a side exits focus mode. Below 1150px, details become an overlay; at 640px and below, roster becomes a drawer. Crossing these layout boundaries closes temporary drawers and exits focus mode. Narrow-screen changes never overwrite desktop preferences.
+During execution distinguish supplemental instructions, queued next work and stop. A submitted instruction remains “pending” until the runtime confirms adoption. Unavailable models show the reason and the corresponding Bot model repair entry point without discarding the draft. IME composition must never trigger send.
 
-Messages and composer share an 800px maximum outer width and matching horizontal gutters (32px desktop, 24px small tablet, 16px phone). Composer grows with its text up to 180px/25dvh (80px in short landscape), then scrolls internally. Keep attachment, skill and connector actions available. During a task, distinguish steering, stop and queue-next actions. Preserve independent message scrolling and IME-safe Enter handling.
+Model selection is searchable by model and provider, exposes the current selection, supports keyboard navigation and commits after a successful save. Failed changes retain the effective selection and display an actionable error.
 
-Details use a compact Bot profile row, then files/results, computer, routines, memory and recent operations. Files/results start expanded; computer expands when connected unless manually toggled. Other sections start collapsed and show counts/status. Expansions are temporary for the mounted Bot details view. Empty sections use short guidance rather than large placeholders. Approvals and errors remain visible in conversation regardless of the details panel. Long delegation prompts and results expand on demand.
+## Visual and interaction rules
 
-Settings retain five categories and on-demand connection forms. Use flat service/model lists with separators, consistent labeled fields and existing status feedback. Phone categories scroll horizontally. Touch controls have at least 44px hit areas. Do not encode work states in color alone.
+`public/bot.css` owns theme tokens. Purple denotes primary action, current selection and focus. Use amber for required attention, red for failures and green only for supported success. Body/chat text is 16px with a 1.6 line height, controls 14px and supporting text 12–13px. Use 4/8px spacing increments, fine separators and neutral surface layers rather than nested cards. Chinese system fonts include Microsoft JhengHei UI, Microsoft JhengHei and PingFang TC; remote fonts are unnecessary.
 
-Native dialogs provide focus trapping, inert backgrounds, Escape dismissal and focus return. Drawers have equivalent keyboard behavior. SVG marks replace font-dependent symbols. Async actions have busy/disabled feedback; copy actions announce completion. Desktop secondary message actions appear on hover/focus; touch actions stay visible with at least 44px targets. Transitions take 120–180ms and respect reduced motion. Theme preference persists locally. The compact composer tool trigger reads “工具”, with attachments, skills and connectors grouped inside.
+`public/approval-mode-picker.tsx` owns mode names and help. The compact trigger stays neutral so a configured policy cannot be mistaken for a pending approval. Mode colors appear inside the selection menu together with icons, labels and a selected check. Preserve the `manual / yolo / auto` values and existing authorization policies. Global scope and when a changed policy takes effect must remain explicit. Composer selection saves immediately; settings are drafts until Save.
+
+Approval cards first explain the action, target and impact, followed by Approve/Reject. Raw arguments belong under Technical details. Long targets wrap safely. Native dialogs trap focus, inert the background, dismiss with Escape and return focus to their trigger. Selection menus support keyboard control and retain visible focus. Interactive touch targets are at least 44px. SVG icons have labels when they are actions; color alone never communicates state.
+
+Motion must communicate an actual state:
+
+| State                                          | Treatment                                                        |
+| ---------------------------------------------- | ---------------------------------------------------------------- |
+| Waiting for model                              | A slow orbit beside an explicit waiting label                    |
+| Current operation                              | A subtle sweep across only the current action text               |
+| Streaming response                             | Natural text arrival; no repeated animation of entire paragraphs |
+| Queued, awaiting approval, failed, interrupted | Static clock, question or state mark and concrete text           |
+| Verified completion                            | A single 180ms acknowledgment; static afterward                  |
+| Menus and small feedback                       | Restrained 160–200ms transitions                                 |
+
+Do not animate every tool row or Bot avatar. `prefers-reduced-motion` removes animation, movement and smooth scrolling while retaining all textual state information. Automatic scrolling follows new work only while the reader is at the end; “回到最新 / Back to latest” resumes following.
 
 ## Verification
 
-Run `npm run check`, `npm run build`, `npm test`, `npm run test:bots:browser` and `npm run test:settings:browser`. Verify all three approval modes, immediate versus draft saves, conflict recovery, cross-window updates and keyboard selection. Verify desktop preference persistence, focus-mode restoration, responsive drawer isolation, detail expansion, composer growth and IME handling. Check chat and settings in both themes and both locales; 375, 768, 1024 and 1440px widths; narrow landscape; 200% text; modal focus and Escape; no horizontal page overflow. Verify text and semantic foreground/background pairs meet 4.5:1. Keep the existing task, approval and artifact flow working. Save screenshots in `artifacts/bot-verification/` and `artifacts/settings-verification/`.
+Run type checking, build and the relevant existing browser suites with isolated data. Cover readable model failure states, complete task work, approval, queued and adopted instructions, stop, plan confirmation, files and diffs. Verify that Bot, task and roster summaries agree, and that historical records do not gain invented progress or verification.
+
+Inspect light and dark themes, Traditional Chinese and English at 1440, 1280, 1024, 768, 390 and 375px. Check no page-level horizontal overflow, 200% text zoom, narrow landscape, visible keyboard focus, Escape and focus return, reduced motion, phone keyboard input, long paths, and a searchable model list. Test panel resizing without shrinking the discussion below 480px, switching conversations without losing drafts or reading position, and streaming while the user reads older messages. Text and semantic foreground/background pairs must meet 4.5:1 contrast.
+
+Record actual checks and screenshots in the task report. Fixture-driven UI verification and live model execution are different forms of evidence and must be reported separately.

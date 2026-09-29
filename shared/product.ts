@@ -32,6 +32,8 @@ export interface BotTemplate {
   permissionRules: PermissionRule[];
 }
 export interface Approval {
+  workContextId?: string;
+  location?: import("./types.ts").WorkLocation;
   matchedRuleIds?: string[];
   reason?: string;
   dangerousCommand?: string;
@@ -46,6 +48,9 @@ export interface Approval {
   createdAt: string;
 }
 export interface Routine {
+  projectId?: string;
+  branch?: string;
+  location?: import("./types.ts").WorkLocation;
   blockedReason?: string;
   id: string;
   botId: string;
@@ -60,6 +65,12 @@ export interface Routine {
   permissionBotIds?: string[];
 }
 export interface Job {
+  taskId?: string;
+  executionSessionId?: string;
+  location?: import("./types.ts").WorkLocation;
+  fileReferences?: { locationId: string; path: string; revision: string }[];
+  /** Set only when enqueuing work after the collection feature is initialized. */
+  avatarRewardsEligible?: boolean;
   retryOf?: string;
   workContextId?: string;
   contextKind?: "chat" | "routine" | "delegation";
@@ -87,6 +98,10 @@ export interface Job {
   result?: string;
 }
 export interface Artifact {
+  deliveredFrom?: string;
+  location?: import("./types.ts").WorkLocation;
+  workContextId?: string;
+  snapshotPath?: string;
   id: string;
   botId: string;
   runId?: string;
@@ -101,6 +116,10 @@ export interface Connector {
   name: string;
   url: string;
   token?: string;
+  headers?: Record<string, string>;
+  bearerTokenEnvVar?: string;
+  startupTimeoutMs?: number;
+  toolTimeoutMs?: number;
   enabled: boolean;
 }
 export interface Draft {

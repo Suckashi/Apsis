@@ -13,7 +13,7 @@ npm ci
 npm run dev
 ```
 
-開啟 <http://localhost:3100>，在「設定與工具 → 模型連線」加入 OpenAI、Anthropic、Ollama 或 OpenAI 相容端點，測試串流與工具呼叫，再建立 Bot。金鑰只儲存在伺服器的 `.apsis/connections.json`。
+開啟 <http://localhost:3100>，在「設定與工具 → 模型連線」加入 OpenAI、Anthropic、Ollama 或 OpenAI 相容端點，測試串流與工具呼叫，再建立 Bot。一般設定與模型連線儲存在 `.apsis/settings.toml`，MCP 伺服器儲存在 `.apsis/mcp.json`；金鑰只由伺服器讀取，也可指定環境變數。舊設定會在啟動時自動遷移，詳見[設定檔說明](docs/config-files-design.md)。
 
 Codex 連線與 ChatGPT 登入執行路徑已退役。既有 Codex Bot 保留歷史與檔案，但必須先明確選擇支援的模型才能再執行；其排程會停用，選好模型後需自行重新啟用。Apsis 不會自動改用需付費的 API 模型，也不會解除安裝 Codex 或移除其本機憑證。
 
@@ -22,7 +22,7 @@ Codex 連線與 ChatGPT 登入執行路徑已退役。既有 Codex Bot 保留歷
 ## 架構
 
 ```text
-Web／已配對的 Telegram
+Web
         ↓
 Bot 設定與持久任務佇列（ProductService）
         ↓

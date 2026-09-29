@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { DEFAULT_SETTINGS, SETTINGS_BOUNDS } from "../shared/settings.ts";
 import type { PermissionRule } from "../shared/settings.ts";
-import { ProductDB } from "../server/product-db.ts";
+import { ConfigStore } from "../server/config-store.ts";
 import {
   SettingsService,
   SettingsValidationError,
@@ -52,47 +52,51 @@ test("settings defaults and all strict numeric bounds", () => {
     assert.throws(() => validateSettings(input), SettingsValidationError);
 });
 
-test("settings SQLite persistence, revision conflicts, rollback and detached results", async (t) => {
+test("settings TOML persistence, revision conflicts, rollback and detached results", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "apsis-settings-"));
-  const db = await new ProductDB().init(directory);
-  const other = await new ProductDB().init(directory);
   t.after(async () => {
-    other.db.close();
-    db.db.close();
     await rm(directory, { recursive: true, force: true });
   });
-  const service = new SettingsService(db);
-  const second = new SettingsService(other);
-  assert.deepEqual(service.read(), { ...DEFAULT_SETTINGS, revision: 0 });
-  const updated = service.update({ locale: "en" }, 0);
-  assert.equal(updated.revision, 1);
+  const service = new SettingsService(
+    new ConfigStore(directory).init(directory),
+  );
+  const second = new SettingsService(
+    new ConfigStore(directory).init(directory),
+  );
+  const initial = service.read();
+  assert.deepEqual(initial, {
+    ...DEFAULT_SETTINGS,
+    revision: initial.revision,
+  });
+  const updated = service.update({ locale: "en" }, initial.revision);
+  assert.notEqual(updated.revision, initial.revision);
   assert.equal(second.read().locale, "en");
   assert.throws(
-    () => second.update({ revision: 0, maxTurns: 20 }),
+    () => second.update({ revision: initial.revision, maxTurns: 20 }),
     (error: unknown) =>
       error instanceof SettingsRevisionError &&
       error.status === 409 &&
-      error.actualRevision === 1,
+      error.actualRevision === updated.revision,
   );
   assert.throws(
-    () => service.update({ revision: 1, maxTurns: 201 }),
+    () => service.update({ revision: updated.revision, maxTurns: 201 }),
     SettingsValidationError,
   );
-  assert.equal(service.read().revision, 1);
+  assert.equal(service.read().revision, updated.revision);
   for (const revision of [undefined, -1, 0.5, "1", null])
     assert.throws(() => service.update({ revision }), SettingsValidationError);
   const next = second.update({
-    revision: 1,
+    revision: updated.revision,
     maxTurns: 20,
     permissionRules: [rule("one", "allow")],
   });
-  assert.equal(next.revision, 2);
+  assert.notEqual(next.revision, updated.revision);
   next.permissionRules[0].effect = "deny";
   next.maxTurns = 99;
   assert.equal(service.read().maxTurns, 20);
   assert.equal(service.read().permissionRules[0].effect, "allow");
   assert.deepEqual(
-    service.update({ permissionRules: [] }, 2).permissionRules,
+    service.update({ permissionRules: [] }, next.revision).permissionRules,
     [],
   );
 });

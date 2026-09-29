@@ -14,6 +14,15 @@ export const taskStatusLabels = {
 } as const;
 
 const toolLabels: Record<string, string> = {
+  model_retry: "重試模型連線",
+  scratch_write_file: "寫入暫存檔",
+  scratch_read_file: "讀取暫存檔",
+  scratch_edit_file: "修改暫存檔",
+  scratch_ls: "列出暫存檔",
+  scratch_glob: "尋找暫存檔",
+  scratch_grep: "搜尋暫存內容",
+  read_scratch_part: "分段讀取暫存檔",
+  write_todos: "更新工作計畫",
   read_file: "讀取文件",
   read_image: "讀取圖片",
   list_files: "查看檔案",
@@ -22,6 +31,7 @@ const toolLabels: Record<string, string> = {
   apply_patch: "修改檔案",
   shell: "執行指令",
   browser: "操作瀏覽器",
+  verify_web: "驗證網頁操作",
   webSearch: "搜尋網路",
   list_bots: "尋找協作 Bot",
   delegate_task: "交辦任務",
@@ -46,12 +56,16 @@ export function operationLabel(
   const label = toolLabels[operation.name] || "使用工具";
   // Commands and opaque IDs belong in the expanded record, not the status bar.
   const showTarget =
-    /^(read_file|read_image|write_file|edit_file|publish_file|list_files)$/.test(
+    /^(read_file|read_image|write_file|edit_file|publish_file|list_files|verify_web)$/.test(
       operation.name,
     );
   const target = showTarget
     ? operation.target?.split(/[\\/]/).at(-1)
     : undefined;
+  if (operation.name === "model_retry" && operation.target)
+    return `${label} ${operation.target}`;
+  if (operation.name.startsWith("scratch_") && operation.target)
+    return `${label} ${operation.target.split("/").at(-1)}`;
   return target ? `${label} ${target}` : label;
 }
 

@@ -59,12 +59,25 @@ async function runShell(
       .filter(Boolean)
       .join(";");
   }
-  const child = spawn(executable, ["--noprofile", "--norc", "-c", command], {
-    cwd,
-    env,
-    detached: !windows,
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
+  // Git Bash can silently truncate a long Windows argv command. Read the
+  // complete source from the pipe before evaluating it; commands then inherit
+  // EOF on stdin, as with the previous noninteractive stdin: "ignore" setup.
+  const child = spawn(
+    executable,
+    ["--noprofile", "--norc", "-c", 'eval "$(cat)"'],
+    {
+      cwd,
+      env,
+      detached: !windows,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  let inputError: Error | undefined;
+  // A failed executable or cancellation may close the pipe before all source
+  // is written. Keep EPIPE from becoming an unhandled process-level error.
+  child.stdin.on("error", (error: Error) => {
+    inputError = error;
   });
   let output = "";
   let truncated = false;
@@ -144,6 +157,7 @@ async function runShell(
     const exitCode = await new Promise<number | null>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", resolve);
+      child.stdin.end(command, "utf8");
     });
     const evidence = boundedEvidence(
       { command, output, exitCode, truncated },
@@ -153,6 +167,11 @@ async function runShell(
     if (timedOut) throw new ToolExecutionError("命令執行逾時。", evidence);
     if (exitCode !== 0)
       throw new ToolExecutionError(`命令結束碼：${exitCode}`, evidence);
+    if (inputError)
+      throw new ToolExecutionError(
+        "無法完整傳送命令，請檢查執行結果。",
+        evidence,
+      );
     return {
       content: [{ type: "text" as const, text: output || "命令已完成。" }],
       details: { evidence },
@@ -266,6 +285,7 @@ export function codingTools({
                 timeout?: number;
               };
               if (!command?.trim()) throw new Error("請提供命令。");
+              await workspace.ready(true);
               return runShell(
                 command,
                 workspace.root,

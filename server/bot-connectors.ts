@@ -7,13 +7,23 @@ export async function withConnector<T>(
   fn: (client: Client) => Promise<T>,
 ) {
   const client = new Client({ name: "apsis", version: "0.2.0" });
+  const headers = { ...connector.headers };
+  const token = connector.bearerTokenEnvVar
+    ? process.env[connector.bearerTokenEnvVar]
+    : connector.token;
+  if (connector.bearerTokenEnvVar && !token)
+    throw Object.assign(
+      new Error(`MCP 缺少環境變數：${connector.bearerTokenEnvVar}`),
+      { status: 400 },
+    );
+  if (token) headers.Authorization = `Bearer ${token}`;
   const transport = new StreamableHTTPClientTransport(new URL(connector.url), {
-    requestInit: connector.token
-      ? { headers: { Authorization: `Bearer ${connector.token}` } }
-      : undefined,
+    requestInit: { headers },
   });
   try {
-    await client.connect(transport, { timeout: 15000 });
+    await client.connect(transport, {
+      timeout: connector.startupTimeoutMs ?? 15000,
+    });
     return await fn(client);
   } finally {
     await client.close();

@@ -9,7 +9,7 @@ export function skillIndex(state: StoreState) {
   return state.skills.map((s) => ({
     id: s.id,
     name: s.name,
-    description: s.content.slice(0, 120),
+    description: s.description || s.content.slice(0, 120),
   }));
 }
 
@@ -52,13 +52,14 @@ export function agentContext(
   permissions?: RunPermissions,
   executionContext = "",
   memoryBudget = 1600,
+  memoryKey?: string,
 ) {
   return (
     (agent
       ? `Agent name: ${agent.name}\nRole instructions:\n${agent.instructions}\n`
       : "") +
     buildContext(
-      scopedState(store.state, agent),
+      scopedState(store.skillState(), agent, memoryKey),
       allowWrites,
       query,
       permissions,

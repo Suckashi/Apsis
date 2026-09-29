@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -90,7 +90,7 @@ test("settings GET/PATCH persists updates and rejects stale revisions without ov
     maxTurns: 17,
   });
   assert.equal(saved.status, 200);
-  assert.equal(saved.data.revision, first.data.revision + 1);
+  assert.notEqual(saved.data.revision, first.data.revision);
   assert.equal(saved.data.maxTurns, 17);
   const conflict = await f.request("/api/v2/settings", "PATCH", {
     revision: first.data.revision,
@@ -109,14 +109,18 @@ test("settings GET/PATCH persists updates and rejects stale revisions without ov
 
 test("templates copy preferences without secrets and per-bot choices reach the runner independently", async (t) => {
   const f = await fixture(t);
-  await f.store.mutate((state) => {
-    state.skills.push(
-      { id: "skill-a", name: "A", content: "Skill A" },
-      { id: "skill-b", name: "B", content: "Skill B" },
-    );
+  f.store.skills.create({
+    id: "skill-a",
+    name: "Settings Skill A",
+    content: "Fixture A",
+  });
+  f.store.skills.create({
+    id: "skill-b",
+    name: "Settings Skill B",
+    content: "Fixture B",
   });
   for (const id of ["connector-a", "connector-b"])
-    f.product.db.put<Connector>("connector", {
+    f.product.connectors.put({
       id,
       name: id,
       url: "http://127.0.0.1:1/mcp",
@@ -233,16 +237,11 @@ for (const inherited of [false, true]) {
       });
     });
     const history = structuredClone(f.tasks.view(bot.sessionId).messages);
-    const rows = f.connections.rows.map((row) => ({
-      ...row,
-      provider: "codex",
-    }));
+    // Model a retired provider in the current config without reintroducing UUID fixtures.
+    f.connections.config.update((doc) => {
+      for (const provider of Object.values(doc.providers)) provider.type = "codex";
+    });
     await f.close();
-    // Only this isolated fixture's persisted connection is changed to emulate an old install.
-    await writeFile(
-      join(f.dir, "data", "connections.json"),
-      JSON.stringify(rows),
-    );
     const reopened = await fixture(t, undefined, f.dir);
     assert.equal(reopened.product.bot(bot.id).needsModelSelection, true);
     assert.equal(reopened.connections.defaultSelection(), null);

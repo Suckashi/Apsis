@@ -13,7 +13,7 @@ npm ci
 npm run dev
 ```
 
-Open <http://localhost:3100>. In **Settings & Tools → Model connections**, add an OpenAI, Anthropic, Ollama, or OpenAI-compatible endpoint and test its streaming and tool calls. Then create a Bot and give it a task. API keys stay on the server in `.apsis/connections.json`.
+Open <http://localhost:3100>. In **Settings & Tools → Model connections**, add an OpenAI, Anthropic, Ollama, or OpenAI-compatible endpoint and test its streaming and tool calls. Then create a Bot and give it a task. Settings and model connections live in `.apsis/settings.toml`; MCP servers live in `.apsis/mcp.json`. API keys stay server-side and can also reference named environment variables. Existing settings migrate automatically on startup. See [configuration files](docs/config-files-design.md) for examples, editing and backups.
 
 The Codex connection and ChatGPT sign-in execution path are retired. Existing Codex Bots keep their history and files, but require an explicit choice of a supported model before running again. Their schedules are disabled and must be re-enabled after model selection. Apsis does not automatically switch them to a billed API model, uninstall Codex, or remove its local credentials.
 
@@ -22,7 +22,7 @@ For local Ollama, use `http://127.0.0.1:11434` and an installed model ID such as
 ## Architecture
 
 ```text
-Web / paired Telegram
+Web
         ↓
 Bot profiles and durable job queues (ProductService)
         ↓

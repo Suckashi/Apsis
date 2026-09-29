@@ -1,3 +1,4 @@
+import { fixtureStyle } from "./browser-style.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -121,7 +122,7 @@ app.product.settings.update(
       { id: "fixture-shell", scope: "global", tool: "shell", effect: "ask" },
     ],
   },
-  0,
+  app.product.settings.read().revision,
 );
 const model = await app.tasks.connections!.save({
   name: "測試模型",
@@ -159,12 +160,42 @@ page.on("response", (response) => {
   if (response.status() >= 400)
     console.error(`Browser HTTP ${response.status()}: ${response.url()}`);
 });
+// Exercise the legacy empty-roster onboarding path; fresh installs are covered by verify-coding-workspace.
+app.product!.db.put("migration", { id: "bot-first-v1" });
 try {
   await page.goto(url);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "建立第一個 Bot" }).click();
   await page.getByLabel("名稱", { exact: true }).fill("新 Bot");
+  assert.equal(
+    await page.getByRole("radio").count(),
+    0,
+    "avatar collection starts collapsed",
+  );
+  const coreForm = await page.locator(".profile-form").evaluate((form) => {
+    const controls = [
+      form.querySelector("input"),
+      form.querySelector(".model-picker > summary"),
+      form.querySelector("textarea"),
+      form.querySelector("button.primary"),
+    ];
+    return controls.every((control) => {
+      const bounds = control?.getBoundingClientRect();
+      return bounds && bounds.top >= 0 && bounds.bottom <= innerHeight;
+    });
+  });
+  assert.equal(
+    coreForm,
+    true,
+    "name, model, role and create action fit on the phone first screen",
+  );
+  await page.screenshot({
+    path: join(output, "mobile-create-bot-core.png"),
+    fullPage: true,
+  });
+  await page.locator(".profile-avatar-disclosure > summary").click();
   await page.getByRole("radio", { name: "藍色雲朵" }).check();
+  await page.locator(".profile-avatar-disclosure > summary").click();
   await page.screenshot({
     path: join(output, "mobile-create-bot.png"),
     fullPage: true,
@@ -196,31 +227,20 @@ try {
     path: join(output, "desktop-chat-roster.png"),
     fullPage: true,
   });
-  await page.getByRole("button", { name: "切換詳情面板" }).click();
-  const artifactsToggle = details.getByRole("button", { name: /^檔案與成果/ });
-  assert.equal(await artifactsToggle.getAttribute("aria-expanded"), "true");
-  assert.equal(
-    await details
-      .getByRole("button", { name: /^電腦/ })
-      .getAttribute("aria-expanded"),
-    "false",
+  await page.getByRole("button", { name: "切換工作內容" }).click();
+  assert.deepEqual(
+    await details.locator(".detail-tabs button").allTextContents(),
+    ["檔案", "變更"],
   );
   assert.equal(
     await details
-      .getByRole("button", { name: /^排程/ })
-      .getAttribute("aria-expanded"),
-    "false",
+      .locator(".computer-preview,.detail-profile,.context-panel")
+      .count(),
+    0,
   );
-  await artifactsToggle.click();
-  assert.equal(
-    await details.getByText("附件與成果會顯示在這裡。").isVisible(),
-    false,
-  );
-  await artifactsToggle.press("Enter");
-  assert.equal(
-    await details.getByText("附件與成果會顯示在這裡。").isVisible(),
-    true,
-  );
+  await details.getByRole("button", { name: "變更", exact: true }).click();
+  await details.getByText("有專案任務後，可在這裡查看修改。").waitFor();
+  await details.getByRole("button", { name: "檔案", exact: true }).click();
   await page.getByRole("button", { name: "進入專注模式" }).click();
   assert.equal(await roster.isVisible(), false);
   assert.equal(await details.count(), 0);
@@ -252,8 +272,8 @@ try {
       });
       await page.keyboard.press("Escape");
     }
-    await page.getByRole("button", { name: "切換詳情面板" }).click();
-    await page.getByRole("dialog", { name: "Bot 詳情" }).waitFor();
+    await page.getByRole("button", { name: "切換工作內容" }).click();
+    await page.getByRole("dialog", { name: "工作內容" }).waitFor();
     await page.keyboard.press("Escape");
     assert.equal(
       await page.evaluate(() => localStorage.getItem("apsis.layout.v1")),
@@ -272,7 +292,7 @@ try {
   );
   await details.waitFor();
   await page.getByRole("button", { name: "開啟 Bot 名單" }).click();
-  await page.getByRole("button", { name: "切換詳情面板" }).click();
+  await page.getByRole("button", { name: "切換工作內容" }).click();
   const shortHeight = (await composerInput.boundingBox())!.height;
   await composerInput.fill(
     Array.from({ length: 20 }, (_, i) => `第 ${i + 1} 行`).join("\n"),
@@ -289,34 +309,22 @@ try {
     true,
   );
   // Composer tools preserve the draft and insert at the saved cursor.
-  const toolsMenu = page.locator(".composer-tools > .composer-popover");
+  const toolsMenu = page.locator(
+    ".composer-tools > .composer-popover:not(.model-picker)",
+  );
   await composerInput.fill("前文 後文");
   await composerInput.press("Home");
   await composerInput.press("ArrowRight");
   await composerInput.press("ArrowRight");
   await composerInput.press("ArrowRight");
-  await toolsMenu.locator("summary").click();
-  assert.equal(await composerInput.inputValue(), "前文 後文");
-  const skillButton = toolsMenu
-    .locator("section")
-    .first()
-    .getByRole("button")
-    .first();
+  await page.keyboard.insertText("/");
+  const skillButton = page.locator(".suggestions button").first();
   const skillName = await skillButton.innerText();
   await skillButton.click();
   const insertedDraft = await composerInput.inputValue();
   assert.ok(insertedDraft.startsWith("前文 請依照技能「" + skillName));
   assert.ok(insertedDraft.endsWith(" 後文"));
   assert.equal(await toolsMenu.getAttribute("open"), null);
-  await composerInput.fill("草稿：");
-  await toolsMenu.locator("summary").click();
-  await toolsMenu
-    .locator("section")
-    .first()
-    .getByRole("button")
-    .first()
-    .click();
-  assert.ok((await composerInput.inputValue()).startsWith("草稿：請依照技能"));
   await composerInput.fill("保留前文 /");
   await page.locator(".suggestions button").first().click();
   assert.ok(
@@ -368,6 +376,7 @@ try {
   assert.equal(app.product!.snapshot().bots[0].avatar, "cloud");
   await page.getByRole("button", { name: /新 Bot 隨時可以交辦/ }).click();
   await page.getByLabel("名稱", { exact: true }).fill("研究助理");
+  await page.locator(".profile-avatar-disclosure > summary").click();
   await page.getByRole("radio", { name: "橘色星星" }).check();
   await page
     .getByLabel("角色與工作方式")
@@ -389,7 +398,6 @@ try {
     fullPage: true,
   });
   await page.setViewportSize({ width: 375, height: 844 });
-  await page.getByRole("button", { name: "切換詳情面板" }).click();
   await page.getByRole("dialog", { name: "Bot 詳情" }).waitFor();
   const mobileSaveButton = (await page
     .getByRole("button", { name: "儲存變更" })
@@ -411,7 +419,7 @@ try {
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
   assert.equal(app.product!.snapshot().bots[0].avatar, "spark");
-  await page.getByRole("button", { name: "返回詳情" }).click();
+  await page.getByRole("button", { name: "關閉 Bot 設定" }).click();
   await page
     .getByRole("textbox", { name: "傳送訊息" })
     .fill("研究資料並建立報告，最後執行驗證。");
@@ -436,6 +444,11 @@ try {
     .waitFor();
   await page.waitForFunction(() => !document.querySelector(".task-progress"));
   assert.equal(
+    await page.locator(".task-context-divider,.run-outcome").count(),
+    0,
+    "chat has no task labels or duplicate outcome in composer",
+  );
+  assert.equal(
     app
       .product!.detail(app.product!.snapshot().bots[0].id)
       .runs[0].operations.find((o) => o.name === "shell")?.status,
@@ -450,17 +463,13 @@ try {
   ]);
   assert.equal(download.suggestedFilename(), "研究報告.md");
   await download.saveAs(join(output, "report.md"));
-  assert.equal(
-    await details
-      .getByRole("button", { name: /^電腦/ })
-      .getAttribute("aria-expanded"),
-    "true",
-  );
+  await page.getByRole("button", { name: "切換工作內容" }).click();
+  assert.equal(await details.locator(".computer-preview").count(), 0);
   await page.screenshot({
     path: join(output, "desktop-details.png"),
     fullPage: true,
   });
-  await page.getByRole("button", { name: "關閉詳情", exact: true }).click();
+  await page.getByRole("button", { name: "關閉工作內容", exact: true }).click();
   await page.screenshot({
     path: join(output, "desktop-completed.png"),
     fullPage: true,
@@ -471,19 +480,24 @@ try {
     fullPage: true,
   });
   await page.getByRole("button", { name: "離開專注模式" }).click();
-  await page.getByRole("button", { name: "切換詳情面板" }).click();
+  await page.getByRole("button", { name: "切換工作內容" }).click();
   await page.reload();
   await page.locator('.header-profile [data-avatar="spark"]').waitFor();
   await page
     .getByText("報告已完成，驗證命令成功。", { exact: false })
     .first()
     .waitFor();
-  await details.getByRole("button", { name: /^排程/ }).click();
+  await page.locator(".bot-actions-menu summary").click();
+  await page
+    .locator(".bot-actions-menu")
+    .getByRole("button", { name: "排程", exact: true })
+    .click();
   await page.getByRole("button", { name: "新增排程", exact: true }).click();
   await page.getByLabel("名稱", { exact: true }).fill("每日日報");
   await page.getByLabel("交辦內容").fill("整理當天的研究資料");
   await page.getByRole("button", { name: "儲存排程" }).click();
   await page.getByRole("button", { name: /每日日報/ }).waitFor();
+  await page.getByRole("button", { name: "關閉 Bot 管理" }).click();
   // New UI contracts: both themes, readable token pairs and real modal focus.
   const checkContrast = async () => {
     const pairs = await page.evaluate(() => {
@@ -551,7 +565,7 @@ try {
   await settingsDialog.getByText("研究模型", { exact: true }).waitFor();
   const originalDefault = await settingsDialog
     .getByLabel("系統預設模型", { exact: true })
-    .inputValue();
+    .textContent();
   await settingsDialog
     .getByRole("button", { name: "新增供應商", exact: true })
     .click();
@@ -585,7 +599,7 @@ try {
   assert.equal(
     await settingsDialog
       .getByLabel("系統預設模型", { exact: true })
-      .inputValue(),
+      .textContent(),
     originalDefault,
   );
   const providerCard = settingsDialog
@@ -606,13 +620,7 @@ try {
     path: join(output, "desktop-settings-dark.png"),
     fullPage: true,
   });
-  for (const category of [
-    "連接器",
-    "技能",
-    "Telegram",
-    "自動核准",
-    "模型連線",
-  ]) {
+  for (const category of ["執行與語言", "Bot 範本", "模型連線"]) {
     await settingsDialog
       .getByRole("button", { name: category, exact: true })
       .click();
@@ -682,8 +690,8 @@ try {
     true,
   );
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "切換詳情面板" }).click();
-  await page.getByRole("dialog", { name: "Bot 詳情" }).waitFor();
+  await page.getByRole("button", { name: "切換工作內容" }).click();
+  await page.getByRole("dialog", { name: "工作內容" }).waitFor();
   await page.keyboard.press("Escape");
   await page
     .getByRole("textbox", { name: "傳送訊息" })
@@ -699,7 +707,7 @@ try {
   await page.reload();
   await page.getByRole("textbox", { name: "傳送訊息" }).waitFor();
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.addStyleTag({ content: "html { font-size: 200% }" });
+  await fixtureStyle(page, { content: "html { font-size: 200% }" });
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth,
@@ -754,7 +762,7 @@ try {
     await touchPage.getByRole("button", { name: "設定與工具" }).click();
     await checkTouchTargets();
     await touchPage.keyboard.press("Escape");
-    await touchPage.getByRole("button", { name: "切換詳情面板" }).click();
+    await touchPage.getByRole("button", { name: "切換工作內容" }).click();
     await checkTouchTargets();
   } finally {
     await touchContext.close();
@@ -817,27 +825,36 @@ try {
   // A quiet model must not be presented as disconnected or falsely finished.
   await page.clock.install();
   await page.clock.fastForward(35000);
-  await progress.getByText(/暫未收到新進度/).waitFor();
+  await progress.getByText(/距上次更新/).waitFor();
   assert.equal(
     await progress.locator(".task-progress-hint.is-quiet").count(),
-    1,
+    0,
   );
   await page.screenshot({
     path: join(output, "desktop-progress-quiet.png"),
     fullPage: true,
   });
   await page.clock.setFixedTime(new Date());
-  assert.match(await progress.innerText(), /1 位 Bot 協作 · 1 位已完成/);
   const liveHistory = page.locator(".message.live .task-history");
   assert.equal(
     await liveHistory.locator(".task-summary").getAttribute("aria-expanded"),
-    "false",
+    "true",
   );
+  await liveHistory.locator(".task-summary").click();
   await progress.getByRole("button", { name: "查看過程" }).click();
-  await liveHistory.locator(".task-row").nth(9).waitFor();
-  assert.equal(await liveHistory.locator(".task-row").count(), 10);
+  await liveHistory.locator(".task-tool-group > summary").first().waitFor();
+  for (const summary of await liveHistory
+    .locator(".task-tool-group:not([open]) > summary")
+    .all())
+    await summary.click();
+  await liveHistory.locator(".task-row:visible").nth(4).waitFor();
+  assert.equal(await liveHistory.locator(".task-row:visible").count(), 5);
   await liveHistory.getByRole("button", { name: /顯示更早紀錄/ }).click();
-  assert.equal(await liveHistory.locator(".task-row").count(), 16);
+  for (const summary of await liveHistory
+    .locator(".task-tool-group:not([open]) > summary")
+    .all())
+    await summary.click();
+  assert.equal(await liveHistory.locator(".task-row:visible").count(), 14);
   await page.screenshot({
     path: join(output, "desktop-progress-expanded.png"),
     fullPage: true,
@@ -889,10 +906,7 @@ try {
     .getByText("多項操作與協作已完成。", { exact: true })
     .waitFor();
   await page.waitForFunction(() => !document.querySelector(".task-progress"));
-  await page
-    .locator(".run-outcome")
-    .getByText(/已完成/)
-    .waitFor();
+  assert.equal(await page.locator(".run-outcome").count(), 0);
   const finishedHistory = page
     .locator(".message.assistant")
     .filter({ hasText: "多項操作與協作已完成。" })
@@ -919,7 +933,8 @@ try {
   );
   await finishedHistory.locator(".task-summary").focus();
   await page.keyboard.press("Enter");
-  await finishedHistory.locator(".task-row").first().waitFor();
+  await finishedHistory.locator(".task-tool-group > summary").first().click();
+  await finishedHistory.locator(".task-row:visible").first().waitFor();
   await finishedHistory.locator(".task-summary").click();
   await page.screenshot({
     path: join(output, "mobile-compact-history.png"),
@@ -932,7 +947,7 @@ try {
     .locator(".connection-banner")
     .getByText(/即時連線中斷/)
     .waitFor();
-  assert.equal(await page.locator(".run-outcome").count(), 1);
+  assert.equal(await page.locator(".run-outcome").count(), 0);
   await page.screenshot({
     path: join(output, "mobile-reconnecting.png"),
     fullPage: true,
@@ -945,6 +960,13 @@ try {
   await page.getByRole("button", { name: "傳送", exact: true }).click();
   await progress.getByText("等待模型回應", { exact: true }).waitFor();
   await page.getByRole("textbox", { name: "傳送訊息" }).fill("progress-worker");
+  await page.getByRole("button", { name: "工作選項", exact: true }).click();
+  const sendOptions = page.getByRole("dialog", {
+    name: "工作選項",
+    exact: true,
+  });
+  await sendOptions.getByLabel("傳送方式").selectOption("queue");
+  await sendOptions.getByRole("button", { name: "完成", exact: true }).click();
   await page
     .getByRole("button", { name: "排入下一個任務", exact: true })
     .click();
@@ -973,8 +995,9 @@ try {
   );
   releaseStop();
   await page
-    .locator(".run-outcome")
-    .getByText(/已取消/)
+    .locator(".task-summary")
+    .filter({ hasText: "已取消" })
+    .first()
     .waitFor();
   await page.locator(".queue-feedback").waitFor({ state: "detached" });
   await page.unroute(stopRoute);
@@ -985,14 +1008,24 @@ try {
     content: "Research result: 42",
   });
   assert.match(
-    String(await app.product!.readDocument(pdf.path)),
+    String(
+      await app.product!.readDocument(
+        pdf.path,
+        app.tasks.locations.workspace(app.product.workLocation(bot)),
+      ),
+    ),
     /Research result: 42/,
   );
   const image = await app.product!.browser.screenshot(bot.id);
   assert.ok(image?.length);
   await writeFile(join(output, "bot-browser.jpg"), image!);
   const screenshotPath = "test-image.jpg";
-  await writeFile(await app.workspace.resolve(screenshotPath, true), image!);
+  await writeFile(
+    await app.tasks.locations
+      .workspace(app.product.workLocation(bot))
+      .resolve(screenshotPath, true),
+    image!,
+  );
   const imageResult = await app
     .product!.tools(bot, "fixture")
     .find((t) => t.name === "read_image")!
@@ -1027,7 +1060,7 @@ try {
           "reload persistence",
           "desktop sidebar preferences and focus-mode restoration",
           "responsive drawers never overwrite desktop preferences",
-          "detail section disclosure and connected computer expansion",
+          "files/changes sidebar and secondary Bot management dialogs",
           "auto-growing composer, IME Enter and Shift+Enter",
           "attachment upload/removal, quoted reply and model settings save",
           "provider catalog, model discovery/search/multiselect, deselection undo and unchanged system default",
@@ -1042,7 +1075,7 @@ try {
           "image tool",
           "delete confirmation, cancellation and reload persistence",
           "Bot delegation, approval navigation and secretary summary",
-          "live progress, per-run compact history, 10-item disclosure, keyboard and retained expansion",
+          "live progress, per-run compact history, 5-item disclosure, keyboard and retained expansion",
           "no browser console errors",
         ],
         artifacts: output,

@@ -11,15 +11,14 @@ import type { RunResult, Skill } from "../shared/types.ts";
 import { runAgent } from "./agent.ts";
 import { discoverCompatibleModels } from "./compatible.ts";
 import { Connections } from "./connections.ts";
-import { normalizeFact } from "./knowledge.ts";
 import { discoverOllama } from "./ollama.ts";
 import { testConnection } from "./probe.ts";
 import { ProductService } from "./product.ts";
 import type { RunOptions } from "./runtime.ts";
 import { Store } from "./store.ts";
 import { TaskService } from "./tasks.ts";
-import { TelegramChannel, type TelegramCall } from "./telegram.ts";
 import { Workspace } from "./workspace.ts";
+import { htmlPreviewRoute } from "./html-preview.ts";
 
 function fail(message: string, status = 400): never {
   throw Object.assign(new Error(message), { status });
@@ -31,7 +30,11 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 64000) fail("內容過大。", 413);
+    if (
+      size >
+      (req.url?.startsWith("/api/v2/work-locations/") ? 8 * 1024 * 1024 : 64000)
+    )
+      fail("內容過大。", 413);
     chunks.push(chunk);
   }
   try {
@@ -54,34 +57,35 @@ function text(value: unknown, limit: number, label: string) {
 }
 
 export interface AppOptions {
-  telegramCall?: TelegramCall;
+  globalSkillsDirectory?: string;
   dataDir?: string;
   workspaceDir?: string;
+  worktreeRoot?: string;
   runner?: (options: RunOptions) => Promise<RunResult>;
 }
 export async function createApp({
   dataDir = ".apsis",
   workspaceDir = ".apsis/workspace",
+  worktreeRoot,
   runner = runAgent,
-  telegramCall,
+  globalSkillsDirectory,
 }: AppOptions = {}) {
-  const store = await new Store(dataDir).init();
+  const store = await new Store(dataDir, globalSkillsDirectory).init();
   const workspace = await new Workspace(workspaceDir).init();
   const tasks = new TaskService(store, workspace, runner);
   await tasks.runs.init();
   const connections = await new Connections(dataDir).init();
   tasks.connections = connections;
-  const telegram = await new TelegramChannel(dataDir, telegramCall).init();
   const product = await new ProductService(tasks, connections).init();
-  telegram.productMessage = (message) => product.telegram(message);
-  product.notifyOwner = (message) => telegram.notifyOwner(message);
+  product.coding.worktreeRoot = worktreeRoot;
 
   const server = createServer(async (req, res) => {
+    const styleNonce = randomUUID().replaceAll("-", "");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${styleNonce}'; style-src-attr 'unsafe-inline'; img-src 'self'; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
     try {
       const port = (server.address() as AddressInfo | null)?.port;
@@ -91,22 +95,37 @@ export async function createApp({
         )
       )
         fail("不允許的 Host。", 403);
+      const path = new URL(req.url || "/", "http://localhost").pathname;
+      const previewRequest =
+        req.method === "GET" &&
+        htmlPreviewRoute.test(path) &&
+        (!req.headers.origin || req.headers.origin === "null");
       if (
         req.headers.origin &&
+        !previewRequest &&
         !["http://localhost:" + port, "http://127.0.0.1:" + port].includes(
           req.headers.origin,
         )
       )
         fail("不允許跨來源請求。", 403);
-      if (req.headers["sec-fetch-site"] === "cross-site")
+      if (req.headers["sec-fetch-site"] === "cross-site" && !previewRequest)
         fail("不允許跨網站請求。", 403);
-      const path = new URL(req.url || "/", "http://localhost").pathname;
       if (
         !["GET", "HEAD"].includes(req.method || "") &&
         req.headers["x-apsis-client"] !== "1"
       )
         fail("缺少工作台請求標頭。", 403);
 
+      if (
+        req.method === "GET" &&
+        (await product.htmlPreview.serve(
+          path,
+          req.headers.host!,
+          product.files,
+          res,
+        ))
+      )
+        return;
       if (path.startsWith("/api/v2/"))
         return await product.handle(
           req,
@@ -122,6 +141,7 @@ export async function createApp({
           "/bot.js.map",
           "/bot.css",
           "/providers.css",
+          "/files.css",
           "/favicon.svg",
         ].includes(path)
       ) {
@@ -130,6 +150,7 @@ export async function createApp({
             ? new URL("../public/bot.html", import.meta.url)
             : path === "/bot.css" ||
                 path === "/providers.css" ||
+                path === "/files.css" ||
                 path === "/favicon.svg"
               ? new URL("../public" + path, import.meta.url)
               : new URL("../dist/public" + path, import.meta.url);
@@ -143,7 +164,17 @@ export async function createApp({
                 ? "text/javascript"
                 : "text/html";
         res.writeHead(200, { "Content-Type": type + "; charset=utf-8" });
-        return res.end(await readFile(file));
+        const data = await readFile(file);
+        return res.end(
+          type === "text/html"
+            ? data
+                .toString("utf8")
+                .replace(
+                  "</head>",
+                  `<meta name="style-nonce" content="${styleNonce}"></head>`,
+                )
+            : data,
+        );
       }
       if (path === "/api/status" && req.method === "GET")
         return json(res, {
@@ -194,10 +225,11 @@ export async function createApp({
           return json(res, await connections.setDefault(await body(req)));
       }
       const connection = path.match(
-        /^\/api\/connections\/([a-f0-9-]+)(?:\/(test))?$/,
+        /^\/api\/connections\/([^/]+)(?:\/(test))?$/,
       );
       if (connection) {
-        const [, id, action] = connection;
+        const [, encodedId, action] = connection;
+        const id = decodeURIComponent(encodedId);
         if (action === "test" && req.method === "POST") {
           const input = await body(req);
           if (
@@ -218,21 +250,12 @@ export async function createApp({
           return json(res, { ok: true });
         }
       }
-      if (path === "/api/channels/telegram") {
-        if (req.method === "GET") return json(res, telegram.view());
-        if (req.method === "POST")
-          return json(res, await telegram.update(await body(req)));
-      }
-      if (path.startsWith("/api/channels/telegram/") && req.method === "POST") {
-        await body(req);
-        if (path.endsWith("/pairing"))
-          return json(res, telegram.createPairing());
-        if (path.endsWith("/unpair")) return json(res, await telegram.unpair());
-        if (path.endsWith("/test"))
-          return json(res, await telegram.testConnection());
-      }
       if (path === "/api/skills") {
-        if (req.method === "GET") return json(res, store.state.skills);
+        if (req.method === "GET")
+          return json(
+            res,
+            store.skillState().skills.filter((s) => !s.agentId),
+          );
         if (req.method === "POST") {
           const input = await body(req);
           const item: Skill = {
@@ -242,25 +265,29 @@ export async function createApp({
             source: { kind: "manual" },
             createdAt: new Date().toISOString(),
           };
-          const saved = await store.mutate((s) => {
-            const duplicate = s.skills.find(
-              (skill) =>
-                !skill.agentId &&
-                !skill.mergedInto &&
-                skill.enabled !== false &&
-                skill.name === item.name &&
-                normalizeFact(skill.content) === normalizeFact(item.content),
-            );
-            if (duplicate) return duplicate;
-            s.skills.unshift(item);
-            return item;
-          });
-          return json(res, saved, saved.id === item.id ? 201 : 200);
+          const saved = store.skills.create(item);
+          product.notify();
+          return json(res, saved.skill, saved.created ? 201 : 200);
         }
       }
       fail("找不到此頁面。", 404);
     } catch (caught) {
       const error = asError(caught);
+      if (req.url?.startsWith("/api/v2/work-locations/") && !error.status) {
+        const fsErrors: Record<string, [number, string]> = {
+          ENOENT: [404, "檔案不存在或已被移動。"],
+          EEXIST: [409, "同名檔案或資料夾已存在。"],
+          ENOTDIR: [400, "路徑不是資料夾。"],
+          EISDIR: [400, "請選擇檔案。"],
+          EACCES: [403, "無法存取此檔案。"],
+          EPERM: [403, "檔案無法修改，可能正被其他程式使用。"],
+        };
+        const known = fsErrors[error.code || ""];
+        if (known) {
+          error.status = known[0];
+          error.message = known[1];
+        }
+      }
       if (!res.headersSent)
         json(
           res,
@@ -278,15 +305,12 @@ export async function createApp({
   server.on("close", () => {
     void product.close();
     tasks.stopAll();
-    void telegram.stop();
   });
-  server.once("listening", () => telegram.start());
   return {
     server,
     store,
     workspace,
     tasks,
-    telegram,
     product,
     connections,
   };

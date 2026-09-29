@@ -1,3 +1,10 @@
+import { retryModel } from "../model-retry.ts";
+import { toolFeedback } from "../tool-feedback.ts";
+import { ToolFailureGuard } from "../tool-failure-guard.ts";
+import { steeringMiddleware } from "../steering-middleware.ts";
+import { modelTurnBudget } from "../model-turn-budget.ts";
+import { scratchNamespace } from "../scratch-namespace.ts";
+import type { ToolOperation } from "../../shared/types.ts";
 import { scratchBackend } from "../scratch-backend.ts";
 import { z } from "zod";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -47,6 +54,10 @@ for (const provider of ["openai", "anthropic"]) {
   registerHarnessProfile(provider, { excludedTools: ["task", "execute"] });
 }
 export async function runDeep(options: RunOptions) {
+  const failureGuard = new ToolFailureGuard();
+  const turns = modelTurnBudget(
+    options.runtimeSettings?.maxTurns ?? options.maxTurns ?? 48,
+  );
   const config = connection(options);
   const budget = contextBudget(
     config.provider,
@@ -54,6 +65,14 @@ export async function runDeep(options: RunOptions) {
     options.modelSettings,
   );
   const maxTokens = budget.output;
+  let outputVersion = 0;
+  const callbacks = [
+    {
+      handleLLMNewToken: () => {
+        outputVersion++;
+      },
+    },
+  ];
   const makeModel = (summary = false) =>
     config.provider === "anthropic"
       ? new ChatAnthropic({
@@ -66,6 +85,7 @@ export async function runDeep(options: RunOptions) {
               )
             : maxTokens,
           maxRetries: 0,
+          callbacks,
           metadata: summary ? { apsis_summary: true } : {},
         })
       : new ChatOpenAI({
@@ -80,6 +100,7 @@ export async function runDeep(options: RunOptions) {
               )
             : maxTokens,
           maxRetries: 0,
+          callbacks,
           metadata: summary ? { apsis_summary: true } : {},
           streamUsage: true,
         });
@@ -117,11 +138,64 @@ export async function runDeep(options: RunOptions) {
       String(error),
     );
   };
+  const modelRetry = createMiddleware({
+    name: "ApsisModelRetry",
+    wrapModelCall: async (request, handler) => {
+      failureGuard.assertActive();
+      let retryOperation: ToolOperation | undefined;
+      try {
+        const result = await retryModel(
+          async () => {
+            turns.consume();
+            return handler(request);
+          },
+          {
+            signal: options.signal,
+            outputVersion: () => outputVersion,
+            onRetry: async (attempt, milliseconds) => {
+              turns.assertAvailable();
+              retryOperation = {
+                id: retryOperation?.id || randomUUID(),
+                name: "model_retry",
+                status: "started",
+                mutating: false,
+                startedAt:
+                  retryOperation?.startedAt || new Date().toISOString(),
+                target: `${attempt}/3 · ${milliseconds / 1000}s`,
+              };
+              await options.recordOperation?.(retryOperation);
+              options.emit({
+                type: "activity",
+                text: `模型連線暫時失敗，${milliseconds / 1000} 秒後重試（${attempt}/3）。`,
+              });
+            },
+          },
+        );
+        if (retryOperation)
+          await options.recordOperation?.({
+            ...retryOperation,
+            status: "succeeded",
+            endedAt: new Date().toISOString(),
+          });
+        return result;
+      } catch (error) {
+        if (retryOperation)
+          await options.recordOperation?.({
+            ...retryOperation,
+            status: options.signal.aborted ? "unknown" : "failed",
+            endedAt: new Date().toISOString(),
+            error: String(error),
+          });
+        throw error;
+      }
+    },
+  });
   const guard = createMiddleware({
     name: "ApsisContextBudget",
     wrapModelCall: async (request, handler) => {
       const memories = selectMemories(
-        scopedState(options.store.state, options.agent).memories,
+        scopedState(options.store.state, options.agent, options.memoryKey)
+          .memories,
         options.prompt,
         budget.memory,
       );
@@ -185,31 +259,26 @@ export async function runDeep(options: RunOptions) {
   const tools = createTools(options).map((t) =>
     tool(
       async (args) => {
-        try {
-          const result = await executeTool(
-            t,
-            args as Record<string, unknown>,
-            options,
+        const result = await executeTool(
+          t,
+          args as Record<string, unknown>,
+          options,
+        );
+        if (disk && estimateTokens(result) > budget.tool) {
+          const path = "/tool-results/" + randomUUID() + ".txt";
+          const saved = await disk.write(
+            path,
+            typeof result === "string" ? result : JSON.stringify(result),
           );
-          if (disk && estimateTokens(result) > budget.tool) {
-            const path = "/tool-results/" + randomUUID() + ".txt";
-            const saved = await disk.write(
-              path,
-              typeof result === "string" ? result : JSON.stringify(result),
-            );
-            if (saved.error) throw new Error(saved.error);
-            return (
-              "Large tool result saved to private scratch " +
-              path +
-              ". Read it in pages with read_scratch_part. Preview: " +
-              String(result).slice(0, 500)
-            );
-          }
-          return result;
-        } catch (error) {
-          options.signal.throwIfAborted();
-          return `Tool failed: ${(error as Error).message}`;
+          if (saved.error) throw new Error(saved.error);
+          return (
+            "Large tool result saved to private scratch " +
+            path +
+            ". Read it in pages with read_scratch_part. Preview: " +
+            String(result).slice(0, 500)
+          );
         }
+        return result;
       },
       {
         name: ["read_file", "write_file", "edit_file", "list_files"].includes(
@@ -268,6 +337,7 @@ export async function runDeep(options: RunOptions) {
     input: Parameters<typeof invokeSummary>[0],
     config?: Parameters<typeof invokeSummary>[1],
   ) => {
+    failureGuard.assertActive();
     const value = input as BaseMessage[];
     const content =
       Array.isArray(value) && value.length === 1 ? value[0].content : undefined;
@@ -281,6 +351,7 @@ export async function runDeep(options: RunOptions) {
     let result: Awaited<ReturnType<typeof invokeSummary>> | undefined;
     for (let start = 0; start < content.length; start += chars) {
       options.signal.throwIfAborted();
+      failureGuard.assertActive();
       result = await invokeSummary(
         [
           new HumanMessage(
@@ -339,11 +410,38 @@ export async function runDeep(options: RunOptions) {
       handler({ ...next, model: request.model }),
     );
   };
+  const steering = steeringMiddleware(
+    options.signal,
+    () => failureGuard.assertActive(),
+    (state) => {
+      if (!persistent) return;
+      history.archiveEngine(
+        options.session.id,
+        contextId,
+        runId,
+        mapChatMessagesToStoredMessages(state.messages),
+      );
+      const saved = checkpoint(state);
+      if (saved) history.saveCheckpoint(options.session.id, contextId, saved);
+    },
+  );
+  options.registerSteer?.(steering.enqueue);
   const agent = createDeepAgent({
     model,
     tools,
     backend,
     middleware: [
+      turns.middleware,
+      toolFeedback(
+        options,
+        new Set(
+          tools
+            .filter((t) => t.name !== "read_scratch_part")
+            .map((t) => t.name),
+        ),
+        failureGuard,
+      ),
+      steering.middleware,
       todoListMiddleware(),
       createFilesystemMiddleware({
         backend,
@@ -352,6 +450,8 @@ export async function runDeep(options: RunOptions) {
       }),
       summary,
       guard,
+      modelRetry,
+      scratchNamespace(),
     ],
     systemPrompt:
       agentContext(
@@ -362,23 +462,24 @@ export async function runDeep(options: RunOptions) {
         options.permissions,
         options.executionContext,
         budget.memory,
+        options.memoryKey,
       ) +
-      "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. workspace_* tools access real workspace files; use these when the user asks about their files. The separately granted shell tool executes on the host. Never claim scratch writes modified the workspace. Long-term memory is managed only by Apsis remember/update_memory tools.",
+      "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. workspace_* tools access real workspace files; use workspace_write_file with a workspace-relative path (for example snake/index.html) when creating code, games, documents, or other user deliverables. Virtual scratch paths use forward slashes such as /notes.txt, never host paths or drive letters. If a tool returns an error, correct the arguments and continue; inspect the state before retrying any action that may already have executed. The separately granted shell tool executes on the host. Never claim scratch writes modified the workspace. Before your first tool call, briefly tell the user what you are about to check or do. After a meaningful result or a change of plan, give one short factual progress update before the next tool call. Describe observable actions and findings, not private reasoning. Avoid narrating every trivial tool call. End with a concise result and verification summary. Long-term memory is managed only by Apsis remember/update_memory tools.",
   });
   const previous = restoreCheckpoint(options.session.engineState);
   const previousMessages = previous
     ? previous.messages
     : options.session.messages
-        .filter((message) => message.status === "complete")
+        .filter(
+          (message) =>
+            message.status === "complete" &&
+            (!message.delivery || message.delivery.state === "applied"),
+        )
         .map((message) =>
           message.role === "user"
             ? new HumanMessage(message.content)
             : new AIMessage(message.content),
         );
-  const steers: string[] = [];
-  options.registerSteer?.(async (instruction) => {
-    steers.push(instruction);
-  });
   let input = {
     messages: [...previousMessages, new HumanMessage(options.prompt)],
 
@@ -392,150 +493,190 @@ export async function runDeep(options: RunOptions) {
     { input_tokens: number; output_tokens: number }
   >();
   const seenTools = new Set<string>();
+  const seenCommentary = new Set(initialIds);
   for (const message of previousMessages) {
     if ("tool_calls" in message && Array.isArray(message.tool_calls)) {
       for (const call of message.tool_calls)
         if (call.id) seenTools.add(call.id);
     }
   }
-  for (;;) {
-    final = undefined;
-    const stream = await agent.stream(input, {
-      streamMode: ["messages", "values"],
-      signal: options.signal,
-      recursionLimit: Math.min(
-        200,
-        Math.max(
-          1,
-          Math.floor(
-            options.runtimeSettings?.maxTurns ?? options.maxTurns ?? 48,
-          ),
-        ),
-      ),
-    });
-    for await (const [kind, value] of stream) {
+  try {
+    for (;;) {
       options.signal.throwIfAborted();
-      if (kind === "messages") {
-        const [message, metadata] = value;
-        if (
-          metadata?.apsis_summary ||
-          metadata?.lcSource === "summarization" ||
-          metadata?.lc_source === "summarization"
-        )
-          continue;
-        if (message.type === "ai") {
-          const delta =
-            typeof message.content === "string"
-              ? message.content
-              : message.content
-                  .filter((c) => c.type === "text")
-                  .map((c) => c.text)
-                  .join("");
-          if (delta) {
-            text += delta;
-            options.emit({ type: "delta", text: delta });
-          }
-        }
-      } else if (kind === "values") {
-        final = value as DeepValue;
-        for (const message of final.messages) {
-          message.id ||= randomUUID();
+      failureGuard.assertActive();
+      final = undefined;
+      const stream = await agent.stream(input, {
+        streamMode: ["messages", "values"],
+        signal: options.signal,
+        recursionLimit: turns.recursionLimit,
+      });
+      for await (const [kind, value] of stream) {
+        options.signal.throwIfAborted();
+        failureGuard.assertActive();
+        if (kind === "messages") {
+          const [message, metadata] = value;
           if (
-            !initialIds.has(message.id) &&
-            "usage_metadata" in message &&
-            message.usage_metadata
+            metadata?.apsis_summary ||
+            metadata?.lcSource === "summarization" ||
+            metadata?.lc_source === "summarization"
           )
-            usageById.set(
-              message.id,
-              message.usage_metadata as {
-                input_tokens: number;
-                output_tokens: number;
-              },
-            );
-        }
-        if (persistent) {
-          history.archiveEngine(
-            options.session.id,
-            contextId,
-            runId,
-            mapChatMessagesToStoredMessages(final.messages),
-          );
-          const safe = checkpoint(final);
-          const last = final.messages.at(-1);
-          if (
-            safe &&
-            ((last?.type === "ai" &&
-              (typeof last.content !== "string" || !!last.content.trim())) ||
-              last?.type === "tool")
-          )
-            history.saveCheckpoint(options.session.id, contextId, safe);
-          const event = final._summarizationEvent;
-          if (event)
-            history.recordCompaction(
-              contextId,
-              runId,
-              final.messages[event.cutoffIndex - 1]?.id ||
-                String(event.cutoffIndex),
-              {
-                recordedAt: new Date().toISOString(),
-                engine: "deepagents@1.14.0",
-                summary: event.summaryMessage.content,
-                sourceStartId: final.messages[0]?.id,
-                sourceEndId: final.messages[event.cutoffIndex - 1]?.id,
-                cutoffIndex: event.cutoffIndex,
-                filePath: event.filePath,
-              },
-            );
-          const usage = [...final.messages]
-            .reverse()
-            .find(
-              (m) =>
-                !initialIds.has(m.id) &&
-                "usage_metadata" in m &&
-                m.usage_metadata,
-            ) as AIMessage | undefined;
-          if (usage?.usage_metadata?.input_tokens && lastEstimate) {
-            lastReported = usage.usage_metadata.input_tokens;
-            correction = Math.max(1, lastReported / lastEstimate);
+            continue;
+          if (message.type === "ai") {
+            const delta =
+              typeof message.content === "string"
+                ? message.content
+                : message.content
+                    .filter((c) => c.type === "text")
+                    .map((c) => c.text)
+                    .join("");
+            if (delta) {
+              text += delta;
+              options.emit({ type: "delta", text: delta });
+            }
           }
-          if (lastEstimate || usage?.usage_metadata)
-            history.setUsage(options.session.id, contextId, {
-              inputTokens: usage?.usage_metadata?.input_tokens ?? lastEstimate,
-              inputBudget: budget.input,
-              windowTokens: budget.windowTokens,
-              source: usage?.usage_metadata ? "provider" : "estimate",
-              omittedCoreIds: selectMemories(
-                scopedState(options.store.state, options.agent).memories,
-                options.prompt,
-                budget.memory,
-              ).omittedCoreIds,
-              updatedAt: new Date().toISOString(),
-            });
-        }
-        for (const m of value.messages) {
-          if ("tool_calls" in m && Array.isArray(m.tool_calls))
-            for (const call of m.tool_calls) {
-              if (call.id && !seenTools.has(call.id)) {
-                seenTools.add(call.id);
+        } else if (kind === "values") {
+          final = value as DeepValue;
+          for (const message of final.messages) {
+            message.id ||= randomUUID();
+            // Only public assistant text belongs in the work log. Reasoning blocks
+            // and summary-model output are never exposed as progress commentary.
+            if (
+              message.type === "ai" &&
+              "tool_calls" in message &&
+              Array.isArray(message.tool_calls) &&
+              message.tool_calls.length &&
+              !seenCommentary.has(message.id)
+            ) {
+              seenCommentary.add(message.id);
+              const commentary =
+                typeof message.content === "string"
+                  ? message.content
+                  : message.content
+                      .filter((part) => part.type === "text")
+                      .map((part) => part.text)
+                      .join("");
+              if (commentary.trim()) {
                 options.emit({
-                  type: "activity",
-                  tool: call.name,
-                  text: `規劃工具 ${call.name}`,
+                  type: "commentary",
+                  id: message.id,
+                  text: commentary,
                 });
+                text = "";
               }
             }
+            if (
+              !initialIds.has(message.id) &&
+              "usage_metadata" in message &&
+              message.usage_metadata
+            )
+              usageById.set(
+                message.id,
+                message.usage_metadata as {
+                  input_tokens: number;
+                  output_tokens: number;
+                },
+              );
+          }
+          if (persistent) {
+            const persisted = steering.forPersistence(final);
+            history.archiveEngine(
+              options.session.id,
+              contextId,
+              runId,
+              mapChatMessagesToStoredMessages(persisted.messages),
+            );
+            const safe = checkpoint(persisted);
+            const last = final.messages.at(-1);
+            if (
+              safe &&
+              ((last?.type === "ai" &&
+                (typeof last.content !== "string" || !!last.content.trim())) ||
+                last?.type === "tool")
+            )
+              history.saveCheckpoint(options.session.id, contextId, safe);
+            const event = final._summarizationEvent;
+            if (event)
+              history.recordCompaction(
+                contextId,
+                runId,
+                final.messages[event.cutoffIndex - 1]?.id ||
+                  String(event.cutoffIndex),
+                {
+                  recordedAt: new Date().toISOString(),
+                  engine: "deepagents@1.14.0",
+                  summary: event.summaryMessage.content,
+                  sourceStartId: final.messages[0]?.id,
+                  sourceEndId: final.messages[event.cutoffIndex - 1]?.id,
+                  cutoffIndex: event.cutoffIndex,
+                  filePath: event.filePath,
+                },
+              );
+            const usage = [...final.messages]
+              .reverse()
+              .find(
+                (m) =>
+                  !initialIds.has(m.id) &&
+                  "usage_metadata" in m &&
+                  m.usage_metadata,
+              ) as AIMessage | undefined;
+            if (usage?.usage_metadata?.input_tokens && lastEstimate) {
+              lastReported = usage.usage_metadata.input_tokens;
+              correction = Math.max(1, lastReported / lastEstimate);
+            }
+            if (lastEstimate || usage?.usage_metadata)
+              history.setUsage(options.session.id, contextId, {
+                inputTokens:
+                  usage?.usage_metadata?.input_tokens ?? lastEstimate,
+                inputBudget: budget.input,
+                windowTokens: budget.windowTokens,
+                source: usage?.usage_metadata ? "provider" : "estimate",
+                omittedCoreIds: selectMemories(
+                  scopedState(
+                    options.store.state,
+                    options.agent,
+                    options.memoryKey,
+                  ).memories,
+                  options.prompt,
+                  budget.memory,
+                ).omittedCoreIds,
+                updatedAt: new Date().toISOString(),
+              });
+          }
+          for (const m of value.messages) {
+            if ("tool_calls" in m && Array.isArray(m.tool_calls))
+              for (const call of m.tool_calls) {
+                if (call.id && !seenTools.has(call.id)) {
+                  seenTools.add(call.id);
+                  options.emit({
+                    type: "activity",
+                    tool: call.name,
+                    text: `規劃工具 ${call.name}`,
+                  });
+                }
+              }
+          }
         }
       }
-    }
-    if (!final) throw new Error("Deep Agents 未回傳執行結果。");
-    if (!steers.length) break;
-    const instruction = steers.splice(0).join("\n");
-    input = {
-      messages: [...effectiveMessages(final), new HumanMessage(instruction)],
+      failureGuard.assertActive();
+      if (!final) throw new Error("Deep Agents 未回傳執行結果。");
+      if (!steering.hasPending()) {
+        // Close synchronously with the final queue check: a late request must not
+        // be accepted after the engine has committed to returning its result.
+        steering.close();
+        break;
+      }
+      input = {
+        // A supplement received during the final model response needs another
+        // graph invocation. The same beforeModel hook injects it exactly once.
+        messages: effectiveMessages(final),
 
-      ...(final.todos ? { todos: final.todos } : {}),
-    };
+        ...(final.todos ? { todos: final.todos } : {}),
+      };
+    }
+  } finally {
+    steering.close();
   }
+  failureGuard.assertActive();
   if (!text) {
     const last = final.messages.findLast((m) => m.type === "ai");
     text =

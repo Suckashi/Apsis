@@ -25,6 +25,8 @@ export interface AgentDefinition {
 }
 export type Environment = Record<string, string | undefined>;
 export interface Memory {
+  /** Undefined is legacy data; never implicitly promote it to global memory. */
+  scopeKey?: string;
   tier?: "core" | "reference";
   locked?: boolean;
   revision?: number;
@@ -53,8 +55,16 @@ export interface Memory {
 }
 export interface Skill extends Memory {
   name: string;
+  description?: string;
+  skillDirectory?: string;
 }
 export interface ChatMessage {
+  /** Delivery into a later model turn is independent of task completion. */
+  delivery?: {
+    kind: "steer";
+    state: "pending" | "applied" | "not-applied";
+    updatedAt: string;
+  };
   createdAt?: string;
   workContextId?: string;
   sequence?: number;
@@ -100,6 +110,7 @@ export interface StoreState {
   skills: Skill[];
 }
 export type RunEvent =
+  | { type: "commentary"; id: string; text: string }
   | { type: "delta" | "activity" | "error"; text: string; tool?: string }
   | { type: "progress"; text?: string }
   | { type: "operation" }
@@ -137,7 +148,12 @@ export interface ToolOperation {
   mutating: boolean;
   error?: string;
 }
+export type RunTimelineEntry =
+  | { kind: "commentary"; id: string; at: string; text: string }
+  | { kind: "operation"; id: string; at: string; operationId: string };
 export interface TaskRun {
+  location?: WorkLocation;
+  timeline?: RunTimelineEntry[];
   workContextId?: string;
   progress?: { kind: "message" | "reply"; text?: string; updatedAt: string };
   project?: Project;
@@ -162,8 +178,18 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  description?: string;
+}
+export interface WorkLocation {
+  id: string;
+  name: string;
+  path: string;
+  kind: "task" | "worktree" | "folder" | "project" | "legacy";
+  projectId?: string;
+  memoryKey: string;
 }
 export interface ModelConnection {
+  configRevision?: string;
   contextProfiles?: Record<
     string,
     { tokens?: number; source: "manual" | "default" }
@@ -204,6 +230,8 @@ export interface ContextUsage {
   updatedAt: string;
 }
 export interface WorkContext {
+  location?: WorkLocation;
+  locationLockedAt?: string;
   id: string;
   sessionId: string;
   kind: "chat" | "routine" | "delegation";
@@ -222,13 +250,4 @@ export type Api = <T = unknown>(
 export interface WorkspaceFile {
   name: string;
   type: "directory" | "file";
-}
-export interface TelegramView {
-  configured: boolean;
-  enabled: boolean;
-  ownerId: string;
-  username: string;
-  status: "disabled" | "connecting" | "connected" | "error";
-  error: string;
-  pairingExpiresAt: string;
 }

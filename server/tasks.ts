@@ -18,6 +18,7 @@ import type { RunPermissions, TaskRun } from "../shared/types.ts";
 import { Projects } from "./projects.ts";
 import { findBash, shellContext, shellMissing } from "./shell.ts";
 import { recoveryContext } from "./recovery.ts";
+import { WorkLocations } from "./work-locations.ts";
 
 export type AgentRunner = typeof runAgent;
 export class TaskService {
@@ -27,6 +28,7 @@ export class TaskService {
   runs: RunStore;
   connections?: Connections;
   projects: Projects;
+  locations: WorkLocations;
   running = new Map<
     string,
     {
@@ -49,6 +51,7 @@ export class TaskService {
     this.runner = runner;
     this.runs = new RunStore(store.directory);
     this.projects = new Projects(store, workspace);
+    this.locations = new WorkLocations(store, this.projects, workspace);
   }
   async create(
     mode: Mode = "deepagents",
@@ -67,9 +70,16 @@ export class TaskService {
       ...(agent ? { agent: structuredClone(agent) } : {}),
     };
     await this.store.mutate((s) => s.sessions.unshift(session));
+    if (projectId)
+      this.locations.bind(
+        session.id,
+        this.store.conversations.activeId(session.id),
+        this.locations.project(projectId),
+      );
     return session;
   }
   view(id: string): SessionView {
+    this.locations.ensure(id);
     const session = this.store.state.sessions.find((s) => s.id === id);
     if (!session)
       throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
@@ -102,6 +112,12 @@ export class TaskService {
     workContextId?: string,
   ) {
     const session = this.store.conversations.load(id, workContextId);
+    const location = this.locations.lock(id, session.workContextId!);
+    session.project = {
+      id: location.projectId || location.id,
+      name: location.name,
+      path: location.path,
+    };
     if (!session)
       throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
     if (this.running.has(id))
@@ -140,6 +156,7 @@ export class TaskService {
     let env: Environment = {};
     const userId = randomUUID();
     const run: TaskRun = {
+      location,
       workContextId: session.workContextId,
       project: session.project || this.projects.get(),
       id: runId,
@@ -154,6 +171,7 @@ export class TaskService {
       text: "",
       activity: live.activity,
       operations: [],
+      timeline: [],
     };
     // Queue the initial durable record synchronously, before returning a task ID.
     const initialSave = this.runs.save(run);
@@ -165,6 +183,16 @@ export class TaskService {
       if ("text" in event && typeof event.text === "string")
         event = { ...event, text: redact(event.text) };
       if (event.type === "delta") live.text += event.text;
+      if (event.type === "commentary") {
+        if (!run.timeline!.some((entry) => entry.id === event.id))
+          run.timeline!.push({
+            kind: "commentary",
+            id: event.id,
+            text: event.text,
+            at: new Date().toISOString(),
+          });
+        live.text = "";
+      }
       if (event.type === "activity") live.activity.push(event.text);
       if (event.type === "delta" || event.type === "progress") {
         run.progress = {
@@ -177,6 +205,7 @@ export class TaskService {
         };
       }
       run.text = live.text;
+      if (event.type === "commentary") void this.runs.save(run).catch(() => {});
       try {
         onEvent(event);
       } catch {
@@ -186,7 +215,8 @@ export class TaskService {
     try {
       await initialSave;
       rejectLegacyCodex({ session });
-      const workspace = await this.projects.workspace(session);
+      const workspace = this.locations.workspace(location);
+      await workspace.ready();
       const recovery = recoveryContext(this.runs, session);
       run.recoveryRunIds = recovery.ids;
       if (session.agent?.connectionId) {
@@ -225,12 +255,14 @@ export class TaskService {
         emit({ type: "activity", text: shellMissing });
       const result = await this.runner({
         ...extensions,
+        memoryKey: location.memoryKey,
+        historyContextId: session.workContextId,
         mode: session.mode,
         prompt,
         session,
         store: this.store,
         workspace,
-        executionContext: `Current project: ${JSON.stringify(run.project)}. All relative file tools and shell start in ${JSON.stringify(workspace.root)}. ${shellContext(workspace.root)} A project directory is not an OS sandbox. Before reporting completion, distinguish actual tool results, checks performed and remaining unverified work.\n${recovery.context}\n${extensions?.executionContext || ""}`,
+        executionContext: `Current task work location: ${JSON.stringify(location)}. Memory writes belong to ${JSON.stringify(location.memoryKey)}; only user-promoted Bot preferences cross tasks. All relative file tools and shell start in ${JSON.stringify(workspace.root)}. ${shellContext(workspace.root)} A work directory is not an OS sandbox. Before reporting completion, distinguish actual tool results, checks performed and remaining unverified work.\n${recovery.context}\n${extensions?.executionContext || ""}`,
         allowWrites,
         emit,
         signal: controller.signal,
@@ -264,8 +296,15 @@ export class TaskService {
                 }
               : undefined,
           };
-          if (index < 0) run.operations.push(safe);
-          else run.operations[index] = safe;
+          if (index < 0) {
+            run.operations.push(safe);
+            run.timeline!.push({
+              kind: "operation",
+              id: `operation-${operation.id}`,
+              operationId: operation.id,
+              at: new Date().toISOString(),
+            });
+          } else run.operations[index] = safe;
           await this.runs.save(run);
           emit({ type: "operation" });
         },

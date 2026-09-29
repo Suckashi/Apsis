@@ -43,12 +43,12 @@ const dictionary = {
   selectedSkills: ["可使用的技能", "Available skills"],
   selectedConnectors: ["可使用的連接器", "Available connectors"],
   noSkills: [
-    "尚無共用技能。可到設定新增。",
-    "No shared skills. Add skills in Settings.",
+    "尚無共用技能。請在技能資料夾新增 SKILL.md。",
+    "No shared skills. Add SKILL.md in a skills folder.",
   ],
   noConnectors: [
-    "尚無連接器。可到設定新增。",
-    "No connectors. Add connectors in Settings.",
+    "尚無連接器。請在 .apsis/mcp.json 設定。",
+    "No connectors. Configure .apsis/mcp.json.",
   ],
   disabled: ["已停用", "Disabled"],
   mode: ["工作區權限", "Workspace access"],

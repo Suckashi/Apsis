@@ -1,6 +1,6 @@
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "./context-budget.ts";
-import { readFile, writeFile, rename } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type {
   ConnectionSelection,
@@ -10,9 +10,19 @@ import type {
 } from "../shared/types.ts";
 import { compatibleUrl } from "./compatible.ts";
 import { ollamaUrl, ollamaModelName } from "./ollama.ts";
-import { connectionsSchema } from "./storage-schema.ts";
-type SavedConnection = Omit<ModelConnection, "credentialConfigured"> & {
-  apiKey?: string;
+import {
+  ConfigStore,
+  connectionId,
+  setConnections,
+  type SavedConnection,
+} from "./config-store.ts";
+import { ConfigConflictError } from "./config-file.ts";
+import type { ProductDB } from "./product-db.ts";
+type Verification = NonNullable<ModelConnection["verification"]>;
+type VerificationRecord = {
+  id: string;
+  fingerprint: string;
+  verification: Verification;
 };
 function error(text: string): never {
   throw Object.assign(new Error(text), { status: 400 });
@@ -35,45 +45,84 @@ const keys = {
   codex: "",
 };
 export class Connections {
-  file: string;
-  defaultFile: string;
-  rows: SavedConnection[] = [];
-  savedDefault: ConnectionSelection | null = null;
+  readonly config: ConfigStore;
+  readonly directory: string;
+  private db?: ProductDB;
+  private verifications = new Map<string, VerificationRecord>();
   tail: Promise<unknown> = Promise.resolve();
   constructor(directory: string) {
-    this.file = join(directory, "connections.json");
-    this.defaultFile = join(directory, "connection-default.json");
+    this.directory = directory;
+    this.config = new ConfigStore(directory);
   }
   async init() {
-    try {
-      this.rows = JSON.parse(await readFile(this.file, "utf8"));
-      if (!connectionsSchema.safeParse(this.rows).success)
-        throw new Error("Invalid connections file");
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-    }
-    try {
-      const selection: unknown = JSON.parse(
-        await readFile(this.defaultFile, "utf8"),
-      );
-      if (
-        !selection ||
-        typeof selection !== "object" ||
-        typeof (selection as ConnectionSelection).connectionId !== "string" ||
-        typeof (selection as ConnectionSelection).model !== "string"
-      )
-        throw new Error("Invalid connection default file");
-      this.savedDefault = selection as ConnectionSelection;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-    }
+    this.config.init(this.directory);
     return this;
   }
+  attachDB(db: ProductDB) {
+    this.db = db;
+    if (!db.get("migration", "connection-verification-v1")) {
+      const legacyFile = join(this.directory, "connections.json");
+      if (existsSync(legacyFile)) {
+        try {
+          for (const row of JSON.parse(
+            readFileSync(legacyFile, "utf8"),
+          ) as SavedConnection[])
+            if (row.verification)
+              db.put("connection-verification", {
+                id: row.id,
+                verification: row.verification,
+                fingerprint: this.rowFingerprint(row),
+              });
+        } catch {
+          /* Optional historical diagnostics must not block valid settings. */
+        }
+      }
+      db.put("migration", { id: "connection-verification-v1" });
+    }
+  }
+  get rows(): SavedConnection[] {
+    return this.config.read().value.connections.map((row) => {
+      const record =
+        this.db?.get<VerificationRecord>("connection-verification", row.id) ||
+        this.verifications.get(row.id);
+      return {
+        ...row,
+        ...(record?.fingerprint === this.rowFingerprint(row)
+          ? { verification: record.verification }
+          : {}),
+      };
+    });
+  }
+  get savedDefault() {
+    return this.config.read().value.defaultSelection;
+  }
+  private rowFingerprint(row: SavedConnection) {
+    return createHash("sha256")
+      .update(
+        JSON.stringify({
+          provider: row.provider,
+          url: row.url,
+          model: row.model,
+          models: row.models || [row.model],
+          modelSettings: row.modelSettings || {},
+          apiKey: row.apiKeyEnv ? process.env[row.apiKeyEnv] : row.apiKey,
+        }),
+      )
+      .digest("hex");
+  }
+  private credential(row: SavedConnection) {
+    if (!row.apiKeyEnv) return row.apiKey;
+    const value = process.env[row.apiKeyEnv];
+    if (!value) error(`模型連線缺少環境變數：${row.apiKeyEnv}`);
+    return value;
+  }
   view() {
+    const configRevision = this.config.read().revision;
     return this.rows
       .filter((row) => !row.archived)
-      .map(({ apiKey, ...row }) => ({
+      .map(({ apiKey, apiKeyEnv, ...row }) => ({
         ...row,
+        configRevision,
         models: row.models?.length ? [...row.models] : [row.model],
         contextProfiles: Object.fromEntries(
           (row.models?.length ? row.models : [row.model]).map((model) => {
@@ -83,15 +132,17 @@ export class Connections {
               model,
               {
                 tokens,
-                source: manual !== undefined
-                  ? ("manual" as const)
-                  : ("default" as const),
+                source:
+                  manual !== undefined
+                    ? ("manual" as const)
+                    : ("default" as const),
               },
             ];
           }),
         ),
         credentialConfigured:
-          !!apiKey || ["ollama", "codex"].includes(row.provider),
+          !!(apiKeyEnv ? process.env[apiKeyEnv] : apiKey) ||
+          ["ollama", "codex"].includes(row.provider),
       }));
   }
   selection(connectionId: unknown, model?: unknown): ConnectionSelection {
@@ -136,15 +187,14 @@ export class Connections {
   }
   async setDefault(input: Record<string, unknown>) {
     const selection = this.selection(input.connectionId, input.model);
-    const operation = this.tail.then(async () => {
+    const revision = this.config.read().revision;
+    const operation = this.tail.then(() => {
       // Recheck after any queued connection edits before persisting the pointer.
       const current = this.selection(selection.connectionId, selection.model);
-      const temporary = this.defaultFile + "." + randomUUID() + ".tmp";
-      await writeFile(temporary, JSON.stringify(current, null, 2), {
-        mode: 0o600,
-      });
-      await rename(temporary, this.defaultFile);
-      this.savedDefault = current;
+      this.config.update(
+        (doc) => setConnections(doc, this.rows, current),
+        revision,
+      );
       return current;
     });
     this.tail = operation.catch(() => {});
@@ -158,7 +208,7 @@ export class Connections {
     return {
       MODEL_PROVIDER: row.provider,
       MODEL_ID: model || row.model,
-      [keys[row.provider] || "UNUSED"]: row.apiKey,
+      [keys[row.provider] || "UNUSED"]: this.credential(row),
       ...(row.provider === "ollama"
         ? { OLLAMA_URL: row.url }
         : row.provider === "openai-compatible"
@@ -179,23 +229,33 @@ export class Connections {
       compatibleUrl(input.url) !== row.url
     )
       error("網址已變更，請重新輸入 API key，或先儲存新網址後再取得模型。");
-    return row.apiKey;
+    return this.credential(row);
   }
   async mutate(fn: (rows: SavedConnection[]) => void) {
-    const operation = this.tail.then(async () => {
+    const revision = this.config.read().revision;
+    const operation = this.tail.then(() => {
       const next = structuredClone(this.rows);
       fn(next);
-      const temporary = this.file + "." + randomUUID() + ".tmp";
-      await writeFile(temporary, JSON.stringify(next, null, 2), {
-        mode: 0o600,
-      });
-      await rename(temporary, this.file);
-      this.rows = next;
+      let selection = this.savedDefault;
+      if (selection) {
+        const row = next.find((r) => r.id === selection!.connectionId);
+        if (row && !(row.models || [row.model]).includes(selection.model))
+          selection = { connectionId: row.id, model: row.model };
+      }
+      this.config.update(
+        (doc) => setConnections(doc, next, selection),
+        revision,
+      );
     });
     this.tail = operation.catch(() => {});
     await operation;
   }
   async save(input: Record<string, unknown>, id?: string) {
+    if (
+      input.configRevision !== undefined &&
+      input.configRevision !== this.config.read().revision
+    )
+      throw new ConfigConflictError(this.config.storage.file);
     const previous = id
       ? this.rows.find((r) => r.id === id && !r.archived)
       : undefined;
@@ -338,7 +398,13 @@ export class Connections {
       }
     }
     const row: SavedConnection = {
-      id: previous?.id || randomUUID(),
+      id:
+        previous?.id ||
+        connectionId(
+          text("name", 100),
+          vendor || provider,
+          this.rows.map((r) => r.id),
+        ),
       name: text("name", 100),
       provider,
       model,
@@ -346,6 +412,14 @@ export class Connections {
       vendor,
       url,
       apiKey,
+      apiKeyEnv:
+        provider !== "ollama" &&
+        !input.apiKey &&
+        input.apiKey !== null &&
+        previous?.url === url &&
+        previous?.provider === provider
+          ? previous.apiKeyEnv
+          : undefined,
       modelSettings: modelSettings as ModelConnection["modelSettings"],
     };
     await this.mutate((rows) => {
@@ -376,15 +450,20 @@ export class Connections {
     verification: NonNullable<ModelConnection["verification"]>,
     fingerprint?: string,
   ) {
-    await this.mutate((rows) => {
-      const row = rows.find((r) => r.id === id);
-      if (
-        row &&
-        !row.archived &&
-        (!fingerprint || this.fingerprint(id) === fingerprint)
-      )
-        row.verification = verification;
-    });
+    const row = this.rows.find((r) => r.id === id);
+    if (
+      row &&
+      !row.archived &&
+      (!fingerprint || this.fingerprint(id) === fingerprint)
+    ) {
+      const record = {
+        id,
+        verification,
+        fingerprint: this.rowFingerprint(row),
+      };
+      if (this.db) this.db.put("connection-verification", record);
+      else this.verifications.set(id, record);
+    }
     return verification;
   }
 }

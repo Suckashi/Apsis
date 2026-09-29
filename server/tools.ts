@@ -12,6 +12,23 @@ import { scopedState } from "./agents.ts";
 import type { ToolOptions } from "./runtime.ts";
 import { normalizeFact, revise } from "./knowledge.ts";
 import type { ToolOperation } from "../shared/types.ts";
+
+export class ToolAuthorizationError extends Error {
+  readonly status = 403;
+  authorization: NonNullable<ToolOperation["authorization"]>;
+  constructor(
+    message: string,
+    authorization: NonNullable<ToolOperation["authorization"]>,
+  ) {
+    super(message);
+    this.name = "ToolAuthorizationError";
+    this.authorization = authorization;
+  }
+}
+
+const recordedFailures = new WeakSet<Error>();
+export const isRecordedToolFailure = (error: unknown) =>
+  error instanceof Error && recordedFailures.has(error);
 export interface AgentToolResult {
   content: (
     | { type: "text"; text: string }
@@ -76,6 +93,8 @@ const tool = (
 export function createTools({
   store,
   workspace,
+  memoryKey,
+  historyContextId,
   allowWrites,
   agent,
   permissions,
@@ -101,7 +120,7 @@ export function createTools({
         },
       ),
     ];
-  const view = () => scopedState(store.state, agent);
+  const view = () => scopedState(store.skillState(), agent, memoryKey);
   const writable =
     (
       fn: ToolHandler,
@@ -118,12 +137,13 @@ export function createTools({
   const tools = [
     tool(
       "read_history",
-      "Read surrounding messages for a sequence from search_history. Results are scoped to your Bot.",
+      "Read surrounding messages for a sequence from search_history. Results are restricted to the current task context.",
       ["sequence"],
       (a) =>
         store.conversations.around(
           view().sessions.map((s) => s.id),
           Number(a.sequence),
+          historyContextId,
         ),
     ),
     tool(
@@ -138,6 +158,7 @@ export function createTools({
             agent?.memoryScope === "private" ? agent.id : undefined,
             change,
             { kind: "agent", ...source },
+            memoryKey,
           ),
         );
       }),
@@ -169,6 +190,8 @@ export function createTools({
       (a) => {
         const skill = view().skills.find((s) => s.id === a.id);
         if (!skill) throw new Error("找不到技能。");
+        if (skill.skillDirectory) return store.skills.read(a.id, a.path);
+        if (a.path !== undefined) throw new Error("此技能沒有資源資料夾。");
         return skill;
       },
     ),
@@ -190,6 +213,7 @@ export function createTools({
           query,
           view().sessions.map((s) => s.id),
           before,
+          historyContextId,
         );
       },
     ),
@@ -210,6 +234,7 @@ export function createTools({
               content: a.content,
             },
             { kind: "agent", ...source },
+            memoryKey,
           ),
         );
         memoryVersions.set(updated.id, updated.revision ?? 1);
@@ -227,7 +252,7 @@ export function createTools({
     ),
     tool(
       "remember",
-      "Save a useful user preference or durable project fact. Never store credentials.",
+      "Save a fact in the current project or task. This does not create a cross-task preference; the user can promote a memory in the UI. Never store credentials.",
       ["content"],
       writable(async (a) => {
         if (!a.content.trim() || a.content.length > 4000)
@@ -238,6 +263,7 @@ export function createTools({
             agent?.memoryScope === "private" ? agent.id : undefined,
             { content: a.content },
             { kind: "agent", ...source },
+            memoryKey,
           ),
         );
         memoryVersions.set(saved.id, saved.revision ?? 1);
@@ -256,6 +282,14 @@ export function createTools({
           a.content.length > 12000
         )
           throw new Error("技能名稱或內容長度不符。");
+        if (!agent) {
+          store.skills.create({
+            id: randomUUID(),
+            name: a.name.trim(),
+            content: a.content,
+          });
+          return "已儲存技能。";
+        }
         await store.mutate((s) =>
           s.skills.push({
             source: { kind: "agent", ...source },
@@ -270,6 +304,18 @@ export function createTools({
       }, "skills"),
     ),
   ];
+  tools.find((t) => t.name === "read_skill")!.parameters = Type.Object(
+    {
+      id: Type.String(),
+      path: Type.Optional(
+        Type.String({
+          description:
+            "Relative text resource path within this skill directory.",
+        }),
+      ),
+    },
+    { additionalProperties: false },
+  );
   tools.find((t) => t.name === "search_history")!.parameters = Type.Object(
     { query: Type.String(), before: Type.Optional(Type.String()) },
     { additionalProperties: false },
@@ -284,8 +330,6 @@ export function createTools({
       // Snapshot parameters before the first async boundary: approval and execution
       // must refer to the same operation, even if a caller mutates its object.
       args = structuredClone(args);
-      let receipt = await authorize?.(t.name, args, signal);
-      signal?.throwIfAborted();
       const values = args as Record<string, unknown> | null;
       const target =
         values &&
@@ -293,15 +337,6 @@ export function createTools({
           .map((k) => values[k])
           .find((v) => typeof v === "string") as string | undefined);
       const operation: ToolOperation = {
-        ...(receipt
-          ? {
-              authorization: {
-                reason: receipt.reason,
-                dangerousCommand: receipt.dangerousCommand,
-                matchedRuleIds: receipt.matchedRuleIds,
-              },
-            }
-          : {}),
         id: randomUUID(),
         name: t.name,
         status: "started",
@@ -315,12 +350,22 @@ export function createTools({
           "manage_memory",
           "save_skill",
           "delegate_task",
+          "create_coding_task",
+          "track_pull_request",
         ].includes(t.name),
         target: target?.slice(0, 300),
       };
-      await recordOperation?.(operation);
       let executed = false;
+      let executionStarted = false;
       try {
+        let receipt = await authorize?.(t.name, args, signal);
+        if (receipt)
+          operation.authorization = {
+            reason: receipt.reason,
+            dangerousCommand: receipt.dangerousCommand,
+            matchedRuleIds: receipt.matchedRuleIds,
+          };
+        await recordOperation?.(operation);
         signal?.throwIfAborted();
         const execute = async () => {
           signal?.throwIfAborted();
@@ -339,6 +384,7 @@ export function createTools({
             };
           }
           signal?.throwIfAborted();
+          executionStarted = true;
           return t.execute(id, args, signal);
         };
         const output = await (executeAuthorizedTool
@@ -364,15 +410,23 @@ export function createTools({
         });
         return output;
       } catch (error) {
+        const failure =
+          error instanceof Error ? error : new Error(String(error));
+        if (failure instanceof ToolAuthorizationError)
+          operation.authorization = failure.authorization;
         await recordOperation?.({
           ...operation,
-          status: executed || t.name === "shell" ? "unknown" : "failed",
+          status:
+            executed || (executionStarted && t.name === "shell")
+              ? "unknown"
+              : "failed",
           endedAt: new Date().toISOString(),
-          error: (error as Error).message,
+          error: failure.message,
           evidence:
             error instanceof ToolExecutionError ? error.evidence : undefined,
         });
-        throw error;
+        if (recordOperation) recordedFailures.add(failure);
+        throw failure;
       }
     },
   }));

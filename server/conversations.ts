@@ -142,6 +142,13 @@ export class ConversationStore {
       .all(sessionId, before || null, before || null, sessionId)
       .map((row) => decode<WorkContext>(row)!);
   }
+  updateContext(sessionId: string, id: string, patch: Partial<WorkContext>) {
+    const context = { ...this.context(sessionId, id), ...patch, id, sessionId };
+    this.db
+      .prepare("UPDATE contexts SET value=? WHERE id=? AND session_id=?")
+      .run(JSON.stringify(context), id, sessionId);
+    return context;
+  }
   createContext(
     sessionId: string,
     kind: WorkContext["kind"] = "chat",
@@ -320,7 +327,12 @@ export class ConversationStore {
       .all(contextId)
       .map((row) => ({ id: Number(row.id), ...JSON.parse(String(row.value)) }));
   }
-  search(query: string, sessionIds: string[], before?: number): HistoryHit[] {
+  search(
+    query: string,
+    sessionIds: string[],
+    before?: number,
+    contextId?: string,
+  ): HistoryHit[] {
     const clean = query.trim();
     if (clean.length < 2 || clean.length > 200)
       fail("查詢需為 2–200 字。", 400);
@@ -331,6 +343,8 @@ export class ConversationStore {
       : "instr(lower(m.content),lower(?))>0";
     const args: SQLInputValue[] = [
       ...sessionIds,
+      contextId ?? null,
+      contextId ?? null,
       before ?? null,
       before ?? null,
       trigram ? '"' + clean.replaceAll('"', '""') + '"' : clean,
@@ -338,7 +352,7 @@ export class ConversationStore {
     return this.db
       .prepare(
         `SELECT m.* FROM messages m WHERE m.session_id IN (${sessionIds.map(() => "?").join(",")})
-      AND (m.channel='chat' OR m.role='tool') AND (? IS NULL OR m.seq<?) AND ${condition} ORDER BY m.seq DESC LIMIT 20`,
+      AND (? IS NULL OR m.context_id=?) AND (m.channel='chat' OR m.role='tool') AND (? IS NULL OR m.seq<?) AND ${condition} ORDER BY m.seq DESC LIMIT 20`,
       )
       .all(...args)
       .map((row) => this.hit(row, clean));
@@ -364,11 +378,19 @@ export class ConversationStore {
       ),
     };
   }
-  around(sessionIds: string[], sequence: number): HistoryHit[] {
+  around(
+    sessionIds: string[],
+    sequence: number,
+    contextId?: string,
+  ): HistoryHit[] {
     const row = this.db
       .prepare("SELECT * FROM messages WHERE seq=?")
       .get(sequence);
-    if (!row || !sessionIds.includes(String(row.session_id)))
+    if (
+      !row ||
+      !sessionIds.includes(String(row.session_id)) ||
+      (contextId && row.context_id !== contextId)
+    )
       return fail("找不到訊息。");
     const args = [
       row.session_id,

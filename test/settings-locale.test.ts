@@ -9,6 +9,7 @@ import {
   settingsText,
 } from "../public/settings-locale.ts";
 import { renderMarkdown } from "../public/markdown.ts";
+import { botAvatars, botAvatarSeries } from "../shared/bot-avatars.ts";
 
 const slots = (text: string) =>
   [...text.matchAll(/\{(\d+)\}/g)].map((match) => match[1]).sort();
@@ -18,6 +19,12 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
     : undefined;
 
 test("fixed UI dictionary calls have English entries and matching placeholders", async () => {
+  for (const { label } of [...botAvatars, ...botAvatarSeries]) {
+    assert.ok(
+      Object.hasOwn(english, label),
+      `Missing avatar translation: ${label}`,
+    );
+  }
   for (const [source, translated] of Object.entries(english)) {
     assert.ok(translated.trim(), `Empty translation: ${source}`);
     assert.deepEqual(
@@ -31,6 +38,7 @@ test("fixed UI dictionary calls have English entries and matching placeholders",
     "bot.tsx",
     "provider-settings.tsx",
     "bot-ui.tsx",
+    "avatar-collection.tsx",
     "mcp-json.ts",
     "settings-controls.tsx",
     "settings-templates.tsx",

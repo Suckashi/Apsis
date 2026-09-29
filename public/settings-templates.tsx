@@ -208,9 +208,7 @@ export function TemplateSettings({
                 )}
                 {catalog && (
                   <BotAccessFields
-                    skills={catalog.skills}
                     connectors={catalog.connectors}
-                    skillIds={editing.skillIds}
                     connectorIds={editing.connectorIds}
                     permissionMode={editing.permissionMode}
                     disabled={busy}
@@ -247,8 +245,8 @@ export function TemplateSettings({
                 <p className="template-description">{template.description}</p>
                 <small className="muted">
                   {template.model || t("defaultModel")} ·{" "}
-                  {template.skillIds.length} {t("skills")} ·{" "}
-                  {template.connectorIds.length} {t("connectors")} ·{" "}
+                  {uiText("共用技能自動可用")} · {template.connectorIds.length}{" "}
+                  {t("connectors")} ·{" "}
                   {t(
                     template.permissionMode === "readonly"
                       ? "readonly"

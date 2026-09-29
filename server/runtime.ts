@@ -9,7 +9,14 @@ import type {
 } from "../shared/types.ts";
 import type { Store } from "./store.ts";
 import type { Workspace } from "./workspace.ts";
+/** Resolve on enqueue; acknowledge only when included in the next model turn. */
+export type SteerHandler = (
+  text: string,
+  onApplied?: () => Promise<void>,
+) => Promise<void>;
 export interface ToolOptions {
+  memoryKey?: string;
+  historyContextId?: string;
   checkToolPermission?: (
     name: string,
     args: unknown,
@@ -33,7 +40,7 @@ export interface ToolOptions {
     args: unknown,
     signal?: AbortSignal,
   ) => Promise<void | AuthorizationReceipt>;
-  registerSteer?: (steer: (text: string) => Promise<void>) => void;
+  registerSteer?: (steer: SteerHandler) => void;
   maxTurns?: number;
   executionContext?: string;
   probe?: { nonce: string; called: () => void };

@@ -6,6 +6,7 @@ import {
 } from "node:http";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { htmlPreviewRoute } from "./html-preview.ts";
 
 const cookieName = "__Host-apsis-share";
 const lifetime = 8 * 60 * 60 * 1000;
@@ -30,6 +31,9 @@ export function createShareGateway({
     throw new Error("Share password must contain at least 24 characters");
   const passwordHash = digest(password);
   const sessions = new Map<string, number>();
+  // Sandboxed assets omit SameSite cookies. Grant only preview capabilities
+  // already opened by an authenticated session, and revoke them with that session.
+  const previews = new Map<string, string>();
   let publicOrigin: URL | undefined;
   let failures = 0;
   let windowStart = Date.now();
@@ -63,9 +67,20 @@ export function createShareGateway({
       if (!publicOrigin) return send(res, 503, "分享入口正在準備中。");
       if (req.headers.host !== publicOrigin.host)
         return send(res, 403, "不允許的 Host。");
-      if (req.headers.origin && req.headers.origin !== publicOrigin.origin)
+      const preview =
+        req.method === "GET" && req.url?.startsWith("/")
+          ? new URL(req.url, publicOrigin).pathname.match(htmlPreviewRoute)
+          : null;
+      const previewKey = preview ? `${preview[1]}/${preview[2]}` : "";
+      const opaquePreview =
+        !!preview && (!req.headers.origin || req.headers.origin === "null");
+      if (
+        req.headers.origin &&
+        req.headers.origin !== publicOrigin.origin &&
+        !opaquePreview
+      )
         return send(res, 403, "不允許的來源。");
-      if (req.headers["sec-fetch-site"] === "cross-site")
+      if (req.headers["sec-fetch-site"] === "cross-site" && !opaquePreview)
         return send(res, 403, "不允許跨網站請求。");
       if (!req.url?.startsWith("/") || req.url.startsWith("//"))
         return send(res, 400, "無效網址。");
@@ -134,7 +149,14 @@ export function createShareGateway({
           .find((part) => part.startsWith(cookieName + "="))
           ?.slice(cookieName.length + 1) || "";
       const expires = sessions.get(token);
-      if (!expires || expires <= Date.now()) {
+      const previewSession = opaquePreview
+        ? previews.get(previewKey)
+        : undefined;
+      const previewExpires = previewSession
+        ? sessions.get(previewSession)
+        : undefined;
+      const authenticated = !!expires && expires > Date.now();
+      if (!authenticated && !(previewExpires && previewExpires > Date.now())) {
         sessions.delete(token);
         if (url.pathname.startsWith("/api/")) {
           res.writeHead(401, { "Content-Type": "application/json" });
@@ -144,6 +166,7 @@ export function createShareGateway({
         }
         return redirect(res, "/__share/login");
       }
+      if (preview && authenticated) previews.set(previewKey, token);
       if (url.pathname === "/__share/logout" && req.method === "POST") {
         sessions.delete(token);
         res.setHeader(
@@ -178,11 +201,22 @@ export function createShareGateway({
           headers,
         },
         (response) => {
+          const responseHeaders = { ...response.headers };
+          if (
+            preview &&
+            typeof responseHeaders["content-security-policy"] === "string"
+          )
+            responseHeaders["content-security-policy"] = responseHeaders[
+              "content-security-policy"
+            ].replaceAll(
+              `http://127.0.0.1:${upstreamPort}/api/v2/work-locations/`,
+              `${publicOrigin!.origin}/api/v2/work-locations/`,
+            );
           res.writeHead(response.statusCode || 502, {
-            ...response.headers,
+            ...responseHeaders,
             "Cache-Control": "no-store",
             "X-Talaria-Shared": "1",
-            "Referrer-Policy": "same-origin",
+            "Referrer-Policy": preview ? "no-referrer" : "same-origin",
           });
           response.on("error", () => res.destroy());
           response.pipe(res);

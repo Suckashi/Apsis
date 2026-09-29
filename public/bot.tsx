@@ -1,7 +1,35 @@
+import { ProjectSettings } from "./project-settings.tsx";
+import {
+  useTaskNotifications,
+  TaskNotificationSettings,
+} from "./task-notifications.tsx";
+import {
+  CodingWorkspace,
+  TaskCard,
+  BotTaskList,
+  TaskTags,
+  ProjectControls,
+} from "./coding-workspace.tsx";
+import { FilePanel, WorkFolder } from "./file-panel.tsx";
 import { ComposerPopover } from "./composer-popover.tsx";
+import { AvatarCollectionProvider } from "./avatar-collection.tsx";
 import { ContextPanel } from "./context-panel.tsx";
 import { ApprovalModeControl } from "./approval-mode-control.tsx";
-import { approvalReason } from "../shared/approval.ts";
+import { WorkApproval } from "./work-approval.tsx";
+import { currentWorkStatus } from "../shared/work-presentation.ts";
+import {
+  restoreTaskNavigation,
+  TASK_NAVIGATION_KEY,
+} from "./task-navigation.ts";
+import type { CodingTask } from "../shared/coding.ts";
+import { compactTaskTitle } from "./task-display.ts";
+import { ModelPicker, connectionModelOptions } from "./model-picker.tsx";
+import {
+  ComposerFrame,
+  useAutoGrowTextarea,
+  InspectorResize,
+  useInspectorWidth,
+} from "./workspace-primitives.tsx";
 import { uiText, uiError } from "./settings-dictionary.ts";
 import React, {
   useCallback,
@@ -12,25 +40,21 @@ import React, {
 } from "react";
 import { createRoot } from "react-dom/client";
 import { renderMarkdown } from "./markdown.ts";
-import { parseMcpConnectorJson, type McpConnectorInput } from "./mcp-json.ts";
 import {
   BrandMark,
   AvatarPicker,
   CopyButton,
-  DetailSection,
   Modal,
   useDrawer,
   useWorkspaceLayout,
 } from "./bot-ui.tsx";
 import type { ProductService } from "../server/product.ts";
 import type { Routine, Artifact, Draft } from "../shared/product.ts";
-import type { TelegramView } from "../shared/types.ts";
 import {
   LegacyDelegations,
   ProgressStrip,
   RunHistory,
-  RunStats,
-  RunOutcome,
+  RunArchive,
 } from "./task-history.tsx";
 import {
   ActionFeedback,
@@ -234,10 +258,11 @@ function App() {
   }, []);
   const [state, setState] = useState<Snapshot>();
   const [approvalSettings, setApprovalSettings] = useState<GlobalSettings>();
+  const approvalGeneration = useRef(0);
   const acceptApprovalSettings = useCallback((next: GlobalSettings) => {
-    setApprovalSettings((old) =>
-      !old || next.revision >= old.revision ? next : old,
-    );
+    // File revisions are opaque hashes. Invalidate reads started before this save.
+    approvalGeneration.current++;
+    setApprovalSettings(next);
   }, []);
   const [detail, setDetail] = useState<Detail>();
   const [selected, setSelected] = useState<string | null>(() =>
@@ -267,13 +292,92 @@ function App() {
     toggleList,
     closeList,
   } = useWorkspaceLayout();
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!smallScreen || !viewport) return;
+    const update = () => {
+      document.documentElement.style.setProperty(
+        "--mobile-viewport-height",
+        viewport.height + "px",
+      );
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      document.documentElement.style.removeProperty("--mobile-viewport-height");
+    };
+  }, [smallScreen]);
   const sidebarRef = useRef<HTMLElement>(null);
   const detailsRef = useRef<HTMLElement>(null);
+  const [activeTask, setActiveTask] = useState<string>();
+  const [taskTabs, setTaskTabs] = useState<string[]>([]);
+  const [navigationRestored, setNavigationRestored] = useState(false);
+  const [taskPanel, setTaskPanel] = useState<string>();
+  const [projectId, setProjectId] = useState("");
+  const [startBranch, setStartBranch] = useState("");
+  const [taskMode, setTaskMode] = useState("work");
+  const [composeOptions, setComposeOptions] = useState(false);
+  const [dirtyChoice, setDirtyChoice] = useState<string>();
+  const [needsDirtyChoice, setNeedsDirtyChoice] = useState(false);
+  const [projectForm, setProjectForm] = useState(false);
+  const [projectName, setProjectName] = useState("");
+  const [projectPath, setProjectPath] = useState("");
+  const [projectView, setProjectView] = useState<string>();
+  const [projectSettings, setProjectSettings] = useState<string>();
+  const [expandedTaskLists, setExpandedTaskLists] = useState<
+    Record<string, boolean>
+  >({});
+  const openTask = (id: string, panel?: string) => {
+    setTaskTabs((old) => (old.includes(id) ? old : [...old, id]));
+    setActiveTask(id);
+    setProjectView(undefined);
+    setTaskPanel(panel);
+    setPanel(false);
+    setMobileList(false);
+  };
+  useEffect(() => {
+    if (!state || navigationRestored) return;
+    let saved: string | null = null;
+    try {
+      saved = sessionStorage.getItem(TASK_NAVIGATION_KEY);
+    } catch {
+      /* Storage may be disabled. */
+    }
+    const restored = restoreTaskNavigation(saved, state.codingTasks);
+    setTaskTabs(restored.tabs);
+    if (restored.activeTask) {
+      setActiveTask(restored.activeTask);
+      setPanel(false);
+      const owner = state.codingTasks.find(
+        (task) => task.id === restored.activeTask,
+      )?.botId;
+      if (owner) setExpandedTaskLists((old) => ({ ...old, [owner]: true }));
+    }
+    setNavigationRestored(true);
+  }, [state, navigationRestored, setPanel]);
+  useEffect(() => {
+    if (!navigationRestored) return;
+    try {
+      sessionStorage.setItem(
+        TASK_NAVIGATION_KEY,
+        JSON.stringify({ tabs: taskTabs, activeTask }),
+      );
+    } catch {
+      /* Navigation remains usable without persistent storage. */
+    }
+  }, [navigationRestored, activeTask, taskTabs]);
+  useTaskNotifications(state?.codingTasks, openTask);
   const [creating, setCreating] = useState(false);
   const [text, setText] = useState("");
+  const [filesTab, setFilesTab] = useState(true);
+  const [botSheet, setBotSheet] = useState<"routines" | "context">();
+  const [fileReferences, setFileReferences] = useState<
+    { locationId: string; path: string; revision: string }[]
+  >([]);
   const [caret, setCaret] = useState(0);
   const [dismissedSuggestion, setDismissedSuggestion] = useState(false);
-  const [sendMode, setSendMode] = useState("queue");
+  const [sendMode, setSendMode] = useState("steer");
   const draftSelection = useRef({ start: 0, end: 0 });
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -296,45 +400,33 @@ function App() {
     content: string;
   }>();
   const [routine, setRoutine] = useState<Routine | "new">();
-  const [expanded, setExpanded] = useState(false);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
   const [eventsConnected, setEventsConnected] = useState(false);
   const [connectionLost, setConnectionLost] = useState(false);
   const listDrawer = smallScreen && mobileList;
-  const detailsDrawer =
-    overlayDetails && panel && !!selected && !!detail && !listDrawer;
+  const detailsVisible =
+    panel && !activeTask && !projectView && !!selected && !!detail;
+  const detailsDrawer = overlayDetails && detailsVisible && !listDrawer;
   useDrawer(sidebarRef, listDrawer, () => setMobileList(false));
   useDrawer(detailsRef, detailsDrawer, () => setPanel(false));
   const bottom = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pinnedBottom = useRef(true);
   const input = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    const element = input.current;
-    if (!element) return;
-    const resize = () => {
-      element.style.height = "0px";
-      const maximum = parseFloat(getComputedStyle(element).maxHeight);
-      element.style.height = `${Math.min(element.scrollHeight, maximum)}px`;
-    };
-    resize();
-    const observer = new ResizeObserver(resize);
-    if (element.parentElement) observer.observe(element.parentElement);
-    window.addEventListener("resize", resize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", resize);
-    };
-  }, [text, selected]);
+  useAutoGrowTextarea(input, detail ? text : "\0");
+  const [inspectorWidth, setInspectorWidth] = useInspectorWidth(
+    "apsis.inspector-width",
+  );
   const upload = useRef<HTMLInputElement>(null);
   const pendingRequest = useRef<
-    { prompt: string; botId: string; id: string } | undefined
+    { scope?: string; prompt: string; botId: string; id: string } | undefined
   >(undefined);
   const generation = useRef(0);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const refresh = useCallback(async () => {
     const version = ++generation.current;
+    const settingsVersion = approvalGeneration.current;
     const id = selectedRef.current;
     const [next, nextSettings] = await Promise.all([
       api<Snapshot>("/state"),
@@ -348,8 +440,14 @@ function App() {
           })
         : undefined;
     if (version !== generation.current || id !== selectedRef.current) return;
-    setState(next);
-    acceptApprovalSettings(nextSettings);
+    setState((previous) =>
+      previous &&
+      previous.avatarCollection.revision > next.avatarCollection.revision
+        ? { ...next, avatarCollection: previous.avatarCollection }
+        : next,
+    );
+    if (settingsVersion === approvalGeneration.current)
+      setApprovalSettings(nextSettings);
     setDetail((old) => {
       if (!old || !nextDetail || old.bot.id !== nextDetail.bot.id)
         return nextDetail;
@@ -368,12 +466,13 @@ function App() {
         },
       };
     });
+    if (!id && next.bots.length) setSelected(next.bots[0].id);
     if (id && !nextDetail) {
       selectedRef.current = null;
       setSelected(null);
       localStorage.removeItem("apsis.bot");
     }
-  }, [acceptApprovalSettings]);
+  }, []);
   const perform = async (fn: () => Promise<unknown>) => {
     try {
       setError("");
@@ -384,7 +483,9 @@ function App() {
     }
   };
   useEffect(() => {
-    void refresh().catch((e) => setError(e.message));
+    void api("/bootstrap", "POST", {})
+      .then(refresh)
+      .catch((e) => setError(e.message));
     let events: EventSource;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const disconnected = () => {
@@ -427,14 +528,17 @@ function App() {
   }, [refresh]);
   useEffect(() => {
     setDetail(undefined);
-    setText("");
-    setSendMode("queue");
+    setText(sessionStorage.getItem(`apsis.bot-draft.${selected}`) || "");
+    setFileReferences([]);
+    setSendMode("steer");
     setDismissedSuggestion(false);
     draftSelection.current = { start: 0, end: 0 };
     setAttachments([]);
     setReplyTo(undefined);
     setRetryOf(undefined);
     setProfile(false);
+    setBotSheet(undefined);
+    setComposeOptions(false);
     setAwayFromBottom(false);
     pinnedBottom.current = true;
     if (selected) {
@@ -449,12 +553,30 @@ function App() {
     const timer = setTimeout(() => setActionFeedback(undefined), 5000);
     return () => clearTimeout(timer);
   }, [actionFeedback]);
-  useEffect(() => {
-    if (pinnedBottom.current)
-      bottom.current?.scrollIntoView({ behavior: "instant" });
-  }, [detail?.session.messages.length, detail?.session.live?.text, selected]);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el || detail?.bot.id !== selected) return;
+    const key = `apsis.bot-scroll.${selected}`;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(key) || "null");
+      pinnedBottom.current = saved?.following ?? true;
+      el.scrollTop = pinnedBottom.current ? el.scrollHeight : saved?.top || 0;
+    } catch {
+      pinnedBottom.current = true;
+      el.scrollTop = el.scrollHeight;
+    }
+    setAwayFromBottom(!pinnedBottom.current);
+  }, [detail?.bot.id, selected, activeTask, projectView]);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el && detail?.bot.id === selected && pinnedBottom.current)
+      el.scrollTop = el.scrollHeight;
+  }, [detail?.session.messages.length, detail?.session.live?.text]);
   const select = (id: string) => {
+    if (selected) sessionStorage.setItem(`apsis.bot-draft.${selected}`, text);
     setSelected(id);
+    setActiveTask(undefined);
+    setProjectView(undefined);
     setMobileList(false);
   };
   const newBot = () => {
@@ -463,7 +585,13 @@ function App() {
   };
   const send = async (steer = false) => {
     if (steer && (retryOf || !text.trim())) return;
-    if (!selected || !detail || busy || (!text.trim() && !attachments.length))
+    if (
+      !selected ||
+      !detail ||
+      detail.contextSetupError ||
+      busy ||
+      (!text.trim() && !attachments.length)
+    )
       return;
     const prompt = [
       text.trim(),
@@ -475,11 +603,24 @@ function App() {
       .join("\n");
     if (
       pendingRequest.current?.prompt !== prompt ||
-      pendingRequest.current?.botId !== selected
+      pendingRequest.current?.botId !== selected ||
+      pendingRequest.current?.scope !==
+        JSON.stringify([
+          projectId,
+          startBranch,
+          taskMode,
+          attachments.map((a) => a.id),
+        ])
     )
       pendingRequest.current = {
         prompt,
         botId: selected,
+        scope: JSON.stringify([
+          projectId,
+          startBranch,
+          taskMode,
+          attachments.map((a) => a.id),
+        ]),
         id: crypto.randomUUID(),
       };
     const botId = selected;
@@ -492,18 +633,46 @@ function App() {
       pending: true,
     });
     try {
-      await api(`/bots/${selected}/${steer ? "steer" : "messages"}`, "POST", {
-        prompt,
-        requestId: pendingRequest.current.id,
-        replyTo,
-        retryOf,
-      });
+      if (!steer && !retryOf && (projectId || taskMode === "plan")) {
+        const created = await api<CodingTask>("/coding-tasks", "POST", {
+          botId: selected,
+          prompt,
+          requestId: pendingRequest.current.id,
+          projectId,
+          branch: startBranch,
+          mode: taskMode,
+          dirty: dirtyChoice,
+          artifactIds: attachments.map((a) => a.id),
+        });
+        setExpandedTaskLists((old) => ({ ...old, [botId]: true }));
+        setNeedsDirtyChoice(false);
+        setDirtyChoice(undefined);
+        if (selectedRef.current === botId) openTask(created.id);
+      } else {
+        const receipt = await api<{
+          delivery?: { state: "pending" | "applied" | "not-applied" };
+        }>(`/bots/${selected}/${steer ? "steer" : "messages"}`, "POST", {
+          prompt,
+          requestId: pendingRequest.current.id,
+          replyTo,
+          retryOf,
+          fileReferences,
+          workContextId: detail?.session.context?.id,
+        });
+        if (steer && receipt.delivery?.state === "not-applied") {
+          pendingRequest.current = undefined;
+          await refresh();
+          throw new Error(uiText("補充未採用，請重新送出。"));
+        }
+      }
       pendingRequest.current = undefined;
       if (selectedRef.current === botId) {
         setText("");
-        setSendMode("queue");
+        sessionStorage.removeItem(`apsis.bot-draft.${botId}`);
+        setSendMode("steer");
         draftSelection.current = { start: 0, end: 0 };
         setAttachments([]);
+        setFileReferences([]);
         setReplyTo(undefined);
         setRetryOf(undefined);
         pinnedBottom.current = true;
@@ -514,18 +683,42 @@ function App() {
           ? "補充指示已送達"
           : queued
             ? "已排入下一個任務"
-            : "訊息已送達",
+            : projectId || taskMode === "plan"
+              ? "任務已建立"
+              : "訊息已送達",
         pending: false,
       });
       await refresh();
     } catch (e) {
       setActionFeedback(undefined);
+      if (steer && (e as { status?: number }).status === 409) {
+        pendingRequest.current = undefined;
+        await refresh();
+      }
+      if ((e as Error).message.includes("未提交修改"))
+        setNeedsDirtyChoice(true);
       setError((e as Error).message);
     } finally {
       setBusy(false);
       input.current?.focus();
     }
   };
+  const referenceArtifact = (artifact: Artifact) =>
+    void perform(async () => {
+      const ref = await api<{
+        locationId: string;
+        path: string;
+        revision: string;
+      }>(`/bots/${selected}/artifact-reference`, "POST", {
+        contextId: detail?.session.context?.id,
+        artifactId: artifact.id,
+      });
+      setFileReferences((old) => [...old, ref]);
+      setText(
+        (old) => old + (old ? "\n" : "") + uiText("引用檔案：") + ref.path,
+      );
+      await refresh();
+    });
   const uploadFiles = async (files: FileList | null) => {
     if (!files?.length || !selected || busy) return;
     const botId = selected;
@@ -540,15 +733,18 @@ function App() {
         });
         if (file.size > 20 * 1024 * 1024)
           throw new Error(uiText("附件上限為 20 MB。"));
-        const res = await fetch(`/api/v2/bots/${selected}/attachments`, {
-          method: "POST",
-          headers: {
-            "X-Apsis-Client": "1",
-            "X-File-Name": encodeURIComponent(file.name),
-            "Content-Type": "application/octet-stream",
+        const res = await fetch(
+          `/api/v2/bots/${botId}/attachments?contextId=${encodeURIComponent(detail?.session.context?.id || "")}`,
+          {
+            method: "POST",
+            headers: {
+              "X-Apsis-Client": "1",
+              "X-File-Name": encodeURIComponent(file.name),
+              "Content-Type": "application/octet-stream",
+            },
+            body: file,
           },
-          body: file,
-        });
+        );
         const artifact = await res.json();
         if (!res.ok) throw new Error(artifact.error);
         if (selectedRef.current === botId)
@@ -587,9 +783,42 @@ function App() {
   const activeSummary = detail?.runSummaries.find(
     (r) => r.id === detail.session.activeRunId && r.status === "running",
   );
-  const latestSummary = detail?.runSummaries.at(-1);
+  const workStatus = currentWorkStatus({
+    connected: eventsConnected,
+    modelIssue: detail?.contextSetupError,
+    approvalCount: pending.length,
+    active: activeSummary,
+    running,
+  });
+  const modelOptions = connectionModelOptions(state?.connections || []);
+  const selectedModel = detail?.bot.connectionId
+    ? JSON.stringify([detail.bot.connectionId, detail.bot.model])
+    : state?.defaultModel
+      ? JSON.stringify([
+          state.defaultModel.connectionId,
+          state.defaultModel.model,
+        ])
+      : "";
+  const chooseBotModel = async (value: string) => {
+    if (!selected || running) return;
+    const [connectionId, model] = JSON.parse(value) as string[];
+    await api(`/bots/${selected}`, "PATCH", { connectionId, model });
+    await refresh();
+  };
+  const modelPicker = (
+    <ModelPicker
+      label={uiText("Bot 模型")}
+      value={selectedModel}
+      options={modelOptions}
+      disabled={running || !detail || !modelOptions.length}
+      onChange={chooseBotModel}
+      placeholder={bot?.model || uiText("選擇模型")}
+    />
+  );
+  const repairModel = () =>
+    modelOptions.length ? setProfile(true) : setSettings(true);
   const queuedCount =
-    detail?.jobs.filter((j) => j.status === "queued").length || 0;
+    detail?.jobs.filter((j) => !j.taskId && j.status === "queued").length || 0;
   const stop = async () => {
     if (!selected || stoppingBot) return;
     setStoppingBot(selected);
@@ -598,7 +827,10 @@ function App() {
   };
   const availableBots = new Set(state?.bots.map((b) => b.id));
   const toggleRun = (id: string) =>
-    setExpandedRuns((old) => ({ ...old, [id]: !old[id] }));
+    setExpandedRuns((old) => ({
+      ...old,
+      [id]: !(old[id] ?? id === activeSummary?.id),
+    }));
   const revealRun = (id: string) => {
     setExpandedRuns((old) => ({ ...old, [id]: true }));
     requestAnimationFrame(() => {
@@ -645,9 +877,12 @@ function App() {
       );
     });
   };
-  return (
+  const content = (
     <div
-      className={`app ${panel ? "details-open" : ""} ${mobileList ? "list-open" : ""} ${!listVisible ? "list-collapsed" : ""} ${focusMode ? "focus-mode" : ""}`}
+      style={
+        { "--inspector-width": `${inspectorWidth}px` } as React.CSSProperties
+      }
+      className={`app ${detailsVisible ? "details-open" : ""} ${mobileList ? "list-open" : ""} ${!listVisible ? "list-collapsed" : ""} ${focusMode ? "focus-mode" : ""}`}
     >
       <a className="skip-link" href="#conversation">
         {uiText("跳至對話")}
@@ -726,42 +961,69 @@ function App() {
                     ? `${uiText("任務失敗")} · ${chatPreview(b.lastMessage)}`
                     : chatPreview(b.lastMessage);
             return (
-              <button
-                key={b.id}
-                aria-current={selected === b.id ? "page" : undefined}
-                title={b.name}
-                className={`bot-row ${selected === b.id ? "selected" : ""} ${b.unread ? "has-unread" : ""} status-${b.status}`}
-                onClick={() => select(b.id)}
-              >
-                <span className={`avatar tone-${b.id.charCodeAt(0) % 4}`}>
-                  <BrandMark size={24} avatar={b.avatar} />
-                  <i className={b.status} />
-                </span>
-                <span className="bot-summary">
-                  <span className="bot-line">
-                    <span className="bot-name">
-                      <strong>{b.name}</strong>
-                      {b.pinned && (
-                        <span className="pin" title={uiText("已釘選")}>
-                          <Icon name="pin" size={13} />
-                          <span className="visually-hidden">
-                            {uiText("已釘選")}
+              <div className="bot-entry" key={b.id}>
+                <button
+                  aria-current={selected === b.id ? "page" : undefined}
+                  title={b.name}
+                  className={`bot-row ${selected === b.id ? "selected" : ""} ${b.unread ? "has-unread" : ""} status-${b.status}`}
+                  onClick={() => select(b.id)}
+                >
+                  <span className={`avatar tone-${b.id.charCodeAt(0) % 4}`}>
+                    <BrandMark size={24} avatar={b.avatar} />
+                    <i className={b.status} />
+                  </span>
+                  <span className="bot-summary">
+                    <span className="bot-line">
+                      <span className="bot-name">
+                        <strong>{b.name}</strong>
+                        {b.pinned && (
+                          <span className="pin" title={uiText("已釘選")}>
+                            <Icon name="pin" size={13} />
+                            <span className="visually-hidden">
+                              {uiText("已釘選")}
+                            </span>
                           </span>
-                        </span>
-                      )}
+                        )}
+                      </span>
+                      <time dateTime={b.updatedAt}>{time(b.updatedAt)}</time>
                     </span>
-                    <time dateTime={b.updatedAt}>{time(b.updatedAt)}</time>
-                  </span>
-                  <span className="bot-preview-line">
-                    <span className="preview" title={preview}>
-                      {preview}
+                    <TaskTags
+                      chat={{
+                        approvalCount: b.status === "waiting" ? 1 : 0,
+                        failed: b.status === "error",
+                        running: b.chatRunning,
+                        unread: !!b.unread,
+                      }}
+                      tasks={
+                        state?.codingTasks.filter((t) => t.botId === b.id) || []
+                      }
+                    />
+                    <span className="bot-preview-line">
+                      <span className="preview" title={preview}>
+                        {preview}
+                      </span>
                     </span>
-                    {b.unread && (
-                      <span className="unread">{uiText("未讀")}</span>
-                    )}
                   </span>
-                </span>
-              </button>
+                </button>
+                <BotTaskList
+                  tasks={
+                    state?.codingTasks.filter((t) => t.botId === b.id) || []
+                  }
+                  botName={b.name}
+                  activeTask={activeTask}
+                  expanded={!!expandedTaskLists[b.id]}
+                  toggle={() =>
+                    setExpandedTaskLists((old) => ({
+                      ...old,
+                      [b.id]: !old[b.id],
+                    }))
+                  }
+                  open={(id) => {
+                    if (selected !== b.id) select(b.id);
+                    openTask(id);
+                  }}
+                />
+              </div>
             );
           })}
           {!bots.length && (
@@ -774,6 +1036,62 @@ function App() {
             </p>
           )}
         </nav>
+        <section className="cw-project-nav">
+          <header>
+            <strong>{uiText("專案")}</strong>
+            <button
+              aria-label={uiText("加入專案")}
+              onClick={() => setProjectForm(!projectForm)}
+            >
+              <Icon name="plus" size={16} />
+            </button>
+          </header>
+          {state?.projects.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => {
+                setProjectView(p.id);
+                setActiveTask(undefined);
+                setMobileList(false);
+              }}
+            >
+              ▱ {p.name}
+            </button>
+          ))}
+          {projectForm && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void perform(async () => {
+                  const p = await api<{ id: string }>("/projects", "POST", {
+                    name: projectName,
+                    path: projectPath,
+                  });
+                  setProjectId(p.id);
+                  setProjectForm(false);
+                });
+              }}
+            >
+              <label>
+                {uiText("名稱")}
+                <input
+                  required
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                />
+              </label>
+              <label>
+                {uiText("本機 Repo 路徑")}
+                <input
+                  required
+                  value={projectPath}
+                  onChange={(e) => setProjectPath(e.target.value)}
+                />
+              </label>
+              <button className="primary">{uiText("加入")}</button>
+            </form>
+          )}
+        </section>
         <div className="sidebar-bottom">
           <div className="sidebar-actions">
             <button
@@ -808,7 +1126,7 @@ function App() {
       <main
         id="conversation"
         tabIndex={-1}
-        className="conversation"
+        className="conversation conversation-shell"
         inert={listDrawer || detailsDrawer}
       >
         {!eventsConnected && (
@@ -852,7 +1170,149 @@ function App() {
             </button>
           </div>
         )}
-        {!selected ? (
+        {!!taskTabs.length && (
+          <nav className="cw-tabs" aria-label={uiText("已開啟任務")}>
+            <button
+              onClick={() => {
+                setActiveTask(undefined);
+                setProjectView(undefined);
+              }}
+            >
+              {uiText("Bot 對話")}
+            </button>
+            {taskTabs.map((id) => {
+              const task = state?.codingTasks.find((t) => t.id === id);
+              return (
+                task && (
+                  <span key={id} className={activeTask === id ? "active" : ""}>
+                    <button
+                      onClick={() => {
+                        setActiveTask(id);
+                        setTaskPanel(undefined);
+                        setPanel(false);
+                      }}
+                    >
+                      {compactTaskTitle(task.title)}
+                    </button>
+                    <button
+                      aria-label={uiText("關閉 {0} 頁籤", [task.title])}
+                      onClick={() => {
+                        setTaskTabs((old) => old.filter((t) => t !== id));
+                        if (activeTask === id) setActiveTask(undefined);
+                      }}
+                    >
+                      <Icon name="close" size={14} />
+                    </button>
+                  </span>
+                )
+              );
+            })}
+          </nav>
+        )}
+        {activeTask ? (
+          <CodingWorkspace
+            key={activeTask}
+            id={activeTask}
+            initialPanel={taskPanel}
+            connected={eventsConnected}
+            modelIssue={
+              state?.codingTasks.find((t) => t.id === activeTask)?.botId ===
+              detail?.bot.id
+                ? detail?.contextSetupError
+                : undefined
+            }
+            onModelSettings={() => setProfile(true)}
+            availableBots={availableBots}
+            botNames={Object.fromEntries(
+              (state?.bots || []).map((b) => [b.id, b.name]),
+            )}
+            selectBot={select}
+            settings={approvalSettings}
+            onSettingsSaved={acceptApprovalSettings}
+            onSettingsReload={refresh}
+            api={api}
+            refresh={refresh}
+            skills={state?.skills || []}
+            name={
+              state?.bots.find(
+                (b) =>
+                  b.id ===
+                  state.codingTasks.find((t) => t.id === activeTask)?.botId,
+              )?.name || "Bot"
+            }
+            avatar={
+              state?.bots.find(
+                (b) =>
+                  b.id ===
+                  state.codingTasks.find((t) => t.id === activeTask)?.botId,
+              )?.avatar
+            }
+            back={() => setActiveTask(undefined)}
+          />
+        ) : projectView ? (
+          <section className="cw-project-page">
+            <button onClick={() => setProjectView(undefined)}>
+              ← Bot 對話
+            </button>
+            <h1>{state?.projects.find((p) => p.id === projectView)?.name}</h1>
+            <button onClick={() => setProjectSettings(projectView)}>
+              專案設定
+            </button>
+            <p>{uiText("這個專案的任務與變更")}</p>
+            {[
+              {
+                label: uiText("需要你處理"),
+                phases: ["plan-ready", "review", "blocked", "stopped"],
+              },
+              {
+                label: uiText("進行中"),
+                phases: ["queued", "working", "planning"],
+              },
+              { label: uiText("已完成"), phases: ["done"] },
+            ].map((group) => {
+              const tasks =
+                state?.codingTasks.filter(
+                  (task) =>
+                    task.projectId === projectView &&
+                    group.phases.includes(task.phase),
+                ) || [];
+              return (
+                tasks.length > 0 && (
+                  <section className="project-task-group" key={group.label}>
+                    <h2>
+                      {group.label} <span>{tasks.length}</span>
+                    </h2>
+                    {tasks.map((task) => (
+                      <TaskCard
+                        key={task.id}
+                        task={task}
+                        open={openTask}
+                        api={api}
+                        onRead={() => void refresh()}
+                      />
+                    ))}
+                  </section>
+                )
+              );
+            })}
+            {!state?.codingTasks.some(
+              (task) => task.projectId === projectView,
+            ) && (
+              <p className="empty-section">
+                {uiText("還沒有任務，交辦第一項需求開始工作。")}
+              </p>
+            )}
+            <button
+              onClick={() => {
+                setProjectId(projectView);
+                setProjectView(undefined);
+                input.current?.focus();
+              }}
+            >
+              交辦新需求
+            </button>
+          </section>
+        ) : !selected ? (
           <div className="welcome">
             <div className="welcome-symbol">
               <BrandMark size={56} />
@@ -901,28 +1361,6 @@ function App() {
           <>
             <header className="chat-header">
               <button
-                className="secondary"
-                title={uiText("執行中、排隊或等待核准時無法切換任務")}
-                disabled={
-                  busy ||
-                  !!detail?.session.live ||
-                  detail?.jobs.some((j) =>
-                    ["queued", "running"].includes(j.status),
-                  ) ||
-                  detail?.approvals.some((a) => a.status === "pending")
-                }
-                onClick={() =>
-                  void perform(async () => {
-                    await api(`/bots/${selected}/contexts`, "POST", {});
-                    setReplyTo(undefined);
-                    setRetryOf(undefined);
-                    await refresh();
-                  })
-                }
-              >
-                {uiText("新任務")}
-              </button>
-              <button
                 id="roster-toggle"
                 className="icon"
                 aria-label={
@@ -945,7 +1383,6 @@ function App() {
                 className="header-profile"
                 title={uiText("自訂 Bot：名稱、圖示、角色與模型")}
                 onClick={() => {
-                  setPanel(true);
                   setProfile(true);
                 }}
               >
@@ -954,25 +1391,58 @@ function App() {
                 </span>
                 <span>
                   <strong>{bot?.name || uiText("載入中")}</strong>
-                  <small>
+                  <small data-state={workStatus.availability}>
                     {!detail
                       ? uiText("載入對話…")
-                      : activeSummary?.progress
-                        ? taskProgress(locale, activeSummary.progress.label)
-                        : bot?.status === "waiting"
-                          ? uiText("等待核准")
-                          : running
-                            ? uiText("正在工作")
-                            : uiText("隨時可以交辦任務")}
+                      : workStatus.phase === "unavailable"
+                        ? uiError(workStatus.label)
+                        : taskProgress(locale, workStatus.label)}
                   </small>
                 </span>
               </button>
+              {!smallScreen && detail?.session.context && selected && (
+                <WorkFolder
+                  key={`${selected}:${detail.session.context.id}`}
+                  botId={selected}
+                  context={detail.session.context}
+                  api={api}
+                  refresh={async () => {
+                    setFileReferences([]);
+                    await refresh();
+                  }}
+                />
+              )}
               <div className="header-actions">
-                <span className="model-label">
-                  {bot?.model ||
-                    state?.defaultModel?.model ||
-                    uiText("尚未連接模型")}
-                </span>
+                <ComposerPopover
+                  label={
+                    <span aria-label={uiText("Bot 選單")}>
+                      <Icon name="more" />
+                    </span>
+                  }
+                  className="bot-actions-menu"
+                >
+                  {smallScreen && detail?.session.context && selected && (
+                    <WorkFolder
+                      key={`${selected}:${detail.session.context.id}`}
+                      botId={selected}
+                      context={detail.session.context}
+                      api={api}
+                      refresh={async () => {
+                        setFileReferences([]);
+                        await refresh();
+                      }}
+                    />
+                  )}
+                  <button onClick={() => setBotSheet("routines")}>
+                    {uiText("排程")}
+                  </button>
+                  <button onClick={() => setBotSheet("context")}>
+                    {uiText("記憶與背景")}
+                  </button>
+                  <button onClick={() => setProfile(true)}>
+                    {uiText("Bot 設定")}
+                  </button>
+                </ComposerPopover>
                 <button
                   className={`icon focus-toggle ${focusMode ? "active" : ""}`}
                   aria-label={
@@ -988,8 +1458,8 @@ function App() {
                 </button>
                 <button
                   className={`icon ${panel ? "active" : ""}`}
-                  aria-label={uiText("切換詳情面板")}
-                  title={uiText("Bot 詳情")}
+                  aria-label={uiText("切換工作內容")}
+                  title={uiText("檔案與變更")}
                   aria-expanded={panel}
                   aria-controls="bot-details"
                   onClick={() => setPanel(!panel)}
@@ -1004,7 +1474,6 @@ function App() {
                 <button
                   className="secondary"
                   onClick={() => {
-                    setPanel(true);
                     setProfile(true);
                   }}
                 >
@@ -1020,6 +1489,19 @@ function App() {
                 pinnedBottom.current =
                   el.scrollHeight - el.scrollTop - el.clientHeight < 100;
                 setAwayFromBottom(!pinnedBottom.current);
+                if (detail?.bot.id === selected) {
+                  try {
+                    sessionStorage.setItem(
+                      `apsis.bot-scroll.${selected}`,
+                      JSON.stringify({
+                        top: el.scrollTop,
+                        following: pinnedBottom.current,
+                      }),
+                    );
+                  } catch {
+                    /* Storage may be unavailable. */
+                  }
+                }
               }}
             >
               {!detail ? (
@@ -1109,33 +1591,25 @@ function App() {
                       )}
                     </div>
                   )}
-                  {detail.session.messages.map((m, index) => (
+                  {detail.session.messages.map((m) => (
                     <article
                       id={`message-${m.id}`}
                       key={m.id}
                       className={`message ${m.role} ${m.status === "error" ? "failed" : ""}`}
                     >
+                      {m.role === "assistant" &&
+                        m.runId &&
+                        summaries.has(m.runId) && (
+                          <RunHistory
+                            botId={detail.bot.id}
+                            summary={summaries.get(m.runId)!}
+                            open={!!expandedRuns[m.runId]}
+                            toggle={() => toggleRun(m.runId!)}
+                            select={select}
+                            available={availableBots}
+                          />
+                        )}
                       <div className="message-body">
-                        {m.workContextId &&
-                          m.workContextId !==
-                            detail.session.messages[index - 1]
-                              ?.workContextId && (
-                            <div className="task-context-divider">
-                              {uiText("任務")} ·{" "}
-                              {uiText(
-                                detail.jobs.find(
-                                  (j) => j.workContextId === m.workContextId,
-                                )?.contextKind === "routine"
-                                  ? "排程"
-                                  : detail.jobs.find(
-                                        (j) =>
-                                          j.workContextId === m.workContextId,
-                                      )?.contextKind === "delegation"
-                                    ? "派工"
-                                    : "互動聊天",
-                              )}
-                            </div>
-                          )}
                         {m.role === "user" &&
                           detail.jobs.find((j) => j.runId === m.runId)
                             ?.replyTo && (
@@ -1187,19 +1661,43 @@ function App() {
                           <Markdown text={m.content} />
                         )}
                       </div>
-                      <div className="message-footer">
-                        {m.role === "assistant" &&
-                          m.runId &&
-                          summaries.has(m.runId) && (
-                            <RunHistory
-                              botId={detail.bot.id}
-                              summary={summaries.get(m.runId)!}
-                              open={!!expandedRuns[m.runId]}
-                              toggle={() => toggleRun(m.runId!)}
-                              select={select}
-                              available={availableBots}
+                      {m.role === "assistant" &&
+                        m.runId &&
+                        detail.artifacts
+                          .filter(
+                            (a) => a.kind === "result" && a.runId === m.runId,
+                          )
+                          .map((a) => (
+                            <ArtifactCard
+                              key={a.id}
+                              artifact={a}
+                              reference={() => referenceArtifact(a)}
                             />
-                          )}
+                          ))}
+                      <div className="message-footer">
+                        {m.delivery?.kind === "steer" && (
+                          <span
+                            className="message-delivery"
+                            data-state={m.delivery.state}
+                            title={
+                              m.delivery.state === "applied"
+                                ? uiText(
+                                    "補充已帶入下一個模型回合，不代表工作已完成。",
+                                  )
+                                : m.delivery.state === "pending"
+                                  ? uiText("等待目前模型回合結束後採用。")
+                                  : uiText(
+                                      "這則補充沒有帶入模型回合，請重新送出。",
+                                    )
+                            }
+                          >
+                            {m.delivery.state === "applied"
+                              ? uiText("已帶入下一回合")
+                              : m.delivery.state === "pending"
+                                ? uiText("待採用")
+                                : uiText("未採用")}
+                          </span>
+                        )}
                         <div className="message-actions">
                           {m.status === "error" &&
                             !(m.runId && summaries.has(m.runId)) && (
@@ -1218,45 +1716,35 @@ function App() {
                       </div>
                     </article>
                   ))}
-                  {!!detail.session.messages.length &&
-                    detail.session.context &&
-                    !detail.session.messages.some(
-                      (m) => m.workContextId === detail.session.context!.id,
-                    ) && (
-                      <p role="status" className="task-context-divider">
-                        {uiText("新任務已開始，輸入新的工作內容。")}
-                      </p>
-                    )}
                   {running && (
                     <article className="message assistant live">
-                      {detail.session.live?.text && (
-                        <Markdown text={detail.session.live.text} />
-                      )}
                       {activeSummary && (
                         <RunHistory
                           key={activeSummary.id}
                           botId={detail.bot.id}
                           summary={activeSummary}
-                          open={!!expandedRuns[activeSummary.id]}
+                          open={expandedRuns[activeSummary.id] ?? true}
                           toggle={() => toggleRun(activeSummary.id)}
                           select={select}
                           available={availableBots}
                         />
                       )}
+                      {detail.session.live?.text && (
+                        <Markdown text={detail.session.live.text} />
+                      )}
                     </article>
                   )}
                   {pending.map((a) => (
-                    <ApprovalCard
+                    <WorkApproval
                       key={a.id}
                       approval={a}
-                      decide={(approved, remember) =>
-                        perform(() =>
-                          api(`/approvals/${a.id}`, "POST", {
-                            approved,
-                            remember,
-                          }),
-                        )
-                      }
+                      onDecide={async (id, approved, remember) => {
+                        await api(`/approvals/${id}`, "POST", {
+                          approved,
+                          remember,
+                        });
+                        await refresh();
+                      }}
                     />
                   ))}
                   <LegacyDelegations
@@ -1265,25 +1753,21 @@ function App() {
                     select={select}
                     available={availableBots}
                   />
-                  {detail.runSummaries
-                    .filter(
+                  <RunArchive
+                    key={`run-archive:${detail.bot.id}`}
+                    botId={detail.bot.id}
+                    summaries={detail.runSummaries.filter(
                       (r) =>
                         r.status !== "running" &&
                         !detail.session.messages.some(
                           (m) => m.role === "assistant" && m.runId === r.id,
                         ),
-                    )
-                    .map((r) => (
-                      <RunHistory
-                        key={r.id}
-                        botId={detail.bot.id}
-                        summary={r}
-                        open={!!expandedRuns[r.id]}
-                        toggle={() => toggleRun(r.id)}
-                        select={select}
-                        available={availableBots}
-                      />
-                    ))}
+                    )}
+                    expandedRuns={expandedRuns}
+                    toggleRun={toggleRun}
+                    select={select}
+                    available={availableBots}
+                  />
                   {detail.drafts.map((d) => (
                     <DraftCard
                       key={d.id}
@@ -1294,7 +1778,7 @@ function App() {
                     />
                   ))}
                   {detail.jobs
-                    .filter((j) => j.status === "queued")
+                    .filter((j) => !j.taskId && j.status === "queued")
                     .map((j) => (
                       <div className="queued" key={j.id}>
                         <Icon name="clock" size={16} />
@@ -1305,13 +1789,24 @@ function App() {
                       </div>
                     ))}
                   {detail.artifacts
-                    .filter((a) => a.kind === "result")
+                    .filter(
+                      (a) =>
+                        a.kind === "result" &&
+                        !detail.session.messages.some(
+                          (m) => m.role === "assistant" && m.runId === a.runId,
+                        ),
+                    )
                     .map((a) => (
-                      <ArtifactCard key={a.id} artifact={a} />
+                      <ArtifactCard
+                        key={a.id}
+                        artifact={a}
+                        reference={() => referenceArtifact(a)}
+                      />
                     ))}
                   {detail.jobs
                     .filter(
                       (j) =>
+                        !j.taskId &&
                         !j.dismissedAt &&
                         ((j.status === "failed" && !j.runId) ||
                           j.status === "interrupted"),
@@ -1323,6 +1818,7 @@ function App() {
                           <button
                             onClick={() => {
                               setRetryOf(j.id);
+                              setSendMode("queue");
                               setText(j.prompt);
                               input.current?.focus();
                             }}
@@ -1363,15 +1859,16 @@ function App() {
                   {feedbackText("回到最新訊息")} ↓
                 </button>
               )}
-              <div className="composer-card">
+              <ComposerFrame as="div" className="composer-card">
                 <div className="composer-status">
                   <div className="composer-status-content">
-                    {actionFeedback?.botId === selected && (
-                      <ActionFeedback
-                        label={actionFeedback.label}
-                        pending={actionFeedback.pending}
-                      />
-                    )}
+                    {actionFeedback?.botId === selected &&
+                      (actionFeedback.pending || !activeSummary) && (
+                        <ActionFeedback
+                          label={actionFeedback.label}
+                          pending={actionFeedback.pending}
+                        />
+                      )}
                     {stoppingBot === selected && (
                       <ActionFeedback
                         label="正在停止任務，等待執行中的操作結束…"
@@ -1382,9 +1879,9 @@ function App() {
                       <ProgressStrip
                         summary={activeSummary}
                         connected={eventsConnected}
-                        open={!!expandedRuns[activeSummary.id]}
+                        open={expandedRuns[activeSummary.id] ?? true}
                         toggle={() =>
-                          expandedRuns[activeSummary.id]
+                          (expandedRuns[activeSummary.id] ?? true)
                             ? toggleRun(activeSummary.id)
                             : revealRun(activeSummary.id)
                         }
@@ -1403,15 +1900,6 @@ function App() {
                         }}
                       />
                     )}
-                    {!running &&
-                      !activeSummary &&
-                      latestSummary &&
-                      latestSummary.status !== "running" && (
-                        <RunOutcome
-                          summary={latestSummary}
-                          reveal={() => revealRun(latestSummary.id)}
-                        />
-                      )}
                     {running && !activeSummary && (
                       <ActionFeedback
                         label="正在準備任務，等待模型回應…"
@@ -1473,6 +1961,26 @@ function App() {
                       </button>
                     </div>
                   )}
+                  {!!fileReferences.length && (
+                    <div className="attachment-chips">
+                      {fileReferences.map((ref) => (
+                        <span key={ref.locationId + ref.path}>
+                          <Icon name="file" size={14} />
+                          {ref.path}
+                          <button
+                            aria-label={uiText("移除 {0}", [ref.path])}
+                            onClick={() =>
+                              setFileReferences((old) =>
+                                old.filter((r) => r !== ref),
+                              )
+                            }
+                          >
+                            <Icon name="close" size={14} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {!!attachments.length && (
                     <div className="attachment-chips">
                       {attachments.map((a) => (
@@ -1487,7 +1995,7 @@ function App() {
                               )
                             }
                           >
-                            ×
+                            <Icon name="close" size={14} />
                           </button>
                         </span>
                       ))}
@@ -1526,6 +2034,11 @@ function App() {
                     value={text}
                     onChange={(e) => {
                       setText(e.target.value);
+                      if (selected)
+                        sessionStorage.setItem(
+                          `apsis.bot-draft.${selected}`,
+                          e.target.value,
+                        );
                       setCaret(e.target.selectionStart);
                       draftSelection.current = {
                         start: e.target.selectionStart,
@@ -1562,6 +2075,7 @@ function App() {
                       }
                       if (
                         e.key === "Enter" &&
+                        !smallScreen &&
                         !e.shiftKey &&
                         !e.nativeEvent.isComposing
                       ) {
@@ -1570,6 +2084,23 @@ function App() {
                       }
                     }}
                   />
+                  {needsDirtyChoice && (
+                    <div className="cw-dirty">
+                      <span>{uiText("專案有未提交修改")}</span>
+                      <button
+                        aria-pressed={dirtyChoice === "include"}
+                        onClick={() => setDirtyChoice("include")}
+                      >
+                        {uiText("接續目前修改")}
+                      </button>
+                      <button
+                        aria-pressed={dirtyChoice === "exclude"}
+                        onClick={() => setDirtyChoice("exclude")}
+                      >
+                        {uiText("從最後提交開始")}
+                      </button>
+                    </div>
+                  )}
                   <div className="composer-actions">
                     <div className="composer-tools">
                       <ComposerPopover
@@ -1590,35 +2121,65 @@ function App() {
                           <Icon name="attach" size={18} />
                           {uiText("新增附件")}
                         </button>
-                        {[
-                          { label: "技能 /", items: skillChoices },
-                          { label: "連接器 @", items: connectorChoices },
-                        ].map((group) => (
-                          <section
-                            key={group.label}
-                            aria-label={uiText(group.label)}
-                          >
-                            <h3>{uiText(group.label)}</h3>
-                            {group.items.length ? (
-                              group.items.map((item) => (
-                                <button
-                                  key={item.id}
-                                  disabled={busy || !detail}
-                                  onClick={(e) => {
-                                    e.currentTarget.closest("details")!.open =
-                                      false;
-                                    insertChoice(item.value);
-                                  }}
-                                >
-                                  {item.name}
-                                </button>
-                              ))
-                            ) : (
-                              <p>{uiText("尚未設定")}</p>
-                            )}
-                          </section>
-                        ))}
+                        {[{ label: "連接器 @", items: connectorChoices }].map(
+                          (group) => (
+                            <section
+                              key={group.label}
+                              aria-label={uiText(group.label)}
+                            >
+                              <h3>{uiText(group.label)}</h3>
+                              {group.items.length ? (
+                                group.items.map((item) => (
+                                  <button
+                                    key={item.id}
+                                    disabled={busy || !detail}
+                                    onClick={(e) => {
+                                      e.currentTarget.closest("details")!.open =
+                                        false;
+                                      insertChoice(item.value);
+                                    }}
+                                  >
+                                    {item.name}
+                                  </button>
+                                ))
+                              ) : (
+                                <p>{uiText("尚未設定")}</p>
+                              )}
+                            </section>
+                          ),
+                        )}
                       </ComposerPopover>
+                      <button
+                        type="button"
+                        className="mobile-compose-options work-options-trigger"
+                        aria-label={uiText("工作選項")}
+                        title={uiText("工作位置與模式")}
+                        onClick={() => setComposeOptions(true)}
+                      >
+                        <span>
+                          {uiText(
+                            taskMode === "plan"
+                              ? "先規劃"
+                              : projectId
+                                ? "專案工作"
+                                : "工作選項",
+                          )}
+                        </span>
+                        <svg
+                          aria-hidden="true"
+                          width="14"
+                          height="14"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                        >
+                          <path
+                            d="m4 6 4 4 4-4"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                          />
+                        </svg>
+                      </button>
+                      {!smallScreen && modelPicker}
                       <ApprovalModeControl
                         settings={approvalSettings}
                         api={api}
@@ -1627,7 +2188,7 @@ function App() {
                       />
                     </div>
                     <div className="composer-send-actions">
-                      {running && (
+                      {running && !smallScreen && (
                         <select
                           aria-label={uiText("傳送方式")}
                           value={sendMode}
@@ -1690,14 +2251,22 @@ function App() {
                   />
                 </div>
                 {detail?.contextSetupError && (
-                  <p role="status" className="composer-note">
-                    {uiError(detail.contextSetupError)}{" "}
-                    <button onClick={() => setSettings(true)}>
-                      {uiText("需設定")}
+                  <div role="status" className="model-setup-notice">
+                    <ActivityMark state="failed" />
+                    <span>
+                      <strong>{uiText("目前無法開始工作")}</strong>
+                      <small>{uiError(detail.contextSetupError)}</small>
+                    </span>
+                    <button type="button" onClick={repairModel}>
+                      {uiText(
+                        modelOptions.length
+                          ? "修正此 Bot 的模型"
+                          : "設定模型連線",
+                      )}
                     </button>
-                  </p>
+                  </div>
                 )}
-              </div>
+              </ComposerFrame>
               <p className="composer-note">
                 {running
                   ? uiText("可以補充指示，或將新訊息排入下一個任務。")
@@ -1707,28 +2276,193 @@ function App() {
           </>
         )}
       </main>
-      {selected && panel && detail && (
+      {!activeTask && !projectView && selected && panel && detail && (
         <aside
           id="bot-details"
           ref={detailsRef}
           className="details"
           role={detailsDrawer ? "dialog" : undefined}
           aria-modal={detailsDrawer || undefined}
-          aria-label={uiText("Bot 詳情")}
+          aria-label={uiText("工作內容")}
           inert={listDrawer}
         >
+          {!overlayDetails && (
+            <InspectorResize
+              value={inspectorWidth}
+              label={uiText("調整檢視區寬度")}
+              onChange={setInspectorWidth}
+            />
+          )}
           <div className="details-header">
+            <nav className="detail-tabs" aria-label={uiText("工作內容分類")}>
+              <button aria-pressed={filesTab} onClick={() => setFilesTab(true)}>
+                {uiText("檔案")}
+              </button>
+              <button
+                aria-pressed={!filesTab}
+                onClick={() => setFilesTab(false)}
+              >
+                {uiText("變更")}
+              </button>
+            </nav>
             <button
               className="icon"
-              aria-label={profile ? uiText("返回詳情") : uiText("關閉詳情")}
-              onClick={() => (profile ? setProfile(false) : setPanel(false))}
+              aria-label={uiText("關閉工作內容")}
+              onClick={() => setPanel(false)}
             >
-              <Icon name={profile ? "back" : "close"} size={18} />
+              <Icon name="close" size={18} />
             </button>
-            <strong>{profile ? uiText("Bot 個人檔案") : uiText("詳情")}</strong>
-            <span />
           </div>
-          {profile ? (
+          {filesTab && detail.session.context ? (
+            <>
+              <FilePanel
+                key={`${selected}:${detail.session.context.id}:${detail.session.context.location?.id}`}
+                context={detail.session.context}
+                storageKey={`apsis.bot-file.${selected}.${detail.session.context.id}`}
+                api={api}
+                updateKey={
+                  detail.jobs.map((j) => j.id + j.status).join(":") +
+                  detail.artifacts.length +
+                  state?.bots.map((b) => b.id + b.status).join(":")
+                }
+                reference={(ref) => {
+                  setFileReferences((old) => [
+                    ...old.filter(
+                      (r) =>
+                        r.path !== ref.path || r.locationId !== ref.locationId,
+                    ),
+                    ref,
+                  ]);
+                  setText(
+                    (text) =>
+                      text +
+                      (text ? "\n" : "") +
+                      uiText("引用檔案：") +
+                      ref.path,
+                  );
+                }}
+              />
+
+              {detail.artifacts.length > 0 && (
+                <details className="cw-deliveries">
+                  <summary>
+                    {uiText("附件與成果")} · {detail.artifacts.length}
+                  </summary>
+                  {detail.artifacts
+                    .slice()
+                    .reverse()
+                    .map((a) => (
+                      <ArtifactCard
+                        key={a.id}
+                        artifact={a}
+                        compact
+                        reference={() => referenceArtifact(a)}
+                      />
+                    ))}
+                </details>
+              )}
+            </>
+          ) : (
+            <div className="details-body">
+              {detail.codingTasks.filter((t) => t.git).length ? (
+                detail.codingTasks
+                  .filter((t) => t.git)
+                  .map((task) => (
+                    <button
+                      className="cw-change-task"
+                      key={task.id}
+                      onClick={() => openTask(task.id, "changes")}
+                    >
+                      <strong>{task.title}</strong>
+                      <small>{task.git?.branch}</small>
+                      <span>{uiText("查看變更")} →</span>
+                    </button>
+                  ))
+              ) : (
+                <p className="muted">
+                  {uiText("有專案任務後，可在這裡查看修改。")}
+                </p>
+              )}
+            </div>
+          )}
+        </aside>
+      )}
+      {composeOptions && (
+        <Modal
+          label={uiText("工作選項")}
+          close={() => setComposeOptions(false)}
+        >
+          <section className="modal mobile-compose-sheet">
+            <header>
+              <h2>{uiText("工作選項")}</h2>
+              <button
+                className="icon"
+                aria-label={uiText("關閉工作選項")}
+                onClick={() => setComposeOptions(false)}
+              >
+                <Icon name="close" />
+              </button>
+            </header>
+            <ProjectControls
+              showLabels
+              projects={state?.projects || []}
+              projectId={projectId}
+              setProject={(id) => {
+                setProjectId(id);
+                setDirtyChoice(undefined);
+                setNeedsDirtyChoice(false);
+              }}
+              branch={startBranch}
+              setBranch={setStartBranch}
+              mode={taskMode}
+              setMode={setTaskMode}
+              api={api}
+            />
+            {smallScreen && (
+              <div className="compose-option-field">
+                <span>{uiText("Bot 模型")}</span>
+                {modelPicker}
+              </div>
+            )}
+            {running && (
+              <label className="compose-option-field">
+                傳送方式
+                <select
+                  aria-label={uiText("傳送方式")}
+                  value={sendMode}
+                  onChange={(e) => setSendMode(e.target.value)}
+                >
+                  <option value="queue">{uiText("排入下一個")}</option>
+                  <option value="steer" disabled={!!retryOf}>
+                    {uiText("補充指示")}
+                  </option>
+                </select>
+              </label>
+            )}
+            <button
+              className="primary"
+              onClick={() => setComposeOptions(false)}
+            >
+              {uiText("完成")}
+            </button>
+          </section>
+        </Modal>
+      )}
+      {profile && selected && detail && state && (
+        <Modal label={uiText("Bot 詳情")} close={() => setProfile(false)}>
+          <section className="modal cw-settings-modal">
+            <header>
+              <h2>
+                {bot?.name} · {uiText("自訂 Bot")}
+              </h2>
+              <button
+                className="icon"
+                aria-label={uiText("關閉 Bot 設定")}
+                onClick={() => setProfile(false)}
+              >
+                <Icon name="close" />
+              </button>
+            </header>
             <Profile
               key={selected}
               detail={detail}
@@ -1749,83 +2483,28 @@ function App() {
                 await refresh();
               }}
             />
-          ) : (
-            <div className="details-body" key={selected}>
+          </section>
+        </Modal>
+      )}
+      {botSheet && selected && detail && (
+        <Modal
+          label={botSheet === "routines" ? "排程" : "記憶與背景"}
+          close={() => setBotSheet(undefined)}
+        >
+          <section className="modal cw-settings-modal">
+            <header>
+              <h2>{botSheet === "routines" ? "排程" : "記憶與背景"}</h2>
               <button
-                className="detail-profile"
-                onClick={() => setProfile(true)}
+                className="icon"
+                aria-label={uiText("關閉 Bot 管理")}
+                onClick={() => setBotSheet(undefined)}
               >
-                <span className="avatar">
-                  <BrandMark size={26} avatar={bot?.avatar} />
-                </span>
-                <span className="detail-profile-copy">
-                  <strong>{bot?.name}</strong>
-                  <small>{uiText("自訂 Bot")}</small>
-                </span>
-                <Icon name="arrow" size={16} />
+                <Icon name="close" />
               </button>
-              <DetailSection
-                title={uiText("檔案與成果")}
-                icon={<Icon name="file" size={16} />}
-                status={detail.artifacts.length}
-                defaultOpen
-              >
-                {detail.artifacts.length ? (
-                  detail.artifacts
-                    .slice()
-                    .reverse()
-                    .map((a) => (
-                      <ArtifactCard key={a.id} artifact={a} compact />
-                    ))
-                ) : (
-                  <p className="muted">{uiText("附件與成果會顯示在這裡。")}</p>
-                )}
-              </DetailSection>
-              <DetailSection
-                title={uiText("電腦")}
-                icon={<Icon name="monitor" size={16} />}
-                status={
-                  detail.computerOwner
-                    ? uiText("使用者控制中")
-                    : detail.browserUrl
-                      ? uiText("已連線")
-                      : uiText("待命")
-                }
-                defaultOpen={!!detail.browserUrl || !!detail.computerOwner}
-              >
-                {detail.browserUrl ? (
-                  <button
-                    className="computer-preview"
-                    onClick={() => setExpanded(true)}
-                  >
-                    <img
-                      src={`/api/v2/bots/${selected}/screenshot?v=${detail.session.live?.activity.length || 0}`}
-                      alt={uiText("Bot 瀏覽器畫面")}
-                    />
-                    <span className="preview-bottom">
-                      {new URL(detail.browserUrl).hostname}
-                      <span>↗</span>
-                    </span>
-                  </button>
-                ) : (
-                  <div className="detail-empty">
-                    <p className="muted">
-                      {uiText("開始瀏覽網頁後會顯示工作畫面。")}
-                    </p>
-                    <button
-                      className="text-button"
-                      onClick={() => setExpanded(true)}
-                    >
-                      {uiText("開啟電腦")}
-                    </button>
-                  </div>
-                )}
-              </DetailSection>
-              <DetailSection
-                title={uiText("排程")}
-                icon={<Icon name="clock" size={16} />}
-                status={detail.routines.length}
-              >
+            </header>
+            {botSheet === "routines" ? (
+              <div className="cw-routine-list">
+                {" "}
                 {detail.routines.map((r) => (
                   <button
                     className="routine-row"
@@ -1859,12 +2538,10 @@ function App() {
                   <Icon name="plus" size={16} />
                   {uiText("新增排程")}
                 </button>
-              </DetailSection>
-              <DetailSection
-                title={uiText("記憶")}
-                icon={<Icon name="spark" size={16} />}
-                status={detail.memories.length}
-              >
+              </div>
+            ) : (
+              <div>
+                {" "}
                 <ContextPanel
                   key={detail.bot.id}
                   botId={detail.bot.id}
@@ -1880,39 +2557,25 @@ function App() {
                   quote={(id, content) => {
                     setReplyTo(id);
                     setQuotedPreview({ id, content });
-                    input.current?.focus();
+                    setBotSheet(undefined);
+                    requestAnimationFrame(() => input.current?.focus());
                   }}
                 />
-              </DetailSection>
-              <DetailSection
-                title={uiText("最近操作")}
-                icon={<Icon name="clock" size={16} />}
-                status={detail.runSummaries.at(-1)?.operationCount || 0}
-              >
-                {detail.runSummaries.length ? (
-                  <button
-                    className="task-summary"
-                    onClick={() => {
-                      if (detailsDrawer) setPanel(false);
-                      revealRun(detail.runSummaries.at(-1)!.id);
-                    }}
-                  >
-                    <span>
-                      <RunStats summary={detail.runSummaries.at(-1)!} />
-                      {uiText("· 查看紀錄")}
-                    </span>
-                    <Icon name="arrow" size={14} />
-                  </button>
-                ) : (
-                  <p className="muted">
-                    {uiText("執行任務後可查看操作紀錄。")}
-                  </p>
-                )}
-              </DetailSection>
-            </div>
-          )}
-        </aside>
+              </div>
+            )}
+          </section>
+        </Modal>
       )}
+      {projectSettings &&
+        state?.projects.find((p) => p.id === projectSettings) && (
+          <ProjectSettings
+            key={projectSettings}
+            project={state.projects.find((p) => p.id === projectSettings)!}
+            api={api}
+            refresh={refresh}
+            close={() => setProjectSettings(undefined)}
+          />
+        )}
       {creating && state && (
         <Modal label={uiText("建立 Bot")} close={() => setCreating(false)}>
           <section className="modal bot-create-modal">
@@ -1954,84 +2617,61 @@ function App() {
           save={(fn) => perform(fn)}
         />
       )}
-      {expanded && selected && (
-        <Modal label={uiText("Bot 的電腦")} close={() => setExpanded(false)}>
-          <section
-            className="modal computer-modal"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <header>
-              <div>
-                <h2>{uiText("Bot 的電腦")}</h2>
-                <p>{uiText("所有 Bots 共用登入狀態，各自使用分頁。")}</p>
-              </div>
-              <button
-                className="icon"
-                aria-label={uiText("關閉電腦")}
-                onClick={() => setExpanded(false)}
-              >
-                <Icon name="close" />
-              </button>
-            </header>
-            {detail?.browserUrl ? (
-              <img
-                src={`/api/v2/bots/${selected}/screenshot?v=${Date.now()}`}
-                alt={uiText("完整瀏覽器畫面")}
-              />
-            ) : (
-              <div className="empty-section">
-                {uiText("尚未開啟網頁。可在對話中請 Bot 瀏覽網站。")}
-              </div>
-            )}
-            <footer>
-              <span>{uiText("接管會在本機開啟專用瀏覽器視窗。")}</span>
-              <button
-                className="primary"
-                onClick={() =>
-                  perform(() =>
-                    api(`/bots/${selected}/takeover`, "POST", {
-                      take: !detail?.computerOwner,
-                    }),
-                  )
-                }
-              >
-                {detail?.computerOwner
-                  ? uiText("交還控制權")
-                  : uiText("接管瀏覽器")}
-              </button>
-            </footer>
-          </section>
-        </Modal>
-      )}
     </div>
+  );
+  return (
+    <AvatarCollectionProvider
+      collection={state?.avatarCollection}
+      request={(requestId) =>
+        api("/avatar-collection/draw", "POST", { requestId })
+      }
+      accept={(collection) =>
+        setState((previous) =>
+          previous && collection.revision >= previous.avatarCollection.revision
+            ? { ...previous, avatarCollection: collection }
+            : previous,
+        )
+      }
+    >
+      {content}
+    </AvatarCollectionProvider>
   );
 }
 
 function ArtifactCard({
   artifact: a,
   compact = false,
+  reference,
 }: {
   artifact: Artifact;
   compact?: boolean;
+  reference?: () => void;
 }) {
   return (
-    <a
-      className={`artifact-card ${compact ? "compact" : ""}`}
-      href={`/api/v2/artifacts/${a.id}`}
-      download={a.name}
-    >
-      <span className="file-icon">
-        <Icon name="file" size={compact ? 18 : 24} />
-      </span>
-      <span>
-        <strong>{a.name}</strong>
-        <small>
-          {a.kind === "attachment" ? uiText("附件") : uiText("成果")} ·{" "}
-          {a.path.split(".").at(-1)?.toUpperCase()}
-        </small>
-      </span>
-      <span className="download-arrow">↓</span>
-    </a>
+    <div className="artifact-delivery">
+      <a
+        className={`artifact-card ${compact ? "compact" : ""}`}
+        href={`/api/v2/artifacts/${a.id}`}
+        download={a.name}
+      >
+        <span className="file-icon">
+          <Icon name="file" size={compact ? 18 : 24} />
+        </span>
+        <span>
+          <strong>{a.name}</strong>
+          <small>
+            {a.kind === "attachment" ? uiText("附件") : uiText("成果")} ·{" "}
+            {a.path.split(".").at(-1)?.toUpperCase()}
+          </small>
+        </span>
+        <span className="download-arrow">↓</span>
+      </a>
+      {reference && (
+        <button className="text-button" onClick={reference}>
+          {uiText("引用給 Bot")}
+        </button>
+      )}
+    </div>
   );
 }
 function DraftCard({
@@ -2114,68 +2754,6 @@ function DraftCard({
     </div>
   );
 }
-function ApprovalCard({
-  approval: a,
-  decide,
-}: {
-  approval: Detail["approvals"][number];
-  decide: (approve: boolean, remember: boolean) => Promise<void>;
-}) {
-  const locale = useSettingsLocale();
-  const [remember, setRemember] = useState(false);
-  const [deciding, setDeciding] = useState(false);
-  const act = async (approved: boolean) => {
-    setDeciding(true);
-    try {
-      await decide(approved, approved && remember);
-    } finally {
-      setDeciding(false);
-    }
-  };
-  return (
-    <div className="approval-card">
-      <div className="approval-heading">
-        <span>!</span>
-        <div>
-          <strong>{uiText("需要你的核准")}</strong>
-          <small>
-            {uiText("Bot 希望執行")} {a.tool}
-          </small>
-        </div>
-      </div>
-      <pre>{JSON.stringify(a.args, null, 2)}</pre>
-      <p className="field-help">
-        {approvalReason(a.reason, locale, a.dangerousCommand)}
-      </p>
-      {a.rememberAllowed !== false && (
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={remember}
-            onChange={(e) => setRemember(e.target.checked)}
-          />
-          {uiText("本次任務允許相同操作（包含由此任務派工）")}
-        </label>
-      )}
-      <div className="approval-actions">
-        <button
-          className="secondary"
-          disabled={deciding}
-          onClick={() => void act(false)}
-        >
-          {uiText("拒絕")}
-        </button>
-        <button
-          className="primary"
-          disabled={deciding}
-          onClick={() => void act(true)}
-        >
-          {deciding ? uiText("處理中…") : uiText("核准並繼續")}
-        </button>
-      </div>
-    </div>
-  );
-}
 function Profile({
   detail,
   state,
@@ -2199,7 +2777,7 @@ function Profile({
     needsReplacement
       ? "__replacement__"
       : detail?.bot.connectionId
-        ? `${detail.bot.connectionId}::${detail.bot.model}`
+        ? JSON.stringify([detail.bot.connectionId, detail.bot.model])
         : "",
   );
   const [avatar, setAvatar] = useState(
@@ -2208,6 +2786,7 @@ function Profile({
       : "orbit",
   );
   const [saving, setSaving] = useState(false);
+  const [avatarExpanded, setAvatarExpanded] = useState(false);
   const [notice, setNotice] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -2244,7 +2823,9 @@ function Profile({
       onSubmit={(e) => {
         e.preventDefault();
         if (model === "__replacement__") return;
-        const [connectionId, modelName] = model.split("::");
+        const [connectionId, modelName] = model
+          ? (JSON.parse(model) as string[])
+          : ["", ""];
         void commit({
           name,
           description,
@@ -2256,10 +2837,6 @@ function Profile({
         });
       }}
     >
-      <span className="avatar hero">
-        <BrandMark size={38} avatar={avatar} />
-      </span>
-      <AvatarPicker value={avatar} onChange={setAvatar} />
       {notice && (
         <p role="status" className="notice">
           {notice}
@@ -2274,10 +2851,29 @@ function Profile({
           onChange={(e) => setName(e.target.value)}
         />
       </label>
+      <div className="compose-option-field">
+        <span>{t("model")}</span>
+        <ModelPicker
+          label={t("model")}
+          value={model}
+          onChange={setModel}
+          disabled={saving}
+          placeholder={t("selectModel")}
+          options={[
+            { value: "", label: t("defaultModel") },
+            ...connectionModelOptions(state.connections),
+          ]}
+        />
+      </div>
+      {needsReplacement && (
+        <p className="notice" role="alert">
+          {t("replacement")}
+        </p>
+      )}
       <label>
         {t("description")}
         <textarea
-          rows={7}
+          rows={3}
           value={description}
           maxLength={4000}
           onChange={(e) => setDescription(e.target.value)}
@@ -2286,44 +2882,39 @@ function Profile({
           )}
         />
       </label>
-      <label>
-        {t("model")}
-        <select value={model} onChange={(e) => setModel(e.target.value)}>
-          {needsReplacement && (
-            <option value="__replacement__" disabled>
-              {t("selectModel")}
-            </option>
-          )}
-          <option value="">{t("defaultModel")}</option>
-          {state.connections
-            .filter((c) => c.provider !== "codex")
-            .flatMap((c) =>
-              (c.models || [c.model]).map((m) => (
-                <option key={`${c.id}::${m}`} value={`${c.id}::${m}`}>
-                  {c.name} / {c.modelSettings?.[m]?.displayName || m}
-                </option>
-              )),
-            )}
-        </select>
-      </label>
-      {needsReplacement && (
-        <p className="notice" role="alert">
-          {t("replacement")}
-        </p>
-      )}
-      <BotAccessFields
-        skills={state.skills}
-        connectors={state.connectors}
-        {...access}
-        disabled={saving}
-        onChange={(patch) => setAccess((old) => ({ ...old, ...patch }))}
-      />
-      <PermissionEditor
-        value={permissionRules}
-        onChange={setPermissionRules}
-        botId={detail?.bot.id}
-        disabled={saving}
-      />
+      <details
+        className="profile-disclosure profile-avatar-disclosure"
+        onToggle={(event) => setAvatarExpanded(event.currentTarget.open)}
+      >
+        <summary>
+          <span className="avatar small">
+            <BrandMark size={26} avatar={avatar} />
+          </span>
+          <span>
+            {getSettingsLocale() === "en"
+              ? "Icon and avatar collection"
+              : "圖示與頭像收藏"}
+          </span>
+        </summary>
+        {avatarExpanded && <AvatarPicker value={avatar} onChange={setAvatar} />}
+      </details>
+      <details className="profile-disclosure profile-advanced">
+        <summary>
+          {getSettingsLocale() === "en" ? "Advanced settings" : "進階設定"}
+        </summary>
+        <BotAccessFields
+          connectors={state.connectors}
+          {...access}
+          disabled={saving}
+          onChange={(patch) => setAccess((old) => ({ ...old, ...patch }))}
+        />
+        <PermissionEditor
+          value={permissionRules}
+          onChange={setPermissionRules}
+          botId={detail?.bot.id}
+          disabled={saving}
+        />
+      </details>
       <button
         className="primary"
         type="submit"
@@ -2340,7 +2931,9 @@ function Profile({
             setSaving(true);
             setNotice("");
             try {
-              const [connectionId, modelName] = model.split("::");
+              const [connectionId, modelName] = model
+                ? (JSON.parse(model) as string[])
+                : ["", ""];
               await api("/templates", "POST", {
                 name,
                 description,
@@ -2469,6 +3062,14 @@ function RoutineEditor({
   const old = r === "new" ? undefined : r;
   const [name, setName] = useState(old?.name || "");
   const [prompt, setPrompt] = useState(old?.prompt || "");
+  const [routineProject, setRoutineProject] = useState(old?.projectId || "");
+  const [routineBranch, setRoutineBranch] = useState(old?.branch || "");
+  const [projects, setProjects] = useState<Snapshot["projects"]>([]);
+  useEffect(() => {
+    void api<Snapshot["projects"]>("/projects")
+      .then((p) => setProjects(p.filter((v) => v.id !== "workspace")))
+      .catch((e) => setNotice(e.message));
+  }, []);
   const [cron, setCron] = useState(old?.cron || "0 9 * * 1-5");
   const [timezone, setTimezone] = useState(old?.timezone || "Asia/Taipei");
   const [enabled, setEnabled] = useState(old?.enabled ?? true);
@@ -2499,7 +3100,15 @@ function RoutineEditor({
                   await api(
                     old ? `/routines/${old.id}` : `/bots/${botId}/routines`,
                     old ? "PATCH" : "POST",
-                    { name, prompt, cron, timezone, enabled },
+                    {
+                      name,
+                      prompt,
+                      cron,
+                      timezone,
+                      enabled,
+                      projectId: routineProject,
+                      branch: routineBranch,
+                    },
                   );
                   close();
                 } catch (error) {
@@ -2535,6 +3144,17 @@ function RoutineEditor({
               required
             />
           </label>
+          <ProjectControls
+            projects={projects}
+            projectId={routineProject}
+            setProject={setRoutineProject}
+            branch={routineBranch}
+            setBranch={setRoutineBranch}
+            mode="work"
+            hideMode
+            setMode={() => {}}
+            api={api}
+          />
           <label>
             {uiText("時間")}
             <select
@@ -2611,7 +3231,6 @@ function Settings({
   state,
   close,
   refresh,
-  report,
 }: {
   state: Snapshot;
   close: () => void;
@@ -2635,90 +3254,6 @@ function Settings({
     window.addEventListener("beforeunload", prevent);
     return () => window.removeEventListener("beforeunload", prevent);
   }, [dirty]);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [showTelegramTokenForm, setShowTelegramTokenForm] = useState(false);
-  const [pairingCommand, setPairingCommand] = useState("");
-  const [connectorMode, setConnectorMode] = useState<"form" | "json">("form");
-  const [connectorJson, setConnectorJson] = useState("");
-  const [connectorJsonError, setConnectorJsonError] = useState("");
-  const [connectorDrafts, setConnectorDrafts] = useState<McpConnectorInput[]>(
-    [],
-  );
-  const [telegram, setTelegram] = useState<TelegramView>();
-  const [rules, setRules] = useState<
-    {
-      id: string;
-      tool: string;
-      args: unknown;
-      legacy?: boolean;
-      scopeKey?: string;
-    }[]
-  >([]);
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    setNotice("");
-    try {
-      await fn();
-      await refresh();
-    } catch (e) {
-      setNotice((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const importConnectorDrafts = async () => {
-    setBusy(true);
-    setNotice("");
-    let added = 0;
-    let failure = "";
-    for (const draft of connectorDrafts) {
-      try {
-        await api("/connectors", "POST", draft);
-        added++;
-      } catch (error) {
-        failure = `${draft.name}：${(error as Error).message}`;
-        break;
-      }
-    }
-    if (added) {
-      try {
-        await refresh();
-      } catch (error) {
-        failure ||= uiText("清單更新失敗：{0}", [(error as Error).message]);
-      }
-    }
-    setConnectorDrafts(connectorDrafts.slice(added));
-    if (failure) {
-      setNotice(`${added ? uiText("已加入 {0} 個。", [added]) : ""}${failure}`);
-    } else {
-      setConnectorJson("");
-      setNotice(uiText("已加入 {0} 個 MCP 連接器。", [added]));
-    }
-    setBusy(false);
-  };
-  useEffect(() => {
-    if (tab === "telegram")
-      void api<TelegramView>("/api/channels/telegram")
-        .then(setTelegram)
-        .catch((e) => setNotice(e.message));
-    if (tab === "approvals")
-      void api<typeof rules>("/rules")
-        .then(setRules)
-        .catch((e) => setNotice(e.message));
-  }, [tab]);
-  useEffect(() => {
-    if (tab !== "telegram") return;
-    const timer = setInterval(() => {
-      void api<TelegramView>("/api/channels/telegram")
-        .then(setTelegram)
-        .catch(() => {});
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [tab]);
-  useEffect(() => {
-    if (telegram?.ownerId) setPairingCommand("");
-  }, [telegram?.ownerId]);
   return (
     <Modal label={t("settings")} close={guardedClose}>
       <section className="modal settings-modal">
@@ -2740,20 +3275,14 @@ function Settings({
             {[
               ["general", t("general")],
               ["models", t("models")],
-              ["connectors", t("connectors")],
-              ["skills", t("skills")],
               ["templates", t("templates")],
-              ["telegram", "Telegram"],
-              ["approvals", t("approvals")],
             ].map(([id, label]) => (
               <button
                 key={id}
                 className={tab === id ? "selected" : ""}
                 aria-current={tab === id ? "true" : undefined}
                 onClick={() => {
-                  if (id === tab || !canLeave()) return;
-                  setTab(id);
-                  setNotice("");
+                  if (id !== tab && canLeave()) setTab(id);
                 }}
               >
                 {label}
@@ -2762,7 +3291,20 @@ function Settings({
           </nav>
           <div className="settings-content">
             {tab === "general" && (
-              <ExecutionSettings api={api} onDirtyChange={setDirty} />
+              <>
+                <ExecutionSettings api={api} onDirtyChange={setDirty} />
+                <TaskNotificationSettings />
+                {!!state.skillDiagnostics?.length && (
+                  <details className="settings-advanced">
+                    <summary>{uiText("技能載入問題")}</summary>
+                    {state.skillDiagnostics.map((issue) => (
+                      <p key={issue.path}>
+                        {issue.path}：{issue.message}
+                      </p>
+                    ))}
+                  </details>
+                )}
+              </>
             )}
             {tab === "templates" && (
               <TemplateSettings
@@ -2771,12 +3313,6 @@ function Settings({
                 onDirtyChange={setDirty}
               />
             )}
-            {notice && (
-              <div role="status" className="notice">
-                {notice}
-              </div>
-            )}
-            {busy && <ActionFeedback label="正在處理設定操作…" pending />}
             {tab === "models" && (
               <ProviderSettings
                 onDirtyChange={setDirty}
@@ -2786,487 +3322,6 @@ function Settings({
                 api={api}
                 refresh={refresh}
               />
-            )}
-            {tab === "connectors" && (
-              <>
-                <h3>{uiText("MCP 連接器")}</h3>
-                <p className="muted">
-                  {uiText(
-                    "連接支援 Streamable HTTP 的 MCP 服務。工具執行前會出現核准卡片。",
-                  )}
-                </p>
-                {state.connectors.map((c) => (
-                  <div className="connection-card" key={c.id}>
-                    <div>
-                      <strong>{c.name}</strong>
-                      <small>{c.url}</small>
-                    </div>
-                    <button
-                      className="text-button"
-                      onClick={() =>
-                        void run(() => api(`/connectors/${c.id}`, "DELETE"))
-                      }
-                    >
-                      {uiText("移除")}
-                    </button>
-                  </div>
-                ))}
-                <section className="settings-form connector-setup">
-                  <h3>{uiText("新增連接器")}</h3>
-                  <div
-                    className="connector-mode"
-                    aria-label={uiText("連接器輸入方式")}
-                  >
-                    <button
-                      className={connectorMode === "form" ? "selected" : ""}
-                      aria-current={
-                        connectorMode === "form" ? "true" : undefined
-                      }
-                      onClick={() => setConnectorMode("form")}
-                    >
-                      {uiText("手動輸入")}
-                    </button>
-                    <button
-                      className={connectorMode === "json" ? "selected" : ""}
-                      aria-current={
-                        connectorMode === "json" ? "true" : undefined
-                      }
-                      onClick={() => setConnectorMode("json")}
-                    >
-                      {uiText("貼上 JSON")}
-                    </button>
-                  </div>
-                  {connectorMode === "form" ? (
-                    <form
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const form = new FormData(e.currentTarget);
-                        void run(async () => {
-                          await api(
-                            "/connectors",
-                            "POST",
-                            Object.fromEntries(form),
-                          );
-                          setNotice(uiText("已連線，Bot 可使用這個服務。"));
-                        });
-                      }}
-                    >
-                      <label>
-                        {uiText("名稱")}
-                        <input name="name" required />
-                      </label>
-                      <label>
-                        MCP endpoint
-                        <input
-                          name="url"
-                          type="url"
-                          required
-                          placeholder="https://example.com/mcp"
-                        />
-                      </label>
-                      <label>
-                        {uiText("Bearer token（選填）")}
-                        <input
-                          name="token"
-                          type="password"
-                          autoComplete="off"
-                        />
-                      </label>
-                      <button className="primary" disabled={busy}>
-                        {uiText("測試並加入")}
-                      </button>
-                    </form>
-                  ) : (
-                    <div className="connector-json">
-                      <p className="muted">
-                        {uiText(
-                          "支援 mcpServers、servers 或單筆 JSON；可一次加入多個 Streamable HTTP 服務。",
-                        )}
-                      </p>
-                      <label>
-                        {uiText("MCP 設定 JSON")}
-                        <textarea
-                          rows={9}
-                          spellCheck={false}
-                          value={connectorJson}
-                          onChange={(event) => {
-                            setConnectorJson(event.target.value);
-                            setConnectorDrafts([]);
-                            setConnectorJsonError("");
-                          }}
-                          placeholder={
-                            '{\n  "mcpServers": {\n    "notes": {\n      "url": "https://example.com/mcp",\n      "headers": { "Authorization": "Bearer YOUR_TOKEN" }\n    }\n  }\n}'
-                          }
-                          aria-invalid={!!connectorJsonError}
-                          aria-describedby={
-                            connectorJsonError
-                              ? "connector-json-error"
-                              : undefined
-                          }
-                        />
-                      </label>
-                      {connectorJsonError && (
-                        <p
-                          id="connector-json-error"
-                          className="field-error"
-                          role="alert"
-                        >
-                          {connectorJsonError}
-                        </p>
-                      )}
-                      <div className="connector-json-actions">
-                        <button
-                          className="secondary"
-                          disabled={busy || !connectorJson.trim()}
-                          onClick={() => {
-                            try {
-                              setConnectorDrafts(
-                                parseMcpConnectorJson(connectorJson),
-                              );
-                              setConnectorJsonError("");
-                            } catch (error) {
-                              setConnectorDrafts([]);
-                              setConnectorJsonError((error as Error).message);
-                            }
-                          }}
-                        >
-                          {uiText("檢查 JSON")}
-                        </button>
-                      </div>
-                      {connectorDrafts.length > 0 && (
-                        <div className="connector-preview">
-                          <strong>
-                            {uiText("準備加入 {0} 個連接器", [
-                              connectorDrafts.length,
-                            ])}
-                          </strong>
-                          {connectorDrafts.map((draft, index) => (
-                            <div
-                              className="connector-preview-item"
-                              key={`${draft.name}-${index}`}
-                            >
-                              <span>{draft.name}</span>
-                              <small>{draft.url}</small>
-                              <small>
-                                {draft.token
-                                  ? uiText("Bearer token 已提供")
-                                  : uiText("無需 token")}
-                              </small>
-                            </div>
-                          ))}
-                          <button
-                            className="primary"
-                            disabled={busy}
-                            onClick={() => void importConnectorDrafts()}
-                          >
-                            {busy
-                              ? uiText("連線測試中…")
-                              : uiText("測試並加入")}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </section>
-              </>
-            )}
-            {tab === "skills" && (
-              <>
-                <h3>{uiText("共用技能")}</h3>
-                <p className="muted">{uiText("在對話輸入 / 選擇技能。")}</p>
-                {state.skills.map((s) => (
-                  <details className="skill-card" key={s.id}>
-                    <summary>{s.name}</summary>
-                    <Markdown text={s.content} />
-                  </details>
-                ))}
-                <form
-                  className="settings-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const data = Object.fromEntries(
-                      new FormData(e.currentTarget),
-                    );
-                    void run(async () => {
-                      await api("/api/skills", "POST", data);
-                      setNotice(uiText("技能已建立。"));
-                    });
-                  }}
-                >
-                  <label>
-                    {uiText("名稱")}
-                    <input name="name" required />
-                  </label>
-                  <label>
-                    {uiText("步驟")}
-                    <textarea name="content" rows={5} required />
-                  </label>
-                  <button className="primary" disabled={busy}>
-                    {uiText("新增技能")}
-                  </button>
-                </form>
-              </>
-            )}
-            {tab === "telegram" && (
-              <>
-                <div className="settings-section-heading">
-                  <div>
-                    <h3>Telegram</h3>
-                    <p className="muted">
-                      {uiText("在 Telegram 私訊你的 Bot，接續本機工作。")}
-                    </p>
-                  </div>
-                </div>
-                <div className="service-card telegram-status-card">
-                  <div className="service-card-main">
-                    <strong>
-                      {telegram?.username
-                        ? `@${telegram.username}`
-                        : "Telegram Bot"}
-                    </strong>
-                    <span
-                      className={`status-badge ${telegram?.ownerId ? "is-success" : telegram?.status === "error" ? "is-error" : ""}`}
-                    >
-                      {!telegram
-                        ? uiText("檢查中")
-                        : telegram.ownerId
-                          ? uiText("已配對")
-                          : !telegram.configured
-                            ? uiText("尚未設定")
-                            : telegram.status === "connected"
-                              ? uiText("等待配對")
-                              : telegram.status === "connecting"
-                                ? uiText("連線中")
-                                : telegram.status === "error"
-                                  ? uiText("連線失敗")
-                                  : uiText("已停用")}
-                    </span>
-                    <small>
-                      {!telegram
-                        ? uiText("正在讀取 Telegram 設定。")
-                        : telegram.ownerId
-                          ? uiText("你的 Telegram 帳號已綁定，可開始傳訊。")
-                          : !telegram.configured
-                            ? uiText("先儲存從 BotFather 取得的 token。")
-                            : telegram.status === "connected"
-                              ? uiText("Bot 已連線，請建立配對碼綁定你的帳號。")
-                              : telegram.status === "connecting"
-                                ? uiText("正在連線 Telegram，完成後即可配對。")
-                                : telegram.error ||
-                                  uiText("啟用 Bot 後即可配對。")}
-                    </small>
-                  </div>
-                </div>
-                {telegram && (
-                  <div className="setup-steps">
-                    <section className="setup-step">
-                      <div className="setup-step-heading">
-                        <span className="setup-step-number">1</span>
-                        <div>
-                          <h4>{uiText("連接你的 Bot")}</h4>
-                          <p>
-                            {uiText(
-                              "從 Telegram 的 @BotFather 取得 Bot token，儲存在這台電腦。",
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                      {telegram?.configured && !showTelegramTokenForm ? (
-                        <div className="setup-step-actions">
-                          <span className="setup-step-done">
-                            {uiText("Token 已儲存")}
-                          </span>
-                          {!telegram.enabled && (
-                            <button
-                              className="primary"
-                              disabled={busy}
-                              onClick={() =>
-                                void run(async () => {
-                                  setTelegram(
-                                    await api<TelegramView>(
-                                      "/api/channels/telegram",
-                                      "POST",
-                                      { enabled: true },
-                                    ),
-                                  );
-                                })
-                              }
-                            >
-                              {uiText("啟用 Bot")}
-                            </button>
-                          )}
-                          <button
-                            className="text-button"
-                            onClick={() => setShowTelegramTokenForm(true)}
-                          >
-                            {uiText("更換 token")}
-                          </button>
-                        </div>
-                      ) : (
-                        <form
-                          className="telegram-token-form"
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            const form = new FormData(e.currentTarget);
-                            void run(async () => {
-                              const next = await api<TelegramView>(
-                                "/api/channels/telegram",
-                                "POST",
-                                { token: form.get("token"), enabled: true },
-                              );
-                              setTelegram(next);
-                              setShowTelegramTokenForm(false);
-                              setPairingCommand("");
-                              setNotice(
-                                uiText("Token 已儲存，正在連線 Telegram。"),
-                              );
-                            });
-                          }}
-                        >
-                          <label>
-                            Bot token
-                            <input
-                              name="token"
-                              type="password"
-                              required
-                              autoComplete="off"
-                              placeholder={uiText("從 @BotFather 取得")}
-                            />
-                          </label>
-                          <div className="setup-step-actions">
-                            <button className="primary" disabled={busy}>
-                              {uiText("儲存並啟用")}
-                            </button>
-                            {telegram?.configured && (
-                              <button
-                                type="button"
-                                className="text-button"
-                                onClick={() => setShowTelegramTokenForm(false)}
-                              >
-                                {uiText("取消")}
-                              </button>
-                            )}
-                          </div>
-                        </form>
-                      )}
-                    </section>
-                    <section className="setup-step">
-                      <div className="setup-step-heading">
-                        <span className="setup-step-number">2</span>
-                        <div>
-                          <h4>{uiText("配對 Telegram 帳號")}</h4>
-                          <p>
-                            {uiText(
-                              "建立指令後，私訊你的 Bot 完成配對。指令有效 10 分鐘。",
-                            )}
-                          </p>
-                        </div>
-                      </div>
-                      {telegram?.ownerId ? (
-                        <p className="setup-step-done">
-                          {uiText("帳號已配對")}
-                        </p>
-                      ) : (
-                        <div className="setup-step-actions">
-                          <button
-                            className="secondary"
-                            disabled={busy || telegram?.status !== "connected"}
-                            onClick={() =>
-                              void run(async () => {
-                                const result = await api<{ command: string }>(
-                                  "/api/channels/telegram/pairing",
-                                  "POST",
-                                  {},
-                                );
-                                setPairingCommand(result.command);
-                              })
-                            }
-                          >
-                            {pairingCommand
-                              ? uiText("重新產生指令")
-                              : uiText("建立配對指令")}
-                          </button>
-                          {telegram?.status === "connecting" && (
-                            <span className="muted">
-                              {uiText("等待連線完成…")}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {pairingCommand && !telegram?.ownerId && (
-                        <div className="pairing-command" role="status">
-                          <span>{uiText("傳送給 Bot")}</span>
-                          <code>{pairingCommand}</code>
-                          <button
-                            className="secondary"
-                            onClick={() =>
-                              void navigator.clipboard
-                                .writeText(pairingCommand)
-                                .then(() =>
-                                  setNotice(uiText("配對指令已複製。")),
-                                )
-                                .catch(() =>
-                                  setNotice(
-                                    uiText(
-                                      "無法自動複製，請手動選取配對指令。",
-                                    ),
-                                  ),
-                                )
-                            }
-                          >
-                            {uiText("複製指令")}
-                          </button>
-                        </div>
-                      )}
-                    </section>
-                  </div>
-                )}
-                <p className="telegram-help muted">
-                  {uiText("配對後可用")}
-                  <code>/bots</code>
-                  {uiText("查看名單、")}
-                  <code>/bot ID</code> {uiText("選擇 Bot、")}
-                  <code>/stop</code>
-                  {uiText("停止工作。")}
-                </p>
-              </>
-            )}
-            {tab === "approvals" && (
-              <>
-                <h3>{uiText("自動核准規則")}</h3>
-                <p className="muted">
-                  {uiText(
-                    "記住的核准只適用於原任務及其派工。舊版永久核准保留供查閱，不再生效。",
-                  )}
-                </p>
-                {!rules.length && (
-                  <p className="empty-section">
-                    {uiText("尚未儲存自動核准規則。")}
-                  </p>
-                )}
-                {rules.map((r) => (
-                  <div className="rule" key={r.id}>
-                    <strong>{r.tool}</strong>
-                    <small>
-                      {uiText(
-                        r.legacy ? "舊版紀錄（不生效）" : "限原任務及其派工",
-                      )}
-                    </small>
-                    <pre>{JSON.stringify(r.args, null, 2)}</pre>
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        void run(async () => {
-                          await api(`/rules/${r.id}`, "DELETE");
-                          setRules((old) => old.filter((x) => x.id !== r.id));
-                        })
-                      }
-                    >
-                      {uiText("撤銷規則")}
-                    </button>
-                  </div>
-                ))}
-              </>
             )}
           </div>
         </div>

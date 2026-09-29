@@ -85,7 +85,7 @@ async function fixture(
         { id: "fixture-shell", scope: "global", tool: "shell", effect: "ask" },
       ],
     },
-    0,
+    app.product.settings.read().revision,
   );
   const parent = await app.product.create("Parent");
   const workers = await Promise.all(
@@ -197,7 +197,10 @@ for (const limit of [1, 2]) {
     await until(() => started.length === limit);
     await until(() => f.jobs().length === 5);
     // Existing root and its descendants retain the captured settings.
-    f.product.settings.update({ maxConcurrent: 4 }, 1);
+    f.product.settings.update(
+      { maxConcurrent: 4 },
+      f.product.settings.read().revision,
+    );
     for (let i = 0; i < 4; i++) {
       await until(() => started.includes(i));
       assert.ok(active <= limit);

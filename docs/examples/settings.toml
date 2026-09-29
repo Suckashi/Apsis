@@ -1,0 +1,26 @@
+# Apsis 一般設定；模型連線可在設定頁新增。
+version = 1
+
+[ui]
+locale = "zh-Hant"
+
+[runtime]
+maxTurns = 100
+taskTimeoutMs = 1800000 # 30 分鐘
+shellTimeoutSeconds = 60
+outputLimit = 24000 # 字元，不是 token
+maxDelegationDepth = 3
+maxDelegatedJobs = 12
+maxConcurrent = 4
+
+[permissions]
+approvalMode = "yolo"
+dangerousCommandGuard = true
+rules = []
+
+[defaults]
+model = "" # 未指定時沿用第一個可用連線
+
+[providers]
+
+[models]

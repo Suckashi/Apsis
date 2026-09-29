@@ -1,3 +1,4 @@
+import { SkillCatalog } from "./skills.ts";
 import type { StoreState } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import {
@@ -15,11 +16,13 @@ import { ConversationStore } from "./conversations.ts";
 
 export class Store {
   directory: string;
+  skills: SkillCatalog;
   file!: string;
   state!: StoreState;
   conversations!: ConversationStore;
   tail: Promise<unknown>;
-  constructor(directory: string) {
+  constructor(directory: string, globalSkillsDirectory?: string) {
+    this.skills = new SkillCatalog(directory, globalSkillsDirectory);
     this.directory = directory;
     this.tail = Promise.resolve();
   }
@@ -94,6 +97,28 @@ export class Store {
       await rename(temporary, this.file);
     }
     this.conversations.transaction(() => {
+      // Delivery receipts are separate from message status. A queued supplement
+      // cannot survive a process restart because its engine queue was in memory.
+      const unapplied = this.conversations.db
+        .prepare(
+          "SELECT session_id,context_id,value FROM messages WHERE channel='chat' AND json_extract(value,'$.delivery.kind')='steer' AND json_extract(value,'$.delivery.state')='pending'",
+        )
+        .all();
+      for (const row of unapplied) {
+        const message = JSON.parse(String(row.value));
+        this.conversations.append(
+          String(row.session_id),
+          {
+            ...message,
+            delivery: {
+              kind: "steer",
+              state: "not-applied",
+              updatedAt: new Date().toISOString(),
+            },
+          },
+          String(row.context_id),
+        );
+      }
       const pending = this.conversations.db
         .prepare(
           "SELECT session_id,context_id,value FROM messages WHERE channel='chat' AND json_extract(value,'$.status')='pending'",
@@ -131,7 +156,17 @@ export class Store {
         );
     });
     this.state.sessions = this.conversations.cachedSessions();
+    this.skills.migrate(this.state.skills);
     return this;
+  }
+  skillState(): StoreState {
+    return {
+      ...this.state,
+      skills: [
+        ...this.skills.list(),
+        ...this.state.skills.filter((s) => !!s.agentId),
+      ],
+    };
   }
   async mutate<T>(fn: (state: StoreState) => T): Promise<T> {
     const operation = this.tail.then(async () => {

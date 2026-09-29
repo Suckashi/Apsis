@@ -58,7 +58,7 @@ the same context and do not apply to a new task or an independent scheduled run.
 Dangerous and unanalyzable-command guard requests cannot be remembered.
 
 Legacy permanent approvals remain visible as inactive history. Current grants
-and legacy records can be removed in Auto approvals. Approval receipts bind the
+and legacy records can be removed in Settings → Execution & language → Advanced permissions → Remembered approvals. Revocation is immediate and does not save other settings drafts. Approval receipts bind the
 arguments and permission state; changed settings, revoked grants or changed
 ancestor rules are checked again after waiting and immediately before execution.
 Arguments are copied before async authorization so callers cannot substitute a

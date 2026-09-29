@@ -66,12 +66,14 @@ test("Codex connections remain readable but cannot be created, tested, or select
   const { app, base } = await fixture(t);
   const id = randomUUID();
   // Model the persisted legacy row without enabling a new Codex connection.
-  app.connections.rows.push({
-    id,
-    name: "Legacy Codex",
-    provider: "codex",
-    model: "legacy-model",
-  });
+  await app.connections.mutate((rows) =>
+    rows.push({
+      id,
+      name: "Legacy Codex",
+      provider: "codex",
+      model: "legacy-model",
+    }),
+  );
   const listed = await fetch(base + "/api/connections");
   assert.equal(listed.status, 200);
   assert.ok((await listed.json()).some((row: { id: string }) => row.id === id));

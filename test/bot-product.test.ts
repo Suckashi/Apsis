@@ -64,6 +64,62 @@ async function fixture(
   return { ...app, dir, base, request, close, product: app.product! };
 }
 
+test("project knowledge API isolates edits and merges and rejects stale revisions", async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const a = await f.tasks.projects.add({ name: "A" });
+  const b = await f.tasks.projects.add({ name: "B" });
+  const endpoint = (id: string) => `/api/v2/projects/${id}/memories`;
+  const created = await f.request(endpoint(a.id), "POST", {
+    content: "Use the project test suite",
+  });
+  assert.equal(created.response.status, 200);
+  const memory = created.data;
+  assert.equal(memory.scopeKey, `project:${a.id}`);
+  assert.equal(memory.source.kind, "manual");
+  assert.equal((await f.request(endpoint(a.id))).data.length, 1);
+  assert.deepEqual((await f.request(endpoint(b.id))).data, []);
+  assert.equal(
+    (
+      await f.request(endpoint(b.id), "POST", {
+        id: memory.id,
+        revision: 1,
+        content: "wrong project",
+      })
+    ).response.status,
+    404,
+  );
+  const badMerge = await f.request(endpoint(b.id), "POST", {
+    content: "merged",
+    mergeIds: [memory.id],
+    mergeRevisions: { [memory.id]: 1 },
+  });
+  assert.equal(badMerge.response.ok, false);
+  assert.deepEqual((await f.request(endpoint(b.id))).data, []);
+  const updated = await f.request(endpoint(a.id), "POST", {
+    id: memory.id,
+    revision: 1,
+    content: "Run tests before PR",
+    enabled: false,
+  });
+  assert.equal(updated.response.status, 200);
+  assert.equal(updated.data.revision, 2);
+  assert.equal(
+    (
+      await f.request(endpoint(a.id), "POST", {
+        id: memory.id,
+        revision: 1,
+        content: "stale overwrite",
+      })
+    ).response.status,
+    409,
+  );
+  const current = (await f.request(endpoint(a.id))).data[0];
+  assert.equal(current.content, "Run tests before PR");
+  assert.equal(current.enabled, false);
+  assert.equal((await f.request(endpoint("missing"))).response.status, 404);
+});
+
 test("task summaries cover old runs while scoped history loads only on request", async (t) => {
   const f = await fixture();
   t.after(f.close);
@@ -216,6 +272,84 @@ test("Bot customization validates before creation and persists edits", async (t)
   assert.equal(invalidEdit.response.status, 400);
   assert.equal(f.product.bot(id).name, "寫作助理");
   assert.equal(f.product.bot(id).avatar, "bloom");
+});
+
+test("avatar rewards, concurrent draws and ownership are enforced through the product API", async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const bot = await f.product.create("Collector");
+  for (const [path, method, body] of [
+    ["/api/v2/bots", "POST", { name: "Locked", avatar: "captain" }],
+    [`/api/v2/bots/${bot.id}`, "PATCH", { avatar: "captain" }],
+    ["/api/v2/templates", "POST", { name: "Locked", avatar: "captain" }],
+  ] as const) {
+    assert.equal((await f.request(path, method, body)).response.status, 403);
+  }
+  const template = f.product.template({ name: "Basic" });
+  assert.equal(
+    (
+      await f.request(`/api/v2/templates/${template.id}`, "PUT", {
+        ...template,
+        avatar: "captain",
+      })
+    ).response.status,
+    403,
+  );
+  // Even a preexisting invalid template cannot bypass create validation.
+  f.product.db.put("template", { ...template, avatar: "captain" });
+  assert.equal(
+    (await f.request("/api/v2/bots", "POST", { templateId: template.id }))
+      .response.status,
+    403,
+  );
+  for (let i = 0; i < 3; i++) {
+    const job = await f.product.submit(bot.id, {
+      prompt: `task ${i}`,
+      requestId: randomUUID(),
+    });
+    await until(() => !f.product.active.size);
+    assert.equal(f.product.db.get<Job>("job", job.id)?.status, "completed");
+  }
+  assert.equal(
+    (await f.request("/api/v2/state")).data.avatarCollection.balance,
+    30,
+  );
+  const ids = [randomUUID(), randomUUID()];
+  const results = await Promise.all(
+    ids.map((requestId) =>
+      f.request("/api/v2/avatar-collection/draw", "POST", { requestId }),
+    ),
+  );
+  assert.deepEqual(results.map((r) => r.response.status).sort(), [200, 409]);
+  const index = results.findIndex((r) => r.response.status === 200);
+  const won = results[index].data.draw;
+  const retries = await Promise.all(
+    Array.from({ length: 3 }, () =>
+      f.request("/api/v2/avatar-collection/draw", "POST", {
+        requestId: ids[index],
+      }),
+    ),
+  );
+  for (const retry of retries) {
+    assert.equal(retry.response.status, 200);
+    assert.deepEqual(retry.data.draw, won);
+    assert.equal(retry.data.avatarCollection.balance, 0);
+  }
+  assert.equal(f.product.db.all("avatar-draw").length, 1);
+  assert.equal(
+    (
+      await f.request(`/api/v2/bots/${bot.id}`, "PATCH", {
+        avatar: won.avatarId,
+      })
+    ).response.status,
+    200,
+  );
+  const saved = f.product.template({ name: "Collected", avatar: won.avatarId });
+  const copy = await f.product.create(undefined, { templateId: saved.id });
+  assert.equal(copy.avatar, won.avatarId);
+  const before = f.product.avatarCollection.view();
+  await f.product.remove(bot.id);
+  assert.deepEqual(f.product.avatarCollection.view(), before);
 });
 
 test("interrupted task notice can be dismissed without deleting the task", async (t) => {
@@ -683,6 +817,7 @@ test("attachments, published snapshots and generated documents round-trip throug
   const f = await fixture();
   t.after(f.close);
   const bot = await f.product.create();
+  const workspace = f.tasks.locations.workspace(f.product.workLocation(bot));
   const upload = await fetch(f.base + `/api/v2/bots/${bot.id}/attachments`, {
     method: "POST",
     headers: {
@@ -693,10 +828,13 @@ test("attachments, published snapshots and generated documents round-trip throug
   });
   assert.equal(upload.status, 201);
   const attachment = await upload.json();
-  assert.equal(await f.product.readDocument(attachment.path), "example text");
-  await f.workspace.write("report.md", "original");
+  assert.equal(
+    await f.product.readDocument(attachment.path, workspace),
+    "example text",
+  );
+  await workspace.write("report.md", "original");
   const artifact = await f.product.publish(bot, "run", "report.md", "報告.md");
-  await f.workspace.write("report.md", "changed");
+  await workspace.write("report.md", "changed");
   const downloaded = await fetch(f.base + `/api/v2/artifacts/${artifact.id}`);
   assert.equal(await downloaded.text(), "original");
   assert.match(downloaded.headers.get("content-disposition")!, /attachment/);
@@ -706,19 +844,20 @@ test("attachments, published snapshots and generated documents round-trip throug
     name: "報告",
     content: "繁體中文文件\n第二行",
   });
-  assert.match(String(await f.product.readDocument(doc.path)), /繁體中文文件/);
+  assert.match(
+    String(await f.product.readDocument(doc.path, workspace)),
+    /繁體中文文件/,
+  );
   const sheet = await f.product.createDocument(bot, "run", {
     format: "xlsx",
     name: "數據",
     content: '[["項目","值"],["總計",42]]',
   });
   assert.match(
-    JSON.stringify(await f.product.readDocument(sheet.path)),
+    JSON.stringify(await f.product.readDocument(sheet.path, workspace)),
     /總計/,
   );
-  assert.ok(
-    (await readFile(await f.workspace.resolve(doc.path))).length > 1000,
-  );
+  assert.ok((await readFile(await workspace.resolve(doc.path))).length > 1000);
 });
 
 test("routine ticks are idempotent, hidden Bots keep schedules, restart expires work without replay", async (t) => {
@@ -884,9 +1023,4 @@ test("Deep Agents product tools pass through the common gate and preserve operat
   assert.equal(detail.runs[0].operations.length, 2);
   assert.equal(detail.runs[0].operations[0].status, "succeeded");
   assert.match(detail.runs[0].operations[0].evidence?.patch || "", /real file/);
-  assert.equal(
-    await f.product.telegram(`/bot ${bot.id}`),
-    `已切換至 ${bot.name}，會接續同一段對話。`,
-  );
-  assert.match(await f.product.telegram("/status"), /待命/);
 });

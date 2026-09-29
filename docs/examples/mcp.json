@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "example": {
+      "url": "https://mcp.example.com/mcp",
+      "bearerTokenEnvVar": "MY_MCP_TOKEN",
+      "enabled": false,
+      "startupTimeoutMs": 15000,
+      "toolTimeoutMs": 60000
+    }
+  },
+  "x-apsis": {
+    "version": 1,
+    "serverNames": {
+      "example": "範例工具（請替換網址後啟用）"
+    }
+  }
+}

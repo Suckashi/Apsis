@@ -215,6 +215,52 @@ test("authenticated remote requests reach the Bot workspace and keep CSRF checks
     headers: { Cookie: cookie },
   });
   assert.equal(state.status, 200);
+  const location = app.product.workLocation(
+    await app.product.create("Preview Bot"),
+  );
+  await app.product.files.save(
+    location.id,
+    "index.html",
+    "<h1>Shared preview</h1>",
+    null,
+  );
+  await app.product.files.save(
+    location.id,
+    "style.css",
+    "h1 { color: red }",
+    null,
+  );
+  const content = await call(
+    port,
+    `/api/v2/work-locations/${location.id}/content?path=index.html`,
+    { headers: { Cookie: cookie } },
+  );
+  const previewUrl = JSON.parse(content.body).previewUrl;
+  const asset = previewUrl.replace(/index\.html$/, "style.css");
+  const opaque = { Origin: "null", "Sec-Fetch-Site": "cross-site" };
+  assert.equal((await call(port, asset, { headers: opaque })).status, 401);
+  const preview = await call(port, previewUrl, { headers: { Cookie: cookie } });
+  assert.equal(preview.status, 200);
+  assert.ok(
+    preview.headers["content-security-policy"]?.includes(
+      origin + "/api/v2/work-locations/",
+    ),
+  );
+  assert.ok(!preview.headers["content-security-policy"]?.includes("127.0.0.1"));
+  assert.equal(preview.headers["referrer-policy"], "no-referrer");
+  const style = await call(port, asset, { headers: opaque });
+  assert.equal(style.status, 200);
+  assert.equal(style.headers["access-control-allow-origin"], "null");
+  assert.equal(style.body, "h1 { color: red }");
+  assert.equal(
+    (await call(port, "/api/v2/state", { headers: opaque })).status,
+    403,
+  );
+  assert.equal(
+    (await call(port, asset, { headers: { Origin: "https://evil.example" } }))
+      .status,
+    403,
+  );
   assert.ok(
     JSON.parse(state.body).bots.some(
       (item: { id: string }) => item.id === bot.id,
@@ -228,6 +274,11 @@ test("authenticated remote requests reach the Bot workspace and keep CSRF checks
     ).status,
     401,
   );
+  await call(port, "/__share/logout", {
+    method: "POST",
+    headers: { Cookie: cookie, Origin: origin },
+  });
+  assert.equal((await call(port, asset, { headers: opaque })).status, 401);
 });
 
 test("repeated failed logins are limited and do not reach the workspace", async (t) => {

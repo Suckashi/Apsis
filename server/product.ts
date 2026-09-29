@@ -1,9 +1,21 @@
-import { changeMemory } from "./memory.ts";
+import { visibleMemory, memoryOwner, changeMemory } from "./memory.ts";
 import { contextBudget } from "./context-budget.ts";
 import { randomUUID, createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readFile, writeFile, stat, copyFile } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { readFile, writeFile, stat, copyFile, mkdir } from "node:fs/promises";
+import {
+  basename,
+  extname,
+  join,
+  resolve,
+  relative,
+  isAbsolute,
+  sep,
+} from "node:path";
+import { createReadStream } from "node:fs";
+import { FileManager, fileRevision } from "./file-manager.ts";
+import { HtmlPreview } from "./html-preview.ts";
+import { Workspace } from "./workspace.ts";
 import { Type } from "typebox";
 import { Cron } from "croner";
 import type { TaskService } from "./tasks.ts";
@@ -18,24 +30,46 @@ import type {
   Draft,
   BotTemplate,
 } from "../shared/product.ts";
-import type { AgentDefinition, Session } from "../shared/types.ts";
-import type { AgentTool } from "./tools.ts";
+import type {
+  AgentDefinition,
+  Session,
+  WorkLocation,
+  ChatMessage,
+} from "../shared/types.ts";
+import { ToolAuthorizationError, type AgentTool } from "./tools.ts";
 import { agentTools } from "../shared/agents.ts";
 import { ProductDB } from "./product-db.ts";
 import { BotBrowser, browserExecutable } from "./bot-browser.ts";
 import { withConnector } from "./bot-connectors.ts";
-import { isBotAvatar } from "../shared/bot-avatars.ts";
+import { McpConfig } from "./mcp-config.ts";
+import { AvatarCollectionService } from "./avatar-collection.ts";
 import { taskPresentation } from "./task-progress.ts";
 import { SettingsService, validatePermissionRules } from "./settings.ts";
 import { evaluatePolicy, type PolicyDecision } from "./policy.ts";
 import { filePolicyContext } from "./policy-paths.ts";
-import type { AuthorizationReceipt } from "./runtime.ts";
+import type { AuthorizationReceipt, SteerHandler } from "./runtime.ts";
 import type { Settings, PermissionRule } from "../shared/settings.ts";
 import { RunSlots } from "./run-slots.ts";
+import { CodingTasks } from "./coding-tasks.ts";
+import { repositoryInfo } from "./git-workspaces.ts";
+import { verifyWeb, verificationStale } from "./coding-verification.ts";
+import type { WebVerification } from "../shared/coding-verification.ts";
 
 const now = () => new Date().toISOString();
 const fail = (text: string, status = 400): never => {
   throw Object.assign(new Error(text), { status });
+};
+const denyOperation = (policy: PolicyDecision): never => {
+  throw new ToolAuthorizationError(
+    policy.reason === "invalid-path"
+      ? "工作區路徑無效。path 必須使用工作區內的相對路徑，例如 index.html 或 snake/index.html；不可使用磁碟代號、絕對路徑或 '..'。請修正 path 後重試。"
+      : "這項操作被權限規則拒絕。請改用允許的操作，或請使用者調整相關權限。",
+    {
+      reason: policy.reason,
+      dangerousCommand: policy.dangerousCommand,
+      matchedRuleIds: policy.matchedRuleIds,
+    },
+  );
 };
 const string = (value: unknown, max = 16000) =>
   typeof value === "string" && value.trim() && value.length <= max
@@ -78,31 +112,215 @@ function makeTool(
   };
 }
 
+async function hasStaticWebPage(root: string) {
+  const workspace = new Workspace(root);
+  const directories = [""];
+  let scanned = 0;
+  while (directories.length && scanned < 300) {
+    const path = directories.shift()!;
+    for (const file of await workspace.list(path).catch(() => [])) {
+      if (++scanned > 300) return false;
+      if (file.type === "file" && /\.html?$/i.test(file.name)) return true;
+      if (
+        file.type === "directory" &&
+        !["node_modules", ".next", ".venv", "vendor"].includes(file.name) &&
+        path.split("/").length < 4
+      )
+        directories.push([path, file.name].filter(Boolean).join("/"));
+    }
+  }
+  return false;
+}
+
 export class ProductService {
+  coding = new CodingTasks(this);
   db = new ProductDB();
-  settings = new SettingsService(this.db);
+  avatarCollection = new AvatarCollectionService(this.db);
+  settings: SettingsService;
+  connectors: McpConfig;
   jobSettings = new Map<string, Settings>();
   slots = new RunSlots();
   jobControllers = new Map<string, AbortController>();
   tasks: TaskService;
   connections: Connections;
   browser: BotBrowser;
+  files: FileManager;
+  htmlPreview = new HtmlPreview();
   subscribers = new Set<ServerResponse>();
   active = new Set<string>();
   deleting = new Set<string>();
   cancelledDelegations = new Set<string>();
-  steers = new Map<string, (text: string) => Promise<void>>();
+  steers = new Map<string, SteerHandler>();
+  private steeringRequests = new Map<
+    string,
+    { prompt: string; request: Promise<ChatMessage> }
+  >();
   pending = new Map<string, (approved: boolean) => void>();
   timer?: ReturnType<typeof setInterval>;
   closed = false;
-  notifyOwner?: (text: string) => Promise<void>;
+  private bootstrapPromise?: Promise<void>;
+  bootstrap() {
+    if (!this.bootstrapPromise)
+      this.bootstrapPromise = (async () => {
+        if (!this.db.get("migration", "bot-first-v1")) {
+          if (!this.db.all<Bot>("bot").length)
+            await this.create("Apsis", { description: "你的研發夥伴" });
+          this.db.put("migration", { id: "bot-first-v1", completedAt: now() });
+        }
+      })().catch((error) => {
+        this.bootstrapPromise = undefined;
+        throw error;
+      });
+    return this.bootstrapPromise;
+  }
   constructor(tasks: TaskService, connections: Connections) {
     this.tasks = tasks;
     this.connections = connections;
+    this.settings = new SettingsService(connections.config);
+    this.connectors = new McpConfig(tasks.store.directory);
     this.browser = new BotBrowser(tasks.store.directory);
+    this.files = new FileManager(
+      tasks.locations,
+      this.db,
+      tasks.store.directory,
+      (location) => this.locationBusy(location),
+    );
+  }
+  locationBusy(location: WorkLocation) {
+    const overlaps = (path: string) => {
+      const inside = (a: string, b: string) => {
+        const r = relative(a, b);
+        return (
+          r === "" ||
+          (!r.startsWith(".." + sep) && r !== ".." && !isAbsolute(r))
+        );
+      };
+      return inside(location.path, path) || inside(path, location.path);
+    };
+    return this.db
+      .all<Job>("job")
+      .some(
+        (j) =>
+          j.status === "running" && j.location && overlaps(j.location.path),
+      );
+  }
+  workLocation(bot: Bot, runId?: string) {
+    if (runId) {
+      const run = this.tasks.runs.records.get(runId);
+      if (run?.location) return run.location;
+      const job = this.db
+        .all<Job>("job")
+        .find((j) => j.botId === bot.id && j.runId === runId);
+      if (job?.location) return job.location;
+    }
+    return this.tasks.locations.ensure(bot.sessionId);
+  }
+  async migrateWorkLocations() {
+    if (this.db.get("migration", "task-locations-v1")) return;
+    const directory = resolve(
+      this.tasks.store.directory,
+      "backups",
+      "task-locations-v1",
+    );
+    await mkdir(directory, { recursive: true });
+    for (const [name, database] of [
+      ["product", this.db.db],
+      ["conversations", this.tasks.store.conversations.db],
+    ] as const) {
+      const file = join(directory, name + ".sqlite");
+      if (!(await stat(file).catch(() => undefined)))
+        database.prepare("VACUUM INTO ?").run(file);
+    }
+    await copyFile(
+      this.tasks.store.file,
+      join(directory, "state.json"),
+      1,
+    ).catch((e: NodeJS.ErrnoException) => {
+      if (e.code !== "EEXIST" && e.code !== "ENOENT") throw e;
+    });
+    const history = this.tasks.store.conversations;
+    for (const row of history.db
+      .prepare("SELECT session_id,value FROM contexts")
+      .all()) {
+      const context = JSON.parse(String(row.value));
+      if (context.location) continue;
+      const project =
+        history.metadata(String(row.session_id)).project ||
+        this.tasks.projects.get();
+      const location: WorkLocation = {
+        id: `legacy-${project.id}`,
+        name: "既有工作",
+        path: project.path,
+        kind: "legacy",
+        projectId: project.id === "workspace" ? undefined : project.id,
+        memoryKey: "legacy",
+      };
+      history.updateContext(String(row.session_id), context.id, {
+        location,
+        locationLockedAt: context.createdAt,
+      });
+    }
+    await this.tasks.store.mutate((state) => {
+      for (const memory of state.memories) memory.scopeKey ??= "legacy";
+    });
+    for (const kind of ["job", "routine"] as const)
+      for (const record of this.db.all<Job | Routine>(kind)) {
+        const bot = this.db.get<Bot>("bot", record.botId);
+        if (!record.location && bot && !bot.deletedAt) {
+          const contextId =
+            "workContextId" in record ? record.workContextId : undefined;
+          record.location = this.tasks.locations.ensure(
+            bot.sessionId,
+            contextId,
+          );
+          this.db.put(kind, record);
+        }
+      }
+    for (const artifact of this.db.all<Artifact>("artifact")) {
+      if (artifact.snapshotPath) continue;
+      try {
+        const source = await this.tasks.workspace.resolve(artifact.path);
+        const snapshotPath = `legacy-${createHash("sha256").update(artifact.id).digest("hex").slice(0, 24)}/${basename(artifact.path)}`;
+        const archive = new Workspace(
+          join(this.tasks.store.directory, "artifacts"),
+          true,
+        );
+        await copyFile(
+          source,
+          await archive.resolve(snapshotPath, true),
+          1,
+        ).catch((e: NodeJS.ErrnoException) => {
+          if (e.code !== "EEXIST") throw e;
+        });
+        const bot = this.db.get<Bot>("bot", artifact.botId);
+        const job = this.db
+          .all<Job>("job")
+          .find((j) => j.runId && j.runId === artifact.runId);
+        this.db.put("artifact", {
+          ...artifact,
+          snapshotPath,
+          workContextId: artifact.workContextId || job?.workContextId,
+          location:
+            artifact.location ||
+            job?.location ||
+            (bot && !bot.deletedAt
+              ? this.tasks.locations.ensure(bot.sessionId)
+              : undefined),
+        });
+      } catch (e) {
+        // Missing legacy files remain represented by their original records for diagnosis.
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      }
+    }
+    this.db.put("migration", { id: "task-locations-v1", completedAt: now() });
   }
   async init() {
     await this.db.init(this.tasks.store.directory);
+    this.connections.attachDB(this.db);
+    this.connectors.init(this.tasks.store.directory);
+    this.avatarCollection.init();
+    await this.migrateWorkLocations();
+    await this.files.recover();
     // Compatibility migration: never silently move a Codex Bot to a paid API.
     const legacyDefault =
       this.connections.rows.find(
@@ -128,11 +346,12 @@ export class ProductService {
             ?.provider === "codex"
         : legacyDefault || legacyImplicitDefault;
       if (legacy) bot.needsModelSelection = true;
-      bot.skillIds ??= this.tasks.store.state.skills
-        .filter((s) => !s.agentId)
+      bot.skillIds ??= this.tasks.store
+        .skillState()
+        .skills.filter((s) => !s.agentId)
         .map((s) => s.id);
-      bot.connectorIds ??= this.db
-        .all<Connector>("connector")
+      bot.connectorIds ??= this.connectors
+        .all()
         .filter((c) => c.enabled)
         .map((c) => c.id);
       bot.permissionMode ??= "workspace";
@@ -165,6 +384,12 @@ export class ProductService {
           contextKind: "chat",
         });
     }
+    for (const task of this.coding.list())
+      if (["working", "planning", "queued"].includes(task.phase)) {
+        task.phase = "blocked";
+        task.error = "服務已重新啟動，請確認執行紀錄後在此任務接續。";
+        this.coding.save(task);
+      }
     for (const run of this.tasks.runs.records.values()) {
       if (
         !run.workContextId &&
@@ -204,7 +429,8 @@ export class ProductService {
         .all<Job>("job")
         .some(
           (j) =>
-            this.db.get<Bot>("bot", j.botId)?.sessionId === sessionId &&
+            (j.executionSessionId ||
+              this.db.get<Bot>("bot", j.botId)?.sessionId) === sessionId &&
             this.slots.isSuspended(j.id),
         ) ||
       this.db
@@ -212,25 +438,66 @@ export class ProductService {
         .some(
           (a) =>
             a.status === "pending" &&
-            this.db.get<Bot>("bot", a.botId)?.sessionId === sessionId,
+            (this.tasks.runs.records.get(a.runId)?.sessionId ||
+              this.db.get<Bot>("bot", a.botId)?.sessionId) === sessionId,
         );
     this.tasks.extensions = (session, runId) => {
-      const bot = this.db
-        .all<Bot>("bot")
-        .find((b) => b.sessionId === session.id);
-      if (!bot) return {};
-      const job = this.db
+      const executionJob = this.db
         .all<Job>("job")
-        .find((j) => j.botId === bot.id && j.status === "running");
+        .find(
+          (j) => j.executionSessionId === session.id && j.status === "running",
+        );
+      const bot = executionJob
+        ? this.bot(executionJob.botId)
+        : this.db.all<Bot>("bot").find((b) => b.sessionId === session.id);
+      if (!bot) return {};
+      const job =
+        executionJob ||
+        this.db
+          .all<Job>("job")
+          .find(
+            (j) =>
+              j.botId === bot.id &&
+              j.status === "running" &&
+              (j.executionSessionId || bot.sessionId) === session.id,
+          );
       const quoted = job?.replyTo
         ? this.tasks.store.conversations.message(session.id, job.replyTo)
         : undefined;
       const settings =
         (job && this.jobSettings.get(job.id)) || this.settings.read();
       return {
-        executionContext: quoted
-          ? `The user is replying to this earlier message: ${JSON.stringify(quoted.content)}`
-          : undefined,
+        executionContext: [
+          job?.taskId
+            ? (() => {
+                const t = this.coding.get(job.taskId!);
+                return t.mode === "plan"
+                  ? "PLAN MODE: research using read tools only. Do not execute shell, modify code, delegate or perform external actions. Return the complete proposed implementation plan as Markdown for the user to edit and approve."
+                  : [
+                      `Task: ${t.title}. Complete only the user's requested scope and verify the result.`,
+                      "Pushing commits, creating or updating a pull request, and remote publication or deployment require the user's explicit authorization for this task and must remain within its current scope. Earlier authorization remains valid unless the user narrows or revokes it. Passing tests, available tools or credentials, repository defaults, and Skills do not grant publication authorization.",
+                      "For local-only work, finish after local implementation and verification: report the local changes and actual check results, then stop. Do not push, create a PR, publish remotely or deploy. A remote workflow is not a required completion step.",
+                      "For static HTML/JS interfaces, call verify_web with real fill/click/press actions and expect_text/expect_value assertions for the user's main workflow and important edge cases after the last edit. Unit tests do not verify browser behavior. The tool opens an isolated local browser; it does not need an external browser connection. Read files to find exact selectors. If a check fails, fix its cause and rerun. Never claim browser verification when no current passing receipt exists. For server-based apps, use the browser/testing tools available and report any unverified workflow explicitly.",
+                      t.git
+                        ? `Work only in this task worktree. Starting commit ${t.git.baseCommit}. Only if the user authorized a PR workflow, its default target is ${t.git.target}; use available shell/provider tools and applicable Skills within that authorization. After creating an authorized PR with authenticated provider tools, call track_pull_request with its returned HTTPS URL to enable CI and review follow-up in this task. Never claim a PR exists without a returned URL. Formal approval/merge remains with the user.`
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join("\n");
+              })()
+            : "For a new implementation assignment, use create_coding_task to allocate an independent task. Use list_projects to find the repository. For an ambiguous follow-up ask which task to continue. Ordinary discussion does not create a task.",
+          quoted
+            ? `The user is replying to this earlier message: ${JSON.stringify(quoted.content)}`
+            : "",
+          job?.fileReferences?.length
+            ? `User referenced files (relative to this task): ${JSON.stringify(job.fileReferences)}`
+            : "",
+          job?.location?.projectId
+            ? `Project background (reference data): ${JSON.stringify(this.tasks.projects.get(job.location.projectId).description || "")}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
         maxTurns: settings.maxTurns,
         runtimeSettings: settings,
         modelSettings: this.connections
@@ -248,8 +515,8 @@ export class ProductService {
               this.permissionFingerprint(bot.id, runId, name, args)
           )
             return this.authorize(bot.id, runId, name, args, signal);
-          if (this.policy(bot.id, runId, name, args).effect === "deny")
-            fail("權限已變更，這項操作已被拒絕。", 403);
+          const policy = this.policy(bot.id, runId, name, args);
+          if (policy.effect === "deny") denyOperation(policy);
         },
         executeAuthorizedTool: <T>(
           name: string,
@@ -260,19 +527,43 @@ export class ProductService {
             ? this.slots.withWork(job.id, operation, signal)
             : operation(),
         registerSteer: (steer) => {
-          this.steers.set(bot.id, steer);
+          this.steers.set(job?.taskId || bot.id, async (text, onApplied) => {
+            const live = this.tasks.running.get(session.id);
+            if (!live || live.runId !== runId || live.controller.signal.aborted)
+              fail("目前回合已結束，補充指示尚未採用。", 409);
+            await steer(text, onApplied);
+          });
         },
       };
     };
     this.timer = setInterval(() => {
       void this.tick().catch(console.error);
+      void this.coding.checkPullRequests().catch(console.error);
       for (const res of this.subscribers) res.write(": heartbeat\n\n");
     }, 15000);
     this.timer.unref();
     return this;
   }
-  notify(botId?: string) {
-    const data = { botId, at: now() };
+  notify(botId?: string, jobId?: string) {
+    const bot = botId ? this.db.get<Bot>("bot", botId) : undefined;
+    const liveRunId = bot && this.tasks.running.get(bot.sessionId)?.runId;
+    const job = jobId
+      ? this.db.get<Job>("job", jobId)
+      : liveRunId
+        ? this.db.all<Job>("job").find((j) => j.runId === liveRunId)
+        : undefined;
+    const data = {
+      botId,
+      at: now(),
+      jobId: job?.id,
+      runId: job?.runId,
+      workContextId:
+        job?.workContextId ||
+        (bot && !bot.deletedAt
+          ? this.tasks.store.conversations.activeId(bot.sessionId)
+          : undefined),
+      locationId: job?.location?.id,
+    };
     const id = this.db.event(data);
     for (const res of this.subscribers)
       res.write(`id: ${id}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -303,14 +594,14 @@ export class ProductService {
         ids.some((id) => typeof id !== "string")
       )
         fail("技能或連接器清單格式錯誤。");
-      const available =
-        key === "skillIds"
-          ? this.tasks.store.state.skills
-              .filter((s) => !s.agentId)
-              .map((s) => s.id)
-          : this.db.all<Connector>("connector").map((c) => c.id);
-      if ((ids as string[]).some((id) => !available.includes(id)))
-        fail("技能或連接器已不存在，請重新選擇。");
+      // Legacy skillIds remain readable but no longer restrict shared skills.
+      if (
+        key === "connectorIds" &&
+        (ids as string[]).some(
+          (id) => !this.connectors.all().some((c) => c.id === id),
+        )
+      )
+        fail("連接器已不存在，請重新選擇。");
       value[key] = [...new Set(ids as string[])];
     }
     if (input.permissionMode !== undefined) {
@@ -340,9 +631,7 @@ export class ProductService {
       avatar:
         input.avatar === undefined
           ? "orbit"
-          : isBotAvatar(input.avatar)
-            ? input.avatar
-            : fail("請選擇有效的 Bot 圖示。"),
+          : this.avatarCollection.requireOwned(input.avatar),
       ...selection,
       skillIds: preferences.skillIds || [],
       connectorIds: preferences.connectorIds || [],
@@ -354,6 +643,14 @@ export class ProductService {
     return template;
   }
   async removeBotData(bot: Bot) {
+    const ownedTasks = this.db
+      .all<import("../shared/coding.ts").CodingTask>("coding-task")
+      .filter((t) => t.botId === bot.id);
+    const ownedSessions = ownedTasks.map((t) => t.sessionId);
+    const taskIds = new Set(ownedTasks.map((t) => t.id));
+    for (const receipt of this.db.all<WebVerification>("web-verification"))
+      if (taskIds.has(receipt.taskId))
+        this.db.remove("web-verification", receipt.id);
     // The tombstone keeps partially completed deletions hidden across restarts.
     for (const kind of [
       "job",
@@ -364,11 +661,14 @@ export class ProductService {
       "draft",
       "artifact",
       "preferences",
+      "coding-task",
     ])
       for (const row of this.db.all<{ id: string; botId?: string }>(kind))
         if (row.botId === bot.id) this.db.remove(kind, row.id);
     await this.tasks.store.mutate((state) => {
-      state.sessions = state.sessions.filter((s) => s.id !== bot.sessionId);
+      state.sessions = state.sessions.filter(
+        (s) => s.id !== bot.sessionId && !ownedSessions.includes(s.id),
+      );
       state.agents = state.agents?.filter((a) => a.id !== bot.id);
       state.memories = state.memories.filter((m) => m.agentId !== bot.id);
       state.skills = state.skills.filter((s) => s.agentId !== bot.id);
@@ -390,7 +690,13 @@ export class ProductService {
           this.db.put("job", { ...job, status: "cancelled" });
       const deadline = Date.now() + 10000;
       // A drain may still be preparing a run, so stop again until it settles.
-      while (this.active.has(id) || this.tasks.running.has(bot.sessionId)) {
+      while (
+        this.active.has(id) ||
+        this.tasks.running.has(bot.sessionId) ||
+        this.coding
+          .list()
+          .some((t) => t.botId === id && this.active.has(t.sessionId))
+      ) {
         for (const job of this.db.all<Job>("job"))
           if (job.botId === id) this.jobControllers.get(job.id)?.abort();
         this.tasks.stop(bot.sessionId);
@@ -413,6 +719,9 @@ export class ProductService {
     const allJobs = this.db.all<Job>("job");
     const approvals = this.db.all<Approval>("approval");
     return {
+      codingTasks: this.coding.list(),
+      projects: this.tasks.projects.list().filter((p) => p.id !== "workspace"),
+      avatarCollection: this.avatarCollection.view(),
       bots: this.db
         .all<Bot>("bot")
         .filter((b) => !b.deletedAt)
@@ -424,9 +733,16 @@ export class ProductService {
           );
           return {
             ...bot,
+            chatRunning:
+              session.running ||
+              jobs.some(
+                (j) => !j.taskId && ["running", "queued"].includes(j.status),
+              ),
             status: approval
               ? "waiting"
-              : session.running || this.active.has(bot.id)
+              : session.running ||
+                  this.active.has(bot.id) ||
+                  jobs.some((j) => ["running", "queued"].includes(j.status))
                 ? "working"
                 : jobs.at(-1)?.status === "failed"
                   ? "error"
@@ -443,10 +759,9 @@ export class ProductService {
         }),
       connections: this.connections.view(),
       defaultModel: this.connections.defaultSelection(),
-      connectors: this.db
-        .all<Connector>("connector")
-        .map(({ token, ...c }) => ({ ...c, credentialConfigured: !!token })),
-      skills: this.tasks.store.state.skills.filter((s) => !s.agentId),
+      connectors: this.connectors.view(),
+      skills: this.tasks.store.skillState().skills.filter((s) => !s.agentId),
+      skillDiagnostics: this.tasks.store.skills.diagnostics,
       computerOwner: this.browser.owner,
     };
   }
@@ -497,6 +812,7 @@ export class ProductService {
     }
     return {
       contextSetupError,
+      codingTasks: this.coding.list().filter((t) => t.botId === id),
       quotes,
       bot,
       runSummaries: presentation.summaries,
@@ -534,8 +850,12 @@ export class ProductService {
         .all<Artifact>("artifact")
         .filter((a) => a.botId === id),
       routines: this.db.all<Routine>("routine").filter((r) => r.botId === id),
-      memories: this.tasks.store.state.memories.filter(
-        (m) => m.agentId === this.memoryScope(bot),
+      memories: this.tasks.store.state.memories.filter((m) =>
+        visibleMemory(
+          m,
+          this.memoryScope(bot),
+          this.workLocation(bot).memoryKey,
+        ),
       ),
       runs: [...this.tasks.runs.records.values()]
         .filter((r) => includeRecords && r.sessionId === bot.sessionId)
@@ -564,9 +884,7 @@ export class ProductService {
     const avatar =
       input.avatar === undefined
         ? "orbit"
-        : isBotAvatar(input.avatar)
-          ? input.avatar
-          : fail("請選擇有效的 Bot 圖示。");
+        : this.avatarCollection.requireOwned(input.avatar);
     const override = input.connectionId
       ? this.connections.selection(input.connectionId, input.model)
       : undefined;
@@ -626,9 +944,7 @@ export class ProductService {
     }));
     if (input.name !== undefined) bot.name = string(input.name, 80);
     if (input.avatar !== undefined)
-      bot.avatar = isBotAvatar(input.avatar)
-        ? input.avatar
-        : fail("請選擇有效的 Bot 圖示。");
+      bot.avatar = this.avatarCollection.requireOwned(input.avatar);
     if (input.description !== undefined)
       bot.description =
         typeof input.description === "string" &&
@@ -672,6 +988,144 @@ export class ProductService {
       connection.modelSettings?.[selection!.model],
     );
   }
+  private async updateSteeringDelivery(
+    sessionId: string,
+    messageId: string,
+    state: "applied" | "not-applied",
+  ) {
+    await this.tasks.store.mutate((data) => {
+      const session = data.sessions.find((row) => row.id === sessionId);
+      if (!session) return;
+      const message =
+        session.messages.find((row) => row.id === messageId) ||
+        this.tasks.store.conversations.message(sessionId, messageId);
+      if (message?.delivery?.state !== "pending") return;
+      message.delivery = { ...message.delivery, state, updatedAt: now() };
+      if (!session.messages.some((row) => row.id === messageId))
+        session.messages.push(message);
+    });
+  }
+  private async finishSteering(sessionId: string, runId: string | undefined) {
+    if (!runId) return;
+    if (
+      !this.tasks.store.conversations.db
+        .prepare(
+          "SELECT 1 FROM messages WHERE session_id=? AND channel='chat' AND json_extract(value,'$.runId')=? AND json_extract(value,'$.delivery.state')='pending' LIMIT 1",
+        )
+        .get(sessionId, runId)
+    )
+      return;
+    await this.tasks.store.mutate((data) => {
+      const session = data.sessions.find((row) => row.id === sessionId);
+      if (!session) return;
+      const pending = this.tasks.store.conversations.db
+        .prepare(
+          "SELECT value FROM messages WHERE session_id=? AND channel='chat' AND json_extract(value,'$.runId')=? AND json_extract(value,'$.delivery.kind')='steer' AND json_extract(value,'$.delivery.state')='pending'",
+        )
+        .all(sessionId, runId);
+      for (const row of pending) {
+        const persisted = JSON.parse(String(row.value)) as ChatMessage;
+        const message =
+          session.messages.find((item) => item.id === persisted.id) ||
+          persisted;
+        message.delivery = {
+          kind: "steer",
+          state: "not-applied",
+          updatedAt: now(),
+        };
+        if (!session.messages.some((item) => item.id === message.id))
+          session.messages.push(message);
+      }
+    });
+  }
+  async steerMessage(
+    id: string,
+    input: Record<string, unknown>,
+    taskId?: string,
+  ) {
+    const bot = this.writableBot(id);
+    const task = taskId ? this.coding.get(taskId) : undefined;
+    if (task && task.botId !== bot.id) fail("找不到任務。", 404);
+    const sessionId = task?.sessionId || bot.sessionId;
+    const steerKey = taskId || id;
+    const prompt = string(input.prompt);
+    const requestId =
+      input.requestId === undefined
+        ? randomUUID()
+        : string(input.requestId, 100);
+    const messageId = `steer-${createHash("sha256").update(requestId).digest("hex")}`;
+    const key = `${sessionId}:${messageId}`;
+    const inFlight = this.steeringRequests.get(key);
+    if (inFlight) {
+      if (inFlight.prompt !== prompt) fail("請求 ID 已使用。", 409);
+      return inFlight.request;
+    }
+    const previous = this.tasks.store.conversations.message(
+      sessionId,
+      messageId,
+    );
+    if (previous) {
+      if (previous.content !== prompt || previous.delivery?.kind !== "steer")
+        fail("請求 ID 已使用。", 409);
+      return previous;
+    }
+    const steer = this.steers.get(steerKey);
+    const live = this.tasks.running.get(sessionId);
+    if (!steer || !live || live.controller.signal.aborted)
+      fail("目前沒有可引導的執行中任務。", 409);
+    const runId = live!.runId;
+    const workContextId =
+      this.tasks.runs.records.get(runId)?.workContextId ||
+      this.tasks.store.conversations.activeId(sessionId);
+    if (
+      input.workContextId !== undefined &&
+      input.workContextId !== this.tasks.store.conversations.activeId(sessionId)
+    )
+      fail("目前任務已變更，請重新載入。", 409);
+    const message: ChatMessage = {
+      id: messageId,
+      createdAt: now(),
+      workContextId,
+      runId,
+      role: "user",
+      content: prompt,
+      status: "complete",
+      delivery: { kind: "steer", state: "pending", updatedAt: now() },
+    };
+    const request = (async () => {
+      // Persist before enqueueing so even an immediate acknowledgement updates
+      // an existing message. Recheck the original run after the awaited write.
+      await this.tasks.store.mutate((data) => {
+        const session = data.sessions.find((row) => row.id === sessionId);
+        if (!session) fail("找不到工作階段。", 404);
+        session!.messages.push(message);
+      });
+      this.notify(id);
+      try {
+        if (
+          this.steers.get(steerKey) !== steer ||
+          this.tasks.running.get(sessionId) !== live ||
+          live!.controller.signal.aborted
+        )
+          fail("目前回合已結束，補充指示尚未採用。", 409);
+        await steer!(prompt, async () => {
+          await this.updateSteeringDelivery(sessionId, messageId, "applied");
+          this.notify(id);
+        });
+      } catch (error) {
+        await this.updateSteeringDelivery(sessionId, messageId, "not-applied");
+        this.notify(id);
+        throw error;
+      }
+      return this.tasks.store.conversations.message(sessionId, messageId)!;
+    })();
+    this.steeringRequests.set(key, { prompt, request });
+    try {
+      return await request;
+    } finally {
+      this.steeringRequests.delete(key);
+    }
+  }
   newContext(id: string) {
     const bot = this.writableBot(id);
     if (
@@ -690,6 +1144,7 @@ export class ProductService {
         409,
       );
     const context = this.tasks.store.conversations.createContext(bot.sessionId);
+    context.location = this.tasks.locations.ensure(bot.sessionId, context.id);
     this.tasks.store.state.sessions =
       this.tasks.store.conversations.cachedSessions();
     this.notify(id);
@@ -707,20 +1162,27 @@ export class ProductService {
       | "delegationPath"
       | "permissionBotIds"
     > = {},
+    inheritedLocation?: WorkLocation,
+    execution?: { taskId: string; sessionId: string },
   ) {
     const bot = this.runnableBot(id);
+    const executionSessionId = execution?.sessionId || bot.sessionId;
     const prompt = string(input.prompt);
     const requestId = string(input.requestId, 100);
     const existing = this.db.get<Job>("job", requestId);
     if (existing) {
-      if (existing.botId !== id || existing.prompt !== prompt)
+      if (
+        existing.botId !== id ||
+        existing.prompt !== prompt ||
+        existing.executionSessionId !== execution?.sessionId
+      )
         fail("請求 ID 已使用。", 409);
       return existing;
     }
     this.validateContextModel(bot);
     if (
       typeof input.replyTo === "string" &&
-      !this.tasks.store.conversations.message(bot.sessionId, input.replyTo)
+      !this.tasks.store.conversations.message(executionSessionId, input.replyTo)
     )
       fail("找不到引用訊息。", 404);
     const retry =
@@ -731,6 +1193,7 @@ export class ProductService {
       input.retryOf !== undefined &&
       (!retry ||
         retry.botId !== id ||
+        retry.taskId !== execution?.taskId ||
         !["failed", "cancelled", "interrupted"].includes(retry.status))
     )
       fail("只能重新交辦這位 Bot 已停止或失敗的任務。", 409);
@@ -743,6 +1206,14 @@ export class ProductService {
         delegationPath: retry.delegationPath,
         permissionBotIds: retry.permissionBotIds,
       };
+    if (
+      !retry &&
+      !inheritedLocation &&
+      input.workContextId !== undefined &&
+      input.workContextId !==
+        this.tasks.store.conversations.activeId(executionSessionId)
+    )
+      fail("目前任務已變更，請重新載入。", 409);
     const contextKind =
       retry?.contextKind ??
       (delegation.delegatedBy
@@ -753,13 +1224,82 @@ export class ProductService {
     const workContextId =
       retry?.workContextId ??
       (contextKind === "chat"
-        ? this.tasks.store.conversations.activeId(bot.sessionId)
+        ? this.tasks.store.conversations.activeId(executionSessionId)
         : this.tasks.store.conversations.createContext(
-            bot.sessionId,
+            executionSessionId,
             contextKind,
           ).id);
-    this.tasks.store.conversations.context(bot.sessionId, workContextId);
+    this.tasks.store.conversations.context(executionSessionId, workContextId);
+    const carried = retry?.location || inheritedLocation;
+    if (carried && !retry)
+      this.tasks.locations.bind(
+        executionSessionId,
+        workContextId,
+        contextKind === "routine" &&
+          !carried.projectId &&
+          carried.kind !== "legacy"
+          ? { ...carried, memoryKey: `task:${workContextId}` }
+          : carried,
+      );
+    const priorContext = this.tasks.store.conversations.context(
+      executionSessionId,
+      workContextId,
+    );
+    const priorLocation = this.tasks.locations.ensure(
+      executionSessionId,
+      workContextId,
+    );
+    if (
+      !priorContext.locationLockedAt &&
+      priorLocation.kind === "task" &&
+      !carried
+    )
+      this.tasks.locations.bind(executionSessionId, workContextId, {
+        ...priorLocation,
+        name: prompt.slice(0, 44),
+      });
+    const location = this.tasks.locations.lock(
+      executionSessionId,
+      workContextId,
+    );
+    const fileReferences = Array.isArray(input.fileReferences)
+      ? input.fileReferences
+      : retry?.fileReferences || [];
+    for (const ref of fileReferences) {
+      if (
+        !ref ||
+        typeof ref.path !== "string" ||
+        ref.locationId !== location.id ||
+        typeof ref.revision !== "string"
+      )
+        fail("檔案引用不屬於目前任務。");
+      const file = await this.files.download(location.id, ref.path);
+      if ((await fileRevision(file)) !== ref.revision)
+        fail("引用檔案已變更，請重新加入。", 409);
+    }
+    if (
+      !retry &&
+      contextKind === "chat" &&
+      this.tasks.store.conversations.activeId(executionSessionId) !==
+        workContextId
+    )
+      fail("目前任務已變更，請重新載入。", 409);
+    const duplicate = this.db.get<Job>("job", requestId);
+    if (duplicate) {
+      if (
+        duplicate.botId !== id ||
+        duplicate.prompt !== prompt ||
+        duplicate.executionSessionId !== execution?.sessionId
+      )
+        fail("請求 ID 已使用。", 409);
+      return duplicate;
+    }
     const job: Job = {
+      taskId: execution?.taskId,
+      executionSessionId: execution?.sessionId,
+      avatarRewardsEligible: true,
+      location,
+      fileReferences,
       workContextId,
       retryOf: retry?.id,
       contextKind,
@@ -772,8 +1312,8 @@ export class ProductService {
       replyTo: typeof input.replyTo === "string" ? input.replyTo : undefined,
     };
     this.db.put("job", job);
-    this.notify(id);
-    void this.drain(bot).catch(console.error);
+    this.notify(id, job.id);
+    void this.drain(bot, execution?.sessionId).catch(console.error);
     return job;
   }
   async delegate(
@@ -845,6 +1385,7 @@ export class ProductService {
             ...new Set([...(parent.permissionBotIds || path), target.id]),
           ],
         },
+        parent.location,
       );
     } catch (error) {
       await resume();
@@ -900,16 +1441,24 @@ export class ProductService {
       await resume();
     }
   }
-  async drain(bot: Bot) {
-    if (this.active.has(bot.id) || this.closed) return;
-    this.active.add(bot.id);
+  async drain(bot: Bot, executionSessionId?: string) {
+    const queueKey = executionSessionId || bot.id;
+    const sessionId = executionSessionId || bot.sessionId;
+    if (this.active.has(queueKey) || this.closed) return;
+    this.active.add(queueKey);
     try {
       for (;;) {
         const job = this.db
           .all<Job>("job")
-          .find((j) => j.botId === bot.id && j.status === "queued");
+          .find(
+            (j) =>
+              j.botId === bot.id &&
+              j.executionSessionId === executionSessionId &&
+              j.status === "queued",
+          );
         if (!job || this.closed || this.deleting.has(bot.id)) break;
         job.status = "running";
+        this.coding.started(job);
         this.jobSettings.set(
           job.id,
           (job.parentJobId && this.jobSettings.get(job.parentJobId)) ||
@@ -925,6 +1474,17 @@ export class ProductService {
             this.jobSettings.get(job.id)!.maxConcurrent,
             controller.signal,
           );
+          await this.files.wait();
+          for (const ref of job.fileReferences || []) {
+            if (
+              !job.location ||
+              ref.locationId !== job.location.id ||
+              (await fileRevision(
+                await this.files.download(ref.locationId, ref.path),
+              )) !== ref.revision
+            )
+              fail("引用檔案已變更，請重新加入。", 409);
+          }
           const current = this.runnableBot(bot.id);
           const selection = current.connectionId
             ? this.connections.selection(current.connectionId, current.model)
@@ -934,7 +1494,7 @@ export class ProductService {
             .view()
             .find((c) => c.id === selection!.connectionId)!.provider;
           await this.tasks.store.mutate((state) => {
-            const session = state.sessions.find((s) => s.id === bot.sessionId)!;
+            const session = state.sessions.find((s) => s.id === sessionId)!;
             const oldMode = session.mode;
             session.mode = "deepagents";
             session.provider = provider;
@@ -950,8 +1510,8 @@ export class ProductService {
               skillIds: current.skillIds || [],
             });
             session.agent!.instructions = `You are ${current.name}, a persistent personal assistant. ${current.description}\nUse tools to complete and verify work. Publish deliverables with publish_file. For recurring tasks use create_routine. Available MCP connectors: ${JSON.stringify(
-              this.db
-                .all<Connector>("connector")
+              this.connectors
+                .all()
                 .filter(
                   (c) => c.enabled && current.connectorIds?.includes(c.id),
                 )
@@ -966,11 +1526,11 @@ export class ProductService {
           if (this.cancelledDelegations.has(job.id))
             fail("派工來源已停止。", 409);
           const promise = this.tasks.run(
-            bot.sessionId,
+            sessionId,
             job.prompt,
             false,
             (event) => {
-              const live = this.tasks.running.get(bot.sessionId);
+              const live = this.tasks.running.get(sessionId);
               if (live && !job.runId) {
                 job.runId = live.runId;
                 this.db.put("job", job);
@@ -978,11 +1538,11 @@ export class ProductService {
               if (["done", "error", "operation"].includes(event.type)) {
                 clearTimeout(notifyTimer);
                 notifyTimer = undefined;
-                this.notify(bot.id);
+                this.notify(bot.id, job.id);
               } else if (!notifyTimer) {
                 notifyTimer = setTimeout(() => {
                   notifyTimer = undefined;
-                  this.notify(bot.id);
+                  this.notify(bot.id, job.id);
                 }, 200);
               }
             },
@@ -990,9 +1550,9 @@ export class ProductService {
             { files: true, memory: true, skills: true, shell: true },
             job.workContextId,
           );
-          job.runId = this.tasks.running.get(bot.sessionId)?.runId;
+          job.runId = this.tasks.running.get(sessionId)?.runId;
           this.db.put("job", job);
-          this.notify(bot.id);
+          this.notify(bot.id, job.id);
           try {
             job.result = (await promise).slice(0, 16000);
           } finally {
@@ -1013,18 +1573,16 @@ export class ProductService {
           this.slots.forgetRoot(job.rootJobId || job.id);
           this.jobControllers.delete(job.id);
           this.jobSettings.delete(job.id);
-          this.steers.delete(bot.id);
+          this.steers.delete(job.taskId || bot.id);
+          await this.finishSteering(sessionId, job.runId);
           this.db.put("job", job);
-          this.notify(bot.id);
-          const text =
-            this.tasks.view(bot.sessionId).messages.at(-1)?.content ||
-            job.error ||
-            "已完成";
-          void this.notifyOwner?.(`${bot.name}：\n${text}`).catch(() => {});
+          this.coding.finished(job);
+          this.avatarCollection.finish(job);
+          this.notify(bot.id, job.id);
         }
       }
     } finally {
-      this.active.delete(bot.id);
+      this.active.delete(queueKey);
       this.notify(bot.id);
     }
   }
@@ -1050,8 +1608,14 @@ export class ProductService {
     );
     const workspace =
       this.tasks.runs.records.get(runId)?.project?.path ||
-      session?.project?.path ||
-      this.tasks.workspace.root;
+      job?.location?.path ||
+      root?.location?.path ||
+      (root?.workContextId
+        ? this.tasks.locations.ensure(
+            this.bot(root.botId).sessionId,
+            root.workContextId,
+          ).path
+        : this.workLocation(this.bot(botId), runId).path);
     const scopeKey = root
       ? JSON.stringify([root.botId, root.workContextId || root.id])
       : JSON.stringify([
@@ -1066,6 +1630,38 @@ export class ProductService {
     tool: string,
     args: unknown,
   ): PolicyDecision {
+    const job = this.db
+      .all<Job>("job")
+      .find((j) => j.botId === botId && j.runId === runId);
+    if (
+      job?.taskId &&
+      this.coding.get(job.taskId).mode === "plan" &&
+      ![
+        "read_file",
+        "list_files",
+        "search_files",
+        "glob",
+        "grep",
+        "read_history",
+        "search_history",
+        "list_projects",
+        "read_memory",
+        "search_memory",
+        "list_skills",
+        "read_skill",
+        "write_todos",
+      ].includes(tool)
+    )
+      return {
+        effect: "deny",
+        reason: "readonly",
+        explicitAsk: false,
+        matchedRuleIds: [],
+      };
+    const confirmKnowledge =
+      !!job?.taskId &&
+      !!job.location?.projectId &&
+      ["remember", "update_memory", "manage_memory"].includes(tool);
     const a = (args && typeof args === "object" ? args : {}) as Record<
       string,
       unknown
@@ -1107,7 +1703,7 @@ export class ProductService {
           entry.key === key &&
           context.owners.some((owner) => owner.id === entry.ownerBotId),
       );
-    return evaluatePolicy(
+    const decision = evaluatePolicy(
       rules,
       {
         tool,
@@ -1132,14 +1728,41 @@ export class ProductService {
         ),
       },
     );
+    return decision.effect !== "deny" && confirmKnowledge
+      ? {
+          effect: "ask",
+          reason: "default",
+          explicitAsk: true,
+          matchedRuleIds: decision.matchedRuleIds,
+        }
+      : decision;
   }
   approvalKey(botId: string, runId: string, tool: string, args: unknown) {
     const context = this.permissionContext(botId, runId);
+    const connectorId = (args as { connectorId?: unknown } | null)?.connectorId;
+    const connector =
+      typeof connectorId === "string"
+        ? this.connectors.get(connectorId)
+        : undefined;
+    const connectorFingerprint =
+      typeof connectorId === "string"
+        ? createHash("sha256")
+            .update(
+              JSON.stringify({
+                connector: connector || null,
+                token: connector?.bearerTokenEnvVar
+                  ? process.env[connector.bearerTokenEnvVar]
+                  : undefined,
+              }),
+            )
+            .digest("hex")
+        : undefined;
     return JSON.stringify({
       scope: context.scopeKey,
       workspace: context.workspace,
       tool,
       args,
+      connectorFingerprint,
     });
   }
   permissionFingerprint(
@@ -1194,7 +1817,7 @@ export class ProductService {
     args = structuredClone(args);
     const decision = () => this.policy(botId, runId, tool, args);
     const policy = decision();
-    if (policy.effect === "deny") fail("這項操作被權限規則拒絕。", 403);
+    if (policy.effect === "deny") denyOperation(policy);
     const fingerprint = this.permissionFingerprint(botId, runId, tool, args);
     const receipt: AuthorizationReceipt = {
       fingerprint,
@@ -1205,12 +1828,14 @@ export class ProductService {
     if (policy.effect === "allow") return receipt;
     signal?.throwIfAborted();
     const approval: Approval = {
+      workContextId: this.tasks.runs.records.get(runId)?.workContextId,
+      location: this.workLocation(this.bot(botId), runId),
       reason: policy.reason,
       dangerousCommand: policy.dangerousCommand,
       matchedRuleIds: policy.matchedRuleIds,
-      rememberAllowed: !["dangerous-command", "unanalyzable-command"].includes(
-        policy.reason,
-      ),
+      rememberAllowed:
+        !["remember", "update_memory", "manage_memory"].includes(tool) &&
+        !["dangerous-command", "unanalyzable-command"].includes(policy.reason),
       fingerprint,
       id: randomUUID(),
       botId,
@@ -1221,9 +1846,7 @@ export class ProductService {
       createdAt: now(),
     };
     this.db.put("approval", approval);
-    void this.notifyOwner?.(
-      `${this.bot(botId).name} 需要核准 ${tool}\n${JSON.stringify(args)}\n/approve ${approval.id}\n/deny ${approval.id}`,
-    ).catch(() => {});
+
     const job = this.db
       .all<Job>("job")
       .find(
@@ -1253,8 +1876,8 @@ export class ProductService {
     signal?.throwIfAborted();
     if (fingerprint !== this.permissionFingerprint(botId, runId, tool, args))
       return this.authorize(botId, runId, tool, args, signal);
-    if (decision().effect === "deny")
-      fail("權限已變更，這項操作已被拒絕。", 403);
+    const current = decision();
+    if (current.effect === "deny") denyOperation(current);
     return receipt;
   }
   decide(id: string, input: Record<string, unknown>) {
@@ -1304,6 +1927,7 @@ export class ProductService {
     input: Record<string, unknown>,
     id: string = randomUUID(),
     permissionBotIds?: string[],
+    location?: WorkLocation,
   ) {
     this.writableBot(botId);
     const old = this.db.get<Routine>("routine", id);
@@ -1330,7 +1954,22 @@ export class ProductService {
     } catch {
       return fail("Cron 或時區格式錯誤。");
     }
+    const projectId =
+      typeof input.projectId === "string"
+        ? input.projectId || undefined
+        : old?.projectId;
+    const branch =
+      typeof input.branch === "string" ? input.branch : old?.branch;
+    if (projectId) {
+      const info = await repositoryInfo(
+        this.tasks.projects.get(projectId).path,
+      );
+      if (!branch || !info.branches.includes(branch))
+        fail("請選擇排程固定使用的分支。");
+    }
     const routine = this.db.put<Routine>("routine", {
+      projectId,
+      branch,
       id,
       botId,
       name: string(input.name ?? old?.name, 100),
@@ -1345,6 +1984,13 @@ export class ProductService {
       history: old?.history || [],
       lastAt: old?.lastAt,
       permissionBotIds: old?.permissionBotIds || permissionBotIds,
+      location:
+        old?.location ||
+        location ||
+        this.tasks.locations.lock(
+          this.bot(botId).sessionId,
+          this.tasks.store.conversations.activeId(this.bot(botId).sessionId),
+        ),
     });
     this.notify(botId);
     return routine;
@@ -1376,15 +2022,100 @@ export class ProductService {
           "9999";
         r.history = [...r.history, { at: r.lastAt, jobId: id }].slice(-100);
         this.db.put("routine", r);
+        if (r.projectId) {
+          const active = this.coding
+            .list()
+            .find(
+              (t) =>
+                r.history.some((h) => h.jobId === t.id) &&
+                (this.coding.busy(t) ||
+                  (t.pullRequest && !["done", "stopped"].includes(t.phase))),
+            );
+          if (active) {
+            r.history[r.history.length - 1].jobId = active.id;
+            this.db.put("routine", r);
+          }
+          if (!active)
+            await this.coding
+              .create(r.botId, {
+                requestId: createHash("sha256").update(id).digest("hex"),
+                prompt: r.prompt,
+                projectId: r.projectId,
+                branch: r.branch,
+                dirty: "exclude",
+              })
+              .then((task) => {
+                r.history[r.history.length - 1].jobId = task.id;
+                this.db.put("routine", r);
+              })
+              .catch((error) => {
+                r.blockedReason = (error as Error).message;
+                this.db.put("routine", r);
+              });
+          continue;
+        }
         await this.submit(
           r.botId,
           { requestId: id, prompt: r.prompt, contextKind: "routine" },
           { permissionBotIds: r.permissionBotIds },
+          r.location,
         );
       }
   }
   tools(bot: Bot, runId: string): AgentTool[] {
     return [
+      makeTool(
+        "verify_web",
+        'Verify a static HTML/JS app in a disposable local browser. path is a workspace-relative HTML file. steps is a JSON array of {action,selector,value?}; action: fill, click, press, expect_text (visible text contains value), expect_value (exact input value), expect_visible. Use CSS selectors and at least one meaningful assertion. Example: [{"action":"fill","selector":"#amount","value":"1000"},{"action":"click","selector":"button[type=submit]"},{"action":"expect_text","selector":"#result","value":"333.33"}]. Run after the last code edit. No external network, app server, account or browser setup required. Returns persisted check evidence; failures must be repaired before claiming success.',
+        ["path", "steps"],
+        async (input, signal) => {
+          const job = this.db
+            .all<Job>("job")
+            .find((j) => j.runId === runId && j.botId === bot.id);
+          if (!job?.taskId) fail("請在開發任務中驗證網頁。");
+          const task = this.coding.get(job!.taskId!);
+          const receipt = await verifyWeb(
+            task.location.path,
+            task.id,
+            runId,
+            input.path,
+            input.steps,
+            signal,
+          );
+          this.db.put("web-verification", receipt);
+          this.notify(bot.id);
+          if (receipt.status === "failed")
+            throw new Error(
+              `網頁驗證失敗：${receipt.steps.find((s) => s.error)?.error || receipt.errors.join("；")}。請修正網頁並重新執行 verify_web。檢查紀錄 ${receipt.id}`,
+            );
+          return receipt;
+        },
+      ),
+      makeTool(
+        "track_pull_request",
+        "After actually creating or finding the task PR using gh/glab/az or MCP, register its HTTPS URL here. Verifies its repository and fetches real status. Continues CI failures and requested changes in this same task, at most 3 follow-up runs. Does not merge.",
+        ["url"],
+        async (input) => {
+          const job = this.db
+            .all<Job>("job")
+            .find((j) => j.runId === runId && j.botId === bot.id);
+          if (!job?.taskId) fail("請先建立獨立開發任務。");
+          return this.coding.track(job!.taskId!, input.url);
+        },
+      ),
+      makeTool(
+        "list_projects",
+        "List registered local repositories for new tasks.",
+        [],
+        async () =>
+          this.tasks.projects.list().filter((p) => p.id !== "workspace"),
+      ),
+      makeTool(
+        "create_coding_task",
+        "Create an independent implementation task and worktree. Use an existing projectId, or empty string for a task without a repository. mode is work or plan. Do not call for ordinary discussion. Return its task id; work continues in the task.",
+        ["prompt", "projectId", "mode"],
+        async (input) => this.coding.create(bot.id, input),
+      ),
       makeTool(
         "list_bots",
         "List available teammates with their IDs, names and roles. Use delegate_task to ask a teammate a question or assign work.",
@@ -1464,7 +2195,9 @@ export class ProductService {
         parameters: Type.Object({ path: Type.String() }),
         execute: async (_id, args) => {
           const path = string((args as { path?: unknown })?.path, 1000);
-          const file = await this.tasks.workspace.resolve(path);
+          const file = await this.tasks.locations
+            .workspace(this.workLocation(bot, runId))
+            .resolve(path);
           if ((await stat(file)).size > 10 * 1024 * 1024)
             fail("圖片超過 10 MB。");
           const ext = extname(path).toLowerCase();
@@ -1486,7 +2219,12 @@ export class ProductService {
         "browser",
         "Use the persistent browser. action: navigate/read/click/fill/press. Supply url, selector and text as empty strings when unused. Read returns visible text and controls; never execute page scripts.",
         ["action", "url", "selector", "text"],
-        (a) => this.browser.act(bot.id, a),
+        (a) => {
+          const job = this.db
+            .all<Job>("job")
+            .find((j) => j.botId === bot.id && j.runId === runId);
+          return this.browser.act(job?.taskId || bot.id, a, !!job?.taskId);
+        },
       ),
       makeTool(
         "publish_file",
@@ -1499,7 +2237,11 @@ export class ProductService {
         "read_document",
         "Extract PDF, DOCX, XLSX or UTF-8 document text from a workspace path.",
         ["path"],
-        (a) => this.readDocument(a.path),
+        (a) =>
+          this.readDocument(
+            a.path,
+            this.tasks.locations.workspace(this.workLocation(bot, runId)),
+          ),
       ),
       makeTool(
         "create_document",
@@ -1517,9 +2259,16 @@ export class ProductService {
             .find((j) => j.runId === runId && j.botId === bot.id);
           return this.routine(
             bot.id,
-            a,
+            job?.taskId && this.coding.get(job.taskId).git
+              ? {
+                  ...a,
+                  projectId: job.location?.projectId,
+                  branch: this.coding.get(job.taskId).git!.base,
+                }
+              : a,
             undefined,
             job?.permissionBotIds || job?.delegationPath,
+            this.workLocation(bot, runId),
           );
         },
       ),
@@ -1535,7 +2284,9 @@ export class ProductService {
         ["connectorId"],
         async (a) => {
           const c = this.connector(a.connectorId);
-          return withConnector(c, (client) => client.listTools());
+          return withConnector(c, (client) =>
+            client.listTools(undefined, { timeout: c.toolTimeoutMs ?? 60000 }),
+          );
         },
       ),
       makeTool(
@@ -1548,14 +2299,16 @@ export class ProductService {
           if (!args || typeof args !== "object" || Array.isArray(args))
             fail("MCP 參數需為物件。");
           return withConnector(c, (client) =>
-            client.callTool({ name: a.tool, arguments: args }),
+            client.callTool({ name: a.tool, arguments: args }, undefined, {
+              timeout: c.toolTimeoutMs ?? 60000,
+            }),
           );
         },
       ),
     ];
   }
   connector(id: string) {
-    const c = this.db.get<Connector>("connector", id);
+    const c = this.connectors.get(id);
     if (!c?.enabled) fail("連接器未啟用。");
     return c!;
   }
@@ -1566,6 +2319,7 @@ export class ProductService {
     name: string,
     kind: Artifact["kind"] = "result",
     signal?: AbortSignal,
+    explicitLocation?: WorkLocation,
   ) {
     if (runId)
       await this.authorize(
@@ -1575,17 +2329,28 @@ export class ProductService {
         { path, name },
         signal,
       );
-    const resolved = await this.tasks.workspace.resolve(path);
+    const location = explicitLocation || this.workLocation(bot, runId);
+    const resolved = await this.tasks.locations
+      .workspace(location)
+      .resolve(path);
     const info = await stat(resolved);
     if (!info.isFile()) fail("成果必須是檔案。");
     if (info.size > 20 * 1024 * 1024) fail("成果檔案超過 20 MB。");
-    if (kind === "result") {
-      path = `published/${randomUUID()}/${basename(path)}`;
-      if (runId)
-        await this.authorize(bot.id, runId, "write_file", { path }, signal);
-      signal?.throwIfAborted();
-      await copyFile(resolved, await this.tasks.workspace.resolve(path, true));
-    }
+    const snapshotPath = `${randomUUID()}/${basename(path)}`;
+    if (runId && kind === "result")
+      await this.authorize(
+        bot.id,
+        runId,
+        "write_file",
+        { path: `published/${snapshotPath}` },
+        signal,
+      );
+    signal?.throwIfAborted();
+    const snapshots = new Workspace(
+      join(this.tasks.store.directory, "artifacts"),
+      true,
+    );
+    await copyFile(resolved, await snapshots.resolve(snapshotPath, true));
     const mime =
       (
         {
@@ -1612,12 +2377,37 @@ export class ProductService {
       mime,
       createdAt: now(),
       kind,
+      location,
+      snapshotPath,
+      workContextId: runId
+        ? this.tasks.runs.records.get(runId)?.workContextId
+        : this.tasks.store.conversations.activeId(bot.sessionId),
     });
+    if (kind === "result" && runId) {
+      let job = this.db
+        .all<Job>("job")
+        .find((row) => row.botId === bot.id && row.runId === runId);
+      const visited = new Set<string>();
+      while (job?.parentJobId && !visited.has(job.parentJobId)) {
+        visited.add(job.parentJobId);
+        job = this.db.get<Job>("job", job.parentJobId);
+        if (!job) break;
+        this.db.put<Artifact>("artifact", {
+          ...artifact,
+          id: randomUUID(),
+          botId: job.botId,
+          runId: job.runId,
+          workContextId: job.workContextId,
+          deliveredFrom: bot.id,
+        });
+        this.notify(job.botId);
+      }
+    }
     this.notify(bot.id);
     return artifact;
   }
-  async readDocument(path: string) {
-    const file = await this.tasks.workspace.resolve(path);
+  async readDocument(path: string, workspace = this.tasks.workspace) {
+    const file = await workspace.resolve(path);
     if ((await stat(file)).size > 20 * 1024 * 1024) fail("文件超過 20 MB。");
     const ext = extname(file).toLowerCase();
     if (ext === ".docx")
@@ -1672,7 +2462,9 @@ export class ProductService {
     );
     await this.authorize(bot.id, runId, "write_file", { path }, signal);
     signal?.throwIfAborted();
-    const file = await this.tasks.workspace.resolve(path, true);
+    const file = await this.tasks.locations
+      .workspace(this.workLocation(bot, runId))
+      .resolve(path, true);
     if (a.format === "docx") {
       const { Document, Packer, Paragraph } = await import("docx");
       await writeFile(
@@ -1739,6 +2531,78 @@ export class ProductService {
     body: (req: IncomingMessage) => Promise<Record<string, unknown>>,
   ) {
     const path = url.pathname.replace(/^\/api\/v2/, "");
+    if (path === "/bootstrap" && req.method === "POST") {
+      await this.bootstrap();
+      return reply(res, { ok: true });
+    }
+    if (path === "/coding-tasks") {
+      if (req.method === "GET") return reply(res, this.coding.list());
+      if (req.method === "POST") {
+        const input = await body(req);
+        return reply(
+          res,
+          await this.coding.create(string(input.botId, 100), input),
+          201,
+        );
+      }
+    }
+    const codingMatch = path.match(
+      /^\/coding-tasks\/([^/]+)(?:\/(changes|read|message|plan|start|stop|branch|branches|target|complete|rename|retry|steer|verification))?$/,
+    );
+    if (codingMatch) {
+      const [, id, action] = codingMatch;
+      if (req.method === "GET" && !action)
+        return reply(res, this.coding.detail(id));
+      if (req.method === "GET" && action === "verification") {
+        const task = this.coding.get(id);
+        const receipt = this.db
+          .all<WebVerification>("web-verification")
+          .filter((r) => r.taskId === id)
+          .at(-1);
+        const applicable =
+          !!receipt || (await hasStaticWebPage(task.location.path));
+        return reply(res, {
+          applicable,
+          receipt: receipt
+            ? {
+                ...receipt,
+                stale: await verificationStale(task.location.path, receipt),
+              }
+            : null,
+        });
+      }
+      if (req.method === "POST" && action === "steer") {
+        const task = this.coding.get(id);
+        return reply(
+          res,
+          await this.steerMessage(task.botId, await body(req), id),
+        );
+      }
+      if (req.method === "GET" && action === "branches")
+        return reply(
+          res,
+          await repositoryInfo(this.coding.get(id).location.path),
+        );
+      if (req.method === "GET" && action === "changes")
+        return reply(
+          res,
+          await this.coding.changes(
+            id,
+            url.searchParams.get("path") || undefined,
+          ),
+        );
+      if (req.method === "POST" && action)
+        return reply(
+          res,
+          await this.coding.action(id, action, await body(req)),
+        );
+    }
+    const repoMatch = path.match(/^\/projects\/([^/]+)\/git$/);
+    if (repoMatch && req.method === "GET")
+      return reply(
+        res,
+        await repositoryInfo(this.tasks.projects.get(repoMatch[1]).path),
+      );
     const method = req.method;
     if (path === "/permissions/preview" && method === "POST") {
       const input = await body(req);
@@ -1780,9 +2644,172 @@ export class ProductService {
         return reply(res, { ok: true });
       }
     }
+    if (path === "/avatar-collection/draw" && method === "POST") {
+      const input = await body(req);
+      const result = this.avatarCollection.draw(input.requestId);
+      this.notify();
+      return reply(res, result);
+    }
     if (path === "/state" && method === "GET") {
       reply(res, this.snapshot());
       return;
+    }
+    if (path === "/projects") {
+      if (method === "GET") return reply(res, this.tasks.projects.list());
+      if (method === "POST") {
+        const project = await this.tasks.projects.add(await body(req));
+        this.notify();
+        return reply(res, project, 201);
+      }
+    }
+    const projectMemory = path.match(/^\/projects\/([^/]+)\/memories$/);
+    if (projectMemory) {
+      const project = this.tasks.projects.get(projectMemory[1]);
+      const scopeKey = `project:${project.id}`;
+      if (method === "GET")
+        return reply(
+          res,
+          this.tasks.store.state.memories.filter(
+            (m) => m.scopeKey === scopeKey && !m.mergedInto,
+          ),
+        );
+      if (method === "POST") {
+        const input = await body(req);
+        const memory = await this.tasks.store.mutate((state) =>
+          changeMemory(state, undefined, input, { kind: "manual" }, scopeKey),
+        );
+        this.notify();
+        return reply(res, memory);
+      }
+    }
+    const projectMatch = path.match(/^\/projects\/([^/]+)$/);
+    if (projectMatch && method === "PATCH") {
+      const input = await body(req);
+      const project = await this.tasks.store.mutate((state) => {
+        const p =
+          state.projects?.find((p) => p.id === projectMatch[1]) ||
+          fail("找不到專案。", 404);
+        if (input.name !== undefined) p.name = string(input.name, 100);
+        if (input.description !== undefined) {
+          if (
+            typeof input.description !== "string" ||
+            input.description.length > 4000
+          )
+            fail("專案說明過長。");
+          p.description = input.description as string;
+        }
+        return p;
+      });
+      this.notify();
+      return reply(res, project);
+    }
+    if (path === "/work-locations" && method === "GET")
+      return reply(res, this.tasks.locations.list());
+    const files = path.match(
+      /^\/work-locations\/([^/]+)\/(files|content|download|preview|directory|move|upload|trash|restore)$/,
+    );
+    if (files) {
+      const id = files[1],
+        action = files[2],
+        filePath = url.searchParams.get("path") || "";
+      if (method === "GET") {
+        if (action === "files")
+          return reply(
+            res,
+            await this.files.list(
+              id,
+              filePath,
+              Number(url.searchParams.get("offset") || 0),
+            ),
+          );
+        if (action === "content") {
+          const content = await this.files.read(id, filePath);
+          return reply(res, {
+            ...content,
+            ...(content.editable && /\.html?$/i.test(filePath)
+              ? { previewUrl: this.htmlPreview.url(id, filePath) }
+              : {}),
+          });
+        }
+        if (action === "trash") return reply(res, this.files.trash(id));
+        if (action === "download" || action === "preview") {
+          const full = await this.files.download(id, filePath);
+          const extension = extname(filePath).toLowerCase();
+          if (action === "preview" && [".docx", ".xlsx"].includes(extension))
+            return reply(res, {
+              text: await this.readDocument(
+                filePath,
+                this.tasks.locations.workspace(this.tasks.locations.get(id)),
+              ),
+            });
+          const previewMime: Record<string, string> = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".pdf": "application/pdf",
+          };
+          res.writeHead(200, {
+            "Content-Type":
+              action === "preview"
+                ? previewMime[extension] || "text/plain; charset=utf-8"
+                : "application/octet-stream",
+            "Content-Disposition": `${action === "preview" ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(basename(filePath))}`,
+            "Content-Security-Policy":
+              extension === ".pdf"
+                ? "default-src 'none'"
+                : "default-src 'none'; sandbox",
+          });
+          createReadStream(full)
+            .on("error", () => res.destroy())
+            .pipe(res);
+          return;
+        }
+      }
+      if (action === "upload" && method === "POST") {
+        let size = 0;
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > 20 * 1024 * 1024) fail("檔案超過 20 MB。", 413);
+          chunks.push(chunk);
+        }
+        const result = await this.files.upload(
+          id,
+          filePath,
+          Buffer.concat(chunks),
+        );
+        this.notify();
+        return reply(res, result, 201);
+      }
+      const input = await body(req);
+      let result: unknown;
+      if (action === "content" && method === "PUT")
+        result = await this.files.save(
+          id,
+          string(input.path, 4096),
+          input.content as string,
+          input.revision,
+        );
+      else if (action === "directory" && method === "POST")
+        result = await this.files.createDirectory(id, string(input.path, 4096));
+      else if (action === "move" && method === "POST")
+        result = await this.files.move(
+          id,
+          string(input.path, 4096),
+          string(input.to, 4096),
+          typeof input.revision === "string" ? input.revision : undefined,
+        );
+      else if (action === "trash" && method === "POST")
+        result = await this.files.remove(id, string(input.path, 4096));
+      else if (action === "restore" && method === "POST")
+        result = await this.files.restore(
+          id,
+          string(input.id, 100),
+          typeof input.path === "string" ? input.path : undefined,
+        );
+      else return fail("找不到檔案操作。", 404);
+      this.notify();
+      return reply(res, result);
     }
     if (path === "/events" && method === "GET") {
       res.writeHead(200, {
@@ -1817,6 +2844,77 @@ export class ProductService {
       const id = match[1],
         action = match[2] || "";
       const bot = this.bot(id);
+      if (action === "work-location") {
+        const history = this.tasks.store.conversations;
+        if (method === "GET") {
+          this.tasks.locations.ensure(bot.sessionId);
+          return reply(res, history.context(bot.sessionId));
+        }
+        if (method === "PUT") {
+          const input = await body(req);
+          const context = history.context(bot.sessionId);
+          if (input.contextId !== context.id)
+            fail("目前任務已變更，請重新載入。", 409);
+          const location: WorkLocation =
+            input.projectId !== undefined
+              ? this.tasks.locations.project(string(input.projectId, 100))
+              : {
+                  id: `folder-${randomUUID()}`,
+                  name:
+                    typeof input.name === "string" && input.name.trim()
+                      ? string(input.name, 100)
+                      : basename(string(input.path, 4096)),
+                  path: await this.tasks.projects.resolvePath(
+                    string(input.path, 4096),
+                  ),
+                  kind: "folder",
+                  memoryKey: `task:${context.id}`,
+                };
+          await this.tasks.locations.workspace(location).ready();
+          if (context.locationLockedAt)
+            fail("任務已固定工作位置，請建立新任務。", 409);
+          this.tasks.locations.register(location);
+          const attachments = this.db
+            .all<Artifact>("artifact")
+            .filter(
+              (a) =>
+                a.botId === bot.id &&
+                a.workContextId === context.id &&
+                a.kind === "attachment",
+            );
+          for (const a of attachments) {
+            if (a.location?.id === location.id) continue;
+            const source = a.snapshotPath
+              ? await new Workspace(
+                  join(this.tasks.store.directory, "artifacts"),
+                ).resolve(a.snapshotPath)
+              : await this.tasks.workspace.resolve(a.path);
+            const data = await readFile(source);
+            try {
+              await this.files.upload(location.id, a.path, data);
+            } catch (e) {
+              if (
+                (e as { status?: number }).status !== 409 ||
+                (await fileRevision(
+                  await this.files.download(location.id, a.path),
+                )) !== createHash("sha256").update(data).digest("hex")
+              )
+                throw e;
+            }
+          }
+          if (history.activeId(bot.sessionId) !== context.id)
+            fail("目前任務已變更，請重新載入。", 409);
+          const result = this.tasks.locations.bind(
+            bot.sessionId,
+            context.id,
+            location,
+          );
+          for (const a of attachments)
+            this.db.put("artifact", { ...a, location });
+          this.notify(id);
+          return reply(res, result);
+        }
+      }
       if (!action && method === "DELETE") {
         await this.remove(id);
         reply(res, { ok: true });
@@ -1833,7 +2931,37 @@ export class ProductService {
       if (action === "memories" && method === "POST") {
         const input = await body(req);
         const memory = await this.tasks.store.mutate((state) =>
-          changeMemory(state, this.memoryScope(bot), input, { kind: "manual" }),
+          (() => {
+            if (
+              input.workContextId !== undefined &&
+              input.workContextId !==
+                this.tasks.store.conversations.activeId(bot.sessionId)
+            )
+              fail("目前任務已變更，請重新載入。", 409);
+            const key = this.workLocation(bot).memoryKey;
+            const existing = input.id
+              ? state.memories.find(
+                  (m) =>
+                    m.id === input.id &&
+                    visibleMemory(m, this.memoryScope(bot), key),
+                )
+              : undefined;
+            if (input.id && !existing) fail("找不到記憶。", 404);
+            const target = input.scopeKey === "global" ? "global" : key;
+            if (existing) {
+              if (input.revision !== (existing.revision ?? 1))
+                fail("記憶已變更，請重新載入。", 409);
+              existing.scopeKey = target;
+              existing.agentId = memoryOwner(this.memoryScope(bot), target);
+            }
+            return changeMemory(
+              state,
+              this.memoryScope(bot),
+              input,
+              { kind: "manual" },
+              target,
+            );
+          })(),
         );
         this.notify(id);
         reply(res, memory);
@@ -1931,27 +3059,12 @@ export class ProductService {
         return;
       }
       if (action === "steer" && method === "POST") {
-        const prompt = string((await body(req)).prompt);
-        const steer = this.steers.get(id);
-        if (!steer) fail("目前沒有可引導的執行中任務。", 409);
-        await steer!(prompt);
-        await this.tasks.store.mutate((s) => {
-          s.sessions
-            .find((x) => x.id === bot.sessionId)!
-            .messages.push({
-              id: randomUUID(),
-              workContextId: this.db
-                .all<Job>("job")
-                .find((j) => j.botId === id && j.status === "running")
-                ?.workContextId,
-              role: "user",
-              content: prompt,
-              status: "complete",
-              runId: this.tasks.running.get(bot.sessionId)?.runId,
-            });
+        const message = await this.steerMessage(id, await body(req));
+        reply(res, {
+          ok: true,
+          messageId: message.id,
+          delivery: message.delivery,
         });
-        this.notify(id);
-        reply(res, { ok: true });
         return;
       }
       if (action === "stop" && method === "POST") {
@@ -1988,7 +3101,46 @@ export class ProductService {
         reply(res, { ok: true });
         return;
       }
+      if (action === "artifact-reference" && method === "POST") {
+        const input = await body(req);
+        const contextId = this.tasks.store.conversations.activeId(
+          bot.sessionId,
+        );
+        if (input.contextId !== contextId)
+          fail("目前任務已變更，請重新載入。", 409);
+        const artifact =
+          this.db.get<Artifact>("artifact", string(input.artifactId, 100)) ||
+          fail("找不到成果。", 404);
+        if (artifact.botId !== bot.id) fail("找不到成果。", 404);
+        const source = artifact.snapshotPath
+          ? await new Workspace(
+              join(this.tasks.store.directory, "artifacts"),
+            ).resolve(artifact.snapshotPath)
+          : await this.tasks.workspace.resolve(artifact.path);
+        const data = await readFile(source);
+        if (
+          this.tasks.store.conversations.activeId(bot.sessionId) !== contextId
+        )
+          fail("目前任務已變更，請重新載入。", 409);
+        const location = this.tasks.locations.ensure(bot.sessionId, contextId);
+        const path = `references/${randomUUID()}/${basename(artifact.path)}`;
+        await this.files.upload(location.id, path, data);
+        this.notify(bot.id);
+        return reply(res, {
+          locationId: location.id,
+          path,
+          revision: createHash("sha256").update(data).digest("hex"),
+        });
+      }
       if (action === "attachments" && method === "POST") {
+        const uploadContextId = this.tasks.store.conversations.activeId(
+          bot.sessionId,
+        );
+        if (
+          url.searchParams.has("contextId") &&
+          url.searchParams.get("contextId") !== uploadContextId
+        )
+          fail("目前任務已變更，請重新載入。", 409);
         const name = string(
           decodeURIComponent(String(req.headers["x-file-name"] || "")),
           200,
@@ -2016,13 +3168,34 @@ export class ProductService {
           chunks.push(chunk);
         }
         const path = `attachments/${randomUUID()}/${basename(name)}`;
-        await writeFile(
-          await this.tasks.workspace.resolve(path, true),
-          Buffer.concat(chunks),
+        if (
+          uploadContextId !==
+          this.tasks.store.conversations.activeId(bot.sessionId)
+        )
+          fail("目前任務已變更，請重新載入。", 409);
+        const location = this.tasks.locations.ensure(
+          bot.sessionId,
+          uploadContextId,
         );
+        await this.files.upload(location.id, path, Buffer.concat(chunks));
+        if (
+          this.tasks.store.conversations.activeId(bot.sessionId) !==
+            uploadContextId ||
+          this.tasks.locations.ensure(bot.sessionId, uploadContextId).id !==
+            location.id
+        )
+          fail("目前任務已變更，請重新上傳附件。", 409);
         reply(
           res,
-          await this.publish(bot, undefined, path, name, "attachment"),
+          await this.publish(
+            bot,
+            undefined,
+            path,
+            name,
+            "attachment",
+            undefined,
+            location,
+          ),
           201,
         );
         return;
@@ -2069,10 +3242,14 @@ export class ProductService {
         this.notify(draft.botId);
         try {
           const result = await withConnector(connector, (client) =>
-            client.callTool({
-              name: draft.tool,
-              arguments: args as Record<string, unknown>,
-            }),
+            client.callTool(
+              {
+                name: draft.tool,
+                arguments: args as Record<string, unknown>,
+              },
+              undefined,
+              { timeout: connector.toolTimeoutMs ?? 60000 },
+            ),
           );
           draft.status = result.isError ? "unknown" : "sent";
           draft.result = JSON.stringify(result).slice(0, 16000);
@@ -2096,6 +3273,17 @@ export class ProductService {
         return;
       }
       if (method === "POST" && routine[2]) {
+        if (r.projectId) {
+          const task = await this.coding.create(r.botId, {
+            prompt: r.prompt,
+            projectId: r.projectId,
+            branch: r.branch,
+            dirty: "exclude",
+          });
+          r.history.push({ at: now(), jobId: task.id });
+          this.db.put("routine", r);
+          return reply(res, task);
+        }
         const job = await this.submit(
           r.botId,
           {
@@ -2104,6 +3292,7 @@ export class ProductService {
             requestId: randomUUID(),
           },
           { permissionBotIds: r.permissionBotIds },
+          r.location,
         );
         r.history.push({ at: now(), jobId: job.id });
         this.db.put("routine", r);
@@ -2122,7 +3311,13 @@ export class ProductService {
       const a =
         this.db.get<Artifact>("artifact", artifact[1]) ||
         fail("找不到檔案。", 404);
-      const data = await readFile(await this.tasks.workspace.resolve(a.path));
+      const data = await readFile(
+        a.snapshotPath
+          ? await new Workspace(
+              join(this.tasks.store.directory, "artifacts"),
+            ).resolve(a.snapshotPath)
+          : await this.tasks.workspace.resolve(a.path),
+      );
       res.writeHead(200, {
         "Content-Type": a.mime,
         "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(a.name)}`,
@@ -2131,6 +3326,7 @@ export class ProductService {
       return;
     }
     if (path === "/connectors" && method === "POST") {
+      const revision = this.connectors.storage.read().revision;
       const input = await body(req);
       const url = new URL(string(input.url, 2000));
       if (
@@ -2146,15 +3342,17 @@ export class ProductService {
         enabled: true,
         token: typeof input.token === "string" ? input.token : undefined,
       };
-      await withConnector(c, (client) => client.listTools());
-      this.db.put("connector", c);
+      await withConnector(c, (client) =>
+        client.listTools(undefined, { timeout: c.toolTimeoutMs ?? 60000 }),
+      );
+      this.connectors.put(c, revision);
       this.notify();
       reply(res, { id: c.id, name: c.name });
       return;
     }
     const connector = path.match(/^\/connectors\/([^/]+)$/);
     if (connector && method === "DELETE") {
-      this.db.remove("connector", connector[1]);
+      this.connectors.remove(connector[1]);
       this.notify();
       reply(res, { ok: true });
       return;
@@ -2193,51 +3391,5 @@ export class ProductService {
       await new Promise((resolve) => setTimeout(resolve, 10));
     await this.tasks.store.tail;
     this.tasks.store.conversations.db.close();
-  }
-  async telegram(text: string): Promise<string> {
-    const [command, ...rest] = text.trim().split(/\s+/);
-    const arg = rest.join(" ");
-    if (["/bots", "/help", "/start"].includes(command))
-      return (
-        this.db
-          .all<Bot>("bot")
-          .filter((b) => !b.hidden)
-          .map((b) => `${b.name}\n/bot ${b.id}`)
-          .join("\n\n") || "請先在 Web 建立 Bot。"
-      );
-    if (command === "/bot") {
-      const bot = this.bot(arg);
-      this.db.put("preferences", { id: "telegram-bot", botId: bot.id });
-      return `已切換至 ${bot.name}，會接續同一段對話。`;
-    }
-    if (command === "/approve" || command === "/deny") {
-      this.decide(arg, { approved: command === "/approve" });
-      return "已處理核准要求。";
-    }
-    const id = this.db.get<{ botId: string }>(
-      "preferences",
-      "telegram-bot",
-    )?.botId;
-    if (!id) return "請使用 /bots 查看名單，再用 /bot ID 選擇 Bot。";
-    const bot = this.bot(id);
-    if (command === "/stop") {
-      this.tasks.stop(bot.sessionId);
-      for (const job of this.db.all<Job>("job"))
-        if (job.botId === id) this.jobControllers.get(job.id)?.abort();
-      for (const job of this.db.all<Job>("job"))
-        if (job.botId === id && job.status === "queued")
-          this.db.put("job", { ...job, status: "cancelled" });
-      return "已停止工作與待執行任務。";
-    }
-    if (command === "/status")
-      return `${bot.name}：${this.tasks.running.has(bot.sessionId) ? "執行中" : "待命"}`;
-    if (command === "/steer") {
-      const steer = this.steers.get(id);
-      if (!steer) return "目前没有執行中的任務。";
-      await steer(string(arg));
-      return "已補充指示。";
-    }
-    await this.submit(id, { prompt: text, requestId: randomUUID() });
-    return `已交給 ${bot.name}，完成或需要核准時會通知你。`;
   }
 }

@@ -126,6 +126,8 @@ export function policyPathMatches(
 }
 
 const mutationTools = new Set([
+  "create_coding_task",
+  "track_pull_request",
   "write_file",
   "edit_file",
   "apply_patch",

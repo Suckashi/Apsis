@@ -37,15 +37,17 @@ export function ApprovalModeControl({
         label={
           <>
             {settings && <ApprovalModeIcon mode={settings.approvalMode} />}
-            {!settings
-              ? uiText("載入中…")
-              : busy
-                ? uiText("儲存中…")
-                : uiText(
-                    approvalModes.find(
-                      (mode) => mode.value === settings.approvalMode,
-                    )!.label,
-                  )}
+            <span className="approval-mode-label">
+              {!settings
+                ? uiText("載入中…")
+                : busy
+                  ? uiText("儲存中…")
+                  : uiText(
+                      approvalModes.find(
+                        (mode) => mode.value === settings.approvalMode,
+                      )!.label,
+                    )}
+            </span>
             <span aria-hidden="true"> ▾</span>
           </>
         }

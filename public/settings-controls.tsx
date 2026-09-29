@@ -21,6 +21,79 @@ export type SettingsRequest = <T>(
   method?: string,
   body?: unknown,
 ) => Promise<T>;
+
+function RememberedApprovals({ api }: { api: SettingsRequest }) {
+  const [rules, setRules] =
+    useState<{ id: string; tool: string; args: unknown; legacy?: boolean }[]>();
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const load = async () => {
+    setBusy(true);
+    setNotice("");
+    try {
+      setRules(await api("/rules"));
+    } catch (error) {
+      setNotice((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="remembered-approvals">
+      <h4>{uiText("已記住的核准")}</h4>
+      <p className="field-help">
+        {uiText(
+          "記住的核准只適用於原任務及其派工。舊版永久核准保留供查閱，不再生效。",
+        )}
+      </p>
+      <button
+        type="button"
+        className="secondary"
+        disabled={busy}
+        onClick={() => void load()}
+      >
+        {busy ? t("loading") : uiText("載入核准紀錄")}
+      </button>
+      {notice && (
+        <p role="status" className="notice">
+          {notice}
+        </p>
+      )}
+      {rules?.length === 0 && (
+        <p className="muted">{uiText("目前沒有已記住的核准。")}</p>
+      )}
+      {rules?.map((rule) => (
+        <div className="rule" key={rule.id}>
+          <strong>{rule.tool}</strong>
+          <small>
+            {uiText(rule.legacy ? "舊版紀錄（不生效）" : "限原任務及其派工")}
+          </small>
+          <pre>{JSON.stringify(rule.args, null, 2)}</pre>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setNotice("");
+              try {
+                await api(`/rules/${encodeURIComponent(rule.id)}`, "DELETE");
+                setRules((old) => old?.filter((item) => item.id !== rule.id));
+                setNotice(uiText("核准已撤銷。"));
+              } catch (error) {
+                setNotice((error as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {uiText("撤銷核准")}
+          </button>
+        </div>
+      ))}
+    </section>
+  );
+}
 const labels = {
   maxTurns: ["每次任務的回合上限", "Maximum turns per task"],
   taskTimeoutMs: ["任務逾時（秒）", "Task timeout (seconds)"],
@@ -347,7 +420,7 @@ export function ExecutionSettings({
             ))}
           </fieldset>
           <details className="settings-advanced">
-            <summary>{t("permissions")}</summary>
+            <summary>{uiText("進階權限")}</summary>
             <label className="checkbox">
               <input
                 type="checkbox"
@@ -369,6 +442,7 @@ export function ExecutionSettings({
               }
               disabled={busy}
             />
+            <RememberedApprovals api={api} />
           </details>
           <div className="settings-save-row">
             <button className="primary" disabled={busy || !dirty || conflict}>
@@ -407,21 +481,16 @@ export function ExecutionSettings({
 }
 
 export function BotAccessFields({
-  skills,
   connectors,
-  skillIds,
   connectorIds,
   permissionMode,
   onChange,
   disabled,
 }: {
-  skills: { id: string; name: string }[];
   connectors: { id: string; name: string; enabled: boolean }[];
-  skillIds: string[];
   connectorIds: string[];
   permissionMode: "workspace" | "readonly";
   onChange: (patch: {
-    skillIds?: string[];
     connectorIds?: string[];
     permissionMode?: "workspace" | "readonly";
   }) => void;
@@ -446,15 +515,9 @@ export function BotAccessFields({
         </select>
         <small className="field-help">{t("accessHelp")}</small>
       </label>
+      <p className="field-help">{uiText("共用技能會自動提供給所有 Bots。")}</p>
       {(
         [
-          {
-            title: t("selectedSkills"),
-            empty: t("noSkills"),
-            items: skills,
-            selected: skillIds,
-            key: "skillIds",
-          },
           {
             title: t("selectedConnectors"),
             empty: t("noConnectors"),

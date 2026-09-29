@@ -240,7 +240,16 @@ export function ContextPanel({
         <div className="memory" key={m.id}>
           <p>{m.content}</p>
           <small>
-            {t(m.tier === "core" ? "核心" : "參考")} · v{m.revision ?? 1}{" "}
+            {t(
+              m.scopeKey === "global"
+                ? "跨工作偏好"
+                : m.scopeKey?.startsWith("project:")
+                  ? "專案記憶"
+                  : m.scopeKey === "legacy"
+                    ? "既有工作記憶"
+                    : "目前任務記憶",
+            )}{" "}
+            · {t(m.tier === "core" ? "核心" : "參考")} · v{m.revision ?? 1}{" "}
             {m.locked ? "🔒" : ""} {m.enabled === false ? t("已停用") : ""}
           </small>
           <button onClick={() => setEditing(m)}>{t("編輯")}</button>
@@ -261,7 +270,10 @@ export function ContextPanel({
           onSubmit={(e) => {
             e.preventDefault();
             void act(async () => {
-              await api(base + "/memories", editing);
+              await api(base + "/memories", {
+                ...editing,
+                workContextId: usage?.context.id,
+              });
               setEditing(undefined);
               await refresh();
             });
@@ -277,6 +289,24 @@ export function ContextPanel({
                 setEditing({ ...editing, content: e.target.value })
               }
             />
+          </label>
+          <label>
+            {t("記憶範圍")}
+            <select
+              value={editing.scopeKey === "global" ? "global" : "current"}
+              onChange={(e) =>
+                setEditing({ ...editing, scopeKey: e.target.value })
+              }
+            >
+              <option value="current">
+                {t(
+                  usage?.context.location?.projectId
+                    ? "專案記憶"
+                    : "目前任務記憶",
+                )}
+              </option>
+              <option value="global">{t("跨工作偏好")}</option>
+            </select>
           </label>
           <label>
             {t("分類")}

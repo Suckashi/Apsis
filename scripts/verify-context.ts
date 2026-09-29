@@ -62,14 +62,19 @@ try {
   await expect(
     page.getByText("舊任務唯一證據青鳥", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "新任務", exact: true }).click();
+  const response = await fetch(url + "/api/v2/bots/" + bot.id + "/contexts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Apsis-Client": "1" },
+    body: "{}",
+  });
+  assert.equal(response.ok, true);
   await expect
     .poll(() => app.tasks.store.conversations.contexts(bot.sessionId).length)
     .toBe(2);
-  await page.getByRole("button", { name: "切換詳情面板" }).click();
+  await page.locator(".bot-actions-menu summary").click();
   await page
-    .locator("#bot-details")
-    .getByRole("button", { name: /^記憶/ })
+    .locator(".bot-actions-menu")
+    .getByRole("button", { name: "記憶與背景", exact: true })
     .click();
   const panel = page.locator(".context-panel");
   await panel.getByRole("button", { name: "新增記憶" }).click();

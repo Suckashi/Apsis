@@ -3,6 +3,7 @@ const projectSchema = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string(),
+  description: z.string().optional(),
 });
 export const runSchema = z
   .object({
@@ -29,6 +30,24 @@ export const runSchema = z
     createdAt: z.string(),
     text: z.string(),
     activity: z.array(z.string()),
+    timeline: z
+      .array(
+        z.discriminatedUnion("kind", [
+          z.object({
+            kind: z.literal("commentary"),
+            id: z.string(),
+            at: z.string(),
+            text: z.string(),
+          }),
+          z.object({
+            kind: z.literal("operation"),
+            id: z.string(),
+            at: z.string(),
+            operationId: z.string(),
+          }),
+        ]),
+      )
+      .optional(),
     progress: z
       .object({
         kind: z.enum(["message", "reply"]),
@@ -112,6 +131,7 @@ const knowledge = z
     id: z.string(),
     content: z.string(),
     agentId: z.string().optional(),
+    scopeKey: z.string().optional(),
     enabled: z.boolean().optional(),
     revisions: z
       .array(z.object({ content: z.string(), at: z.string() }))

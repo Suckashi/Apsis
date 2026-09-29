@@ -1,47 +1,44 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { TelegramChannel, type TelegramCall } from "../server/telegram.ts";
+import { createApp } from "../server/app.ts";
 
-test("paired Telegram private messages reach the Bot product handler", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "apsis-telegram-"));
-  const sent: string[] = [];
-  const call: TelegramCall = async (_token, method, params) => {
-    if (method === "getMe")
-      return { id: 99, username: "apsis_test_bot", is_bot: true } as never;
-    if (method === "getWebhookInfo") return { url: "" } as never;
-    if (method === "getUpdates") return [] as never;
-    if (method === "sendMessage") {
-      sent.push(String(params.text));
-      return { message_id: sent.length } as never;
-    }
-    throw new Error(`Unexpected Telegram method: ${method}`);
-  };
-  const channel = await new TelegramChannel(directory, call).init();
-  t.after(() => channel.stop());
-  channel.productMessage = async (message) => `Bot received: ${message}`;
-  await channel.update({
-    token: "12345:abcdefghijklmnopqrstuvwxyz",
-    enabled: true,
+test("removed Telegram routes cannot activate a channel and leave legacy data intact", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "apsis-no-telegram-"));
+  const file = join(directory, "telegram.json");
+  // Deliberately invalid: startup must not even parse the retired config.
+  await writeFile(file, "retired channel config");
+  const app = await createApp({
+    dataDir: directory,
+    workspaceDir: join(directory, "work"),
+    globalSkillsDirectory: join(directory, "global"),
   });
-  const deadline = Date.now() + 2000;
-  while (channel.status !== "connected" && Date.now() < deadline)
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(channel.status, "connected");
-  const pairing = channel.createPairing();
-  const message = (update_id: number, text: string) => ({
-    update_id,
-    message: {
-      message_id: update_id,
-      text,
-      from: { id: 123 },
-      chat: { id: 123, type: "private" },
-    },
+  t.after(async () => {
+    await app.product.close();
+    await new Promise<void>((resolve) => app.server.close(() => resolve()));
   });
-  await channel.accept(message(1, pairing.command));
-  await channel.accept(message(2, "/bots"));
-  assert.equal(channel.view().ownerId, "123");
-  assert.match(sent.at(-1) || "", /Bot received: \/bots/);
+  await new Promise<void>((resolve) =>
+    app.server.listen(0, "127.0.0.1", resolve),
+  );
+  const base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}`;
+  for (const [path, method] of [
+    ["", "GET"],
+    ["", "POST"],
+    ["/pairing", "POST"],
+    ["/unpair", "POST"],
+    ["/test", "POST"],
+  ]) {
+    const response = await fetch(`${base}/api/channels/telegram${path}`, {
+      method,
+      headers: { "X-Apsis-Client": "1", "Content-Type": "application/json" },
+      ...(method === "POST" ? { body: "{}" } : {}),
+    });
+    assert.equal(response.status, 404);
+    await response.arrayBuffer();
+  }
+  assert.equal("telegram" in app, false);
+  assert.equal("telegram" in app.product, false);
+  assert.equal(await readFile(file, "utf8"), "retired channel config");
 });

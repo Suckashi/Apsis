@@ -1,7 +1,8 @@
+import { ModelPicker, connectionModelOptions } from "./model-picker.tsx";
 import { uiText } from "./settings-dictionary.ts";
 import { useSettingsLocale } from "./settings-locale.ts";
 import { ActionFeedback } from "./activity-feedback.tsx";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   ConnectionSelection,
   ModelConnection,
@@ -73,7 +74,7 @@ export function ProviderSettings({
     manual,
   });
   const dirty = page === "editor" && draftSnapshot !== initialDraft.current;
-  useEffect(() => {
+  useLayoutEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
@@ -262,10 +263,10 @@ export function ProviderSettings({
       )}
       {page === "list" && (
         <>
-          <label className="provider-default">
-            {uiText("系統預設模型")}
-            <select
-              aria-label={uiText("系統預設模型")}
+          <div className="provider-default">
+            <span>{uiText("系統預設模型")}</span>
+            <ModelPicker
+              label={uiText("系統預設模型")}
               disabled={busy || !selectable.length}
               value={
                 defaultModel && validDefault
@@ -275,39 +276,28 @@ export function ProviderSettings({
                     ])
                   : ""
               }
-              onChange={(e) => {
-                const [connectionId, model] = JSON.parse(
-                  e.target.value,
-                ) as string[];
-                void perform(async () => {
+              options={connectionModelOptions(selectable)}
+              placeholder={uiText("選擇替代模型")}
+              onChange={async (value) => {
+                const [connectionId, model] = JSON.parse(value) as string[];
+                setBusy(true);
+                setNotice("");
+                try {
                   await api("/api/connections/default", "PUT", {
                     connectionId,
                     model,
                   });
                   await refresh();
                   setNotice(uiText("已更新系統預設模型。"));
-                });
+                } finally {
+                  setBusy(false);
+                }
               }}
-            >
-              {!validDefault && (
-                <option value="" disabled>
-                  {uiText("選擇替代模型")}
-                </option>
-              )}
-              {selectable.map((c) => (
-                <optgroup key={c.id} label={c.name}>
-                  {(c.models || [c.model]).map((m) => (
-                    <option key={m} value={JSON.stringify([c.id, m])}>
-                      {c.name} · {m}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            />
             <small className="field-help">
               {uiText("僅用於未指定模型的 Bot；編輯供應商不會切換此設定。")}
             </small>
-          </label>
+          </div>
           <div className="provider-list">
             {!selectable.length && (
               <p className="empty-section">
@@ -382,13 +372,16 @@ export function ProviderSettings({
             e.preventDefault();
             void perform(async () => {
               await api(
-                editing ? `/api/connections/${editing.id}` : "/api/connections",
+                editing
+                  ? `/api/connections/${encodeURIComponent(editing.id)}`
+                  : "/api/connections",
                 editing ? "PUT" : "POST",
                 {
                   name,
                   provider,
                   url,
                   apiKey: key,
+                  configRevision: editing?.configRevision,
                   models,
                   model: preferred,
                   modelSettings: Object.fromEntries(
@@ -686,7 +679,7 @@ export function ProviderSettings({
                 onClick={() =>
                   void perform(async () => {
                     const result = await api<{ message: string }>(
-                      `/api/connections/${editing.id}/test`,
+                      `/api/connections/${encodeURIComponent(editing.id)}/test`,
                       "POST",
                       { model: editing.model },
                     );

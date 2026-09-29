@@ -83,7 +83,9 @@ async function appReady() {
     if (!response.ok) return false;
     const state = await response.json();
     return (
-      state.runtime === "deepagents" && state.workspace === ".apsis/workspace"
+      (state.runtime === "deepagents" ||
+        (Array.isArray(state.runtimes) && state.runtimes.includes("deepagents"))) &&
+      state.workspace === ".apsis/workspace"
     );
   } catch {
     return false;

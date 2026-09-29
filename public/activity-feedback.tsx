@@ -6,20 +6,44 @@ import { taskText } from "./task-locale.ts";
 export function ActivityMark({ state = "working" }: { state?: string }) {
   return (
     <span className={`activity-mark is-${state}`} aria-hidden="true">
-      {state === "approval" || state === "queued" ? (
+      {state === "queued" ? (
         <svg viewBox="0 0 20 20">
-          <path d="M7 5v10M13 5v10" />
+          <circle cx="10" cy="10" r="7" />
+          <path d="M10 6v4l3 2" />
+        </svg>
+      ) : state === "approval" ? (
+        <svg viewBox="0 0 20 20">
+          <circle cx="10" cy="10" r="7" />
+          <path d="M8 7a2 2 0 0 1 4 0c0 1-2 2-2 3m0 3h.01" />
         </svg>
       ) : state === "completed" ? (
         <svg viewBox="0 0 20 20">
           <path d="m4 10 4 4 8-8" />
         </svg>
-      ) : ["failed", "interrupted", "cancelled", "disconnected"].includes(
-          state,
-        ) ? (
+      ) : state === "finished" ? (
+        <svg viewBox="0 0 20 20">
+          <path d="M4 4h12v9H8l-4 3V4Z" />
+        </svg>
+      ) : ["ready", "unread"].includes(state) ? (
+        <svg viewBox="0 0 20 20">
+          <circle cx="10" cy="10" r="4" />
+        </svg>
+      ) : [
+          "failed",
+          "interrupted",
+          "cancelled",
+          "disconnected",
+          "unavailable",
+        ].includes(state) ? (
         <svg viewBox="0 0 20 20">
           <path d="M10 4v7m0 4v1" />
         </svg>
+      ) : state === "reply" ? (
+        <span className="activity-reply">
+          <span />
+          <span />
+          <span />
+        </span>
       ) : (
         <span className="activity-orbit" />
       )}

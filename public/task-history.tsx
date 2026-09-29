@@ -1,3 +1,4 @@
+import { renderMarkdown } from "./markdown.ts";
 import React, { useEffect, useState } from "react";
 import { approvalReason } from "../shared/approval.ts";
 import {
@@ -6,6 +7,11 @@ import {
   type RunSummary,
 } from "../shared/task-progress.ts";
 import type { ToolOperation } from "../shared/types.ts";
+import {
+  currentWorkStatus,
+  operationGroupLabel,
+  runOutcome,
+} from "../shared/work-presentation.ts";
 import { useSettingsLocale } from "./settings-locale.ts";
 import { ActivityMark } from "./activity-feedback.tsx";
 import {
@@ -21,11 +27,11 @@ import {
 
 export function RunStats({ summary }: { summary: RunSummary }) {
   const locale = useSettingsLocale();
+  const outcome = runOutcome(summary);
+  if (outcome.quiet) return <>{taskText(locale, outcome.label)}</>;
   return (
     <>
-      {summary.warning && summary.status === "completed"
-        ? taskText(locale, "已結束")
-        : taskStatus(locale, summary.status)}{" "}
+      {taskText(locale, outcome.label)}{" "}
       {summary.operationCount > 0 &&
         ` · ${taskCount(locale, summary.operationCount, "operations")}`}
       {summary.botCount > 0 &&
@@ -64,39 +70,19 @@ export function ProgressStrip({
     return () => clearInterval(timer);
   }, []);
   const progress = summary.progress;
-  const phase = !connected
-    ? "disconnected"
-    : progress?.approvalBotId
-      ? "approval"
-      : progress?.phase || "waiting";
+  const current = currentWorkStatus({ connected, active: summary });
+  const phase = current.phase;
   const updatedAt = progress?.updatedAt || summary.createdAt;
-  const quiet =
-    connected &&
-    phase !== "approval" &&
-    phase !== "queued" &&
-    now - Date.parse(updatedAt) >= 30000;
-  const phaseLabel = {
-    disconnected: "重新連線",
-    approval: "需要你處理",
-    queued: "排隊中",
-    waiting: "等待模型",
-    working: "執行中",
-    reply: "回覆中",
-    delegating: "Bot 協作中",
-  }[phase];
   return (
     <section
-      className={`task-progress phase-${phase}`}
+      className={`task-progress phase-${connected ? phase : "disconnected"}`}
       aria-label={t("目前任務進度")}
     >
       <div className="task-progress-main">
         <span className="task-progress-label" role="status" aria-live="polite">
-          <ActivityMark state={phase} />
-          <span className="task-phase">{t(phaseLabel)}</span>
-          <span className="task-current-label" key={progress?.label + phase}>
-            {connected
-              ? taskProgress(locale, progress?.label || "等待模型回應")
-              : t("連線中斷，正在重新連線")}
+          <ActivityMark state={connected ? phase : "disconnected"} />
+          <span className="task-current-label">
+            {taskProgress(locale, current.label)}
           </span>
         </span>
         <span className="task-elapsed">
@@ -104,31 +90,22 @@ export function ProgressStrip({
           {taskElapsed(locale, summary.createdAt, now)}
         </span>
       </div>
-      <p className={`task-progress-hint ${quiet ? "is-quiet" : ""}`}>
-        {phase === "approval" ? (
-          t("核准或拒絕後，任務才會繼續。")
-        ) : phase === "disconnected" ? (
-          t("目前顯示最後收到的狀態，任務可能仍在執行。")
-        ) : quiet ? (
-          <>
-            {t("暫未收到新進度；你可以繼續等待，或停止任務。")}{" "}
-            <span className="task-elapsed">
-              {t("距上次進度")} {taskElapsed(locale, updatedAt, now)}
-            </span>
-          </>
-        ) : phase === "queued" ? (
-          t("等待協作 Bot 開始後會自動更新。")
-        ) : phase === "reply" ? (
-          t("回覆會持續出現在對話中。")
-        ) : (
-          t("進度會隨模型與工具回報更新，你可以隨時補充指示。")
-        )}
-      </p>
       <div className="task-progress-actions">
-        <span>
-          {summary.botCount > 0
-            ? `${taskCount(locale, summary.botCount, "bots")} · ${taskCount(locale, summary.completedBotCount, "completed")}`
-            : taskCount(locale, summary.operationCount, "operations")}
+        <span
+          className="task-progress-note"
+          title={
+            !connected
+              ? t("目前顯示最後收到的狀態，任務可能仍在執行。")
+              : undefined
+          }
+        >
+          {!connected
+            ? t("即時更新中斷，正在重新連線")
+            : phase === "approval"
+              ? t("核准或拒絕後，任務才會繼續。")
+              : phase === "queued"
+                ? t("等待 Bot 開始")
+                : `${t("距上次更新")} ${taskElapsed(locale, updatedAt, now)}`}
           {summary.warning && (
             <span className="task-warning">
               {" "}
@@ -146,6 +123,7 @@ export function ProgressStrip({
             </button>
           )}
           <button
+            type="button"
             aria-expanded={open}
             aria-controls={`task-record-${summary.id}`}
             onClick={toggle}
@@ -167,21 +145,31 @@ export function RunOutcome({
   reveal: () => void;
 }) {
   const locale = useSettingsLocale();
+  const outcome = runOutcome(summary);
   return (
     <button
       type="button"
       onClick={reveal}
-      className={`run-outcome outcome-${summary.status}`}
+      className={`run-outcome outcome-${summary.status}${outcome.quiet ? " is-quiet" : ""}`}
     >
       <span role="status">
         <ActivityMark
-          state={summary.warning ? "interrupted" : summary.status}
+          state={
+            summary.warning
+              ? "interrupted"
+              : summary.status === "completed"
+                ? "finished"
+                : summary.status
+          }
         />
         <span>
           <RunStats summary={summary} />
         </span>
       </span>
-      <span className="outcome-link">{taskText(locale, "查看結果")} ↗</span>
+      <span className="outcome-link">
+        {taskText(locale, outcome.quiet ? "查看回覆" : "查看結果")}{" "}
+        <span aria-hidden="true">↗</span>
+      </span>
     </button>
   );
 }
@@ -330,6 +318,67 @@ export function LegacyDelegations({
   );
 }
 
+export function RunArchive({
+  botId,
+  summaries,
+  expandedRuns,
+  toggleRun,
+  select,
+  available,
+}: {
+  botId: string;
+  summaries: RunSummary[];
+  expandedRuns: Record<string, boolean>;
+  toggleRun: (id: string) => void;
+  select: (id: string) => void;
+  available: Set<string>;
+}) {
+  const locale = useSettingsLocale();
+  const t = (text: string) => taskText(locale, text);
+  const [open, setOpen] = useState(false);
+  const needsAttention = summaries.filter(
+    (s) => s.status === "failed" || s.status === "interrupted" || !!s.warning,
+  ).length;
+  const revealed = summaries
+    .filter((s) => expandedRuns[s.id])
+    .map((s) => s.id)
+    .join(",");
+  useEffect(() => {
+    if (revealed) setOpen(true);
+  }, [revealed]);
+  if (!summaries.length) return null;
+  return (
+    <details
+      className="task-history run-archive"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        {t("其他執行紀錄")} · {taskCount(locale, summaries.length, "records")}
+        {needsAttention > 0 && (
+          <span className="task-warning">
+            {" "}
+            · {t("需留意")} {needsAttention}
+          </span>
+        )}
+      </summary>
+      <div>
+        {summaries.map((summary) => (
+          <RunHistory
+            key={summary.id}
+            botId={botId}
+            summary={summary}
+            open={!!expandedRuns[summary.id]}
+            toggle={() => toggleRun(summary.id)}
+            select={select}
+            available={available}
+          />
+        ))}
+      </div>
+    </details>
+  );
+}
+
 export function RunHistory({
   botId,
   summary,
@@ -337,6 +386,7 @@ export function RunHistory({
   toggle,
   select,
   available,
+  record: suppliedRecord,
 }: {
   botId: string;
   summary: RunSummary;
@@ -344,17 +394,20 @@ export function RunHistory({
   toggle: () => void;
   select: (id: string) => void;
   available: Set<string>;
+  /** Task workspaces already have their run journal; main chats load it on demand. */
+  record?: RunRecord;
 }) {
-  const [record, setRecord] = useState<RunRecord>();
+  const [loadedRecord, setRecord] = useState<RunRecord>();
+  const record = suppliedRecord || loadedRecord;
   const [error, setError] = useState(false);
   const locale = useSettingsLocale();
   const t = (text: string) => taskText(locale, text);
   const [retry, setRetry] = useState(0);
-  const [count, setCount] = useState(10);
+  const [count, setCount] = useState(5);
   const live = summary.status === "running";
   const recordVersion = live ? "live" : summary.revision;
   useEffect(() => {
-    if (!open) return;
+    if (!open || suppliedRecord) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     setError(false);
@@ -382,26 +435,74 @@ export function RunHistory({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [botId, summary.id, recordVersion, live, open, retry]);
+  }, [botId, summary.id, recordVersion, live, open, retry, !!suppliedRecord]);
+  const combinedOperations =
+    record?.run.operations.filter(
+      (operation) =>
+        operation.name === "delegate_task" &&
+        operation.status === "succeeded" &&
+        record.delegations.some(
+          (job) => job.outgoing && job.botId === operation.target,
+        ),
+    ) || [];
+  const timelineEntries = new Map(
+    record?.run.timeline?.map((entry, index) => [
+      entry.id,
+      { ...entry, index },
+    ]),
+  );
   const entries = record
     ? [
-        ...record.run.operations.map((operation) => ({
-          id: `operation-${operation.id}`,
-          at: operation.startedAt,
-          operation,
-          job: undefined as DelegationRecord | undefined,
-        })),
+        ...record.run.operations
+          .filter((operation) => !combinedOperations.includes(operation))
+          .map((operation) => ({
+            id: `operation-${operation.id}`,
+            at:
+              timelineEntries.get(`operation-${operation.id}`)?.at ||
+              operation.startedAt,
+            operation,
+            job: undefined as DelegationRecord | undefined,
+            commentary: undefined as string | undefined,
+          })),
         ...record.delegations.map((job) => ({
           id: `job-${job.id}`,
           at: job.createdAt,
           operation: undefined as ToolOperation | undefined,
           job,
+          commentary: undefined as string | undefined,
         })),
-      ].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id))
+        ...(record.run.timeline || [])
+          .filter((entry) => entry.kind === "commentary")
+          .map((entry) => ({
+            id: entry.id,
+            at: entry.at,
+            commentary: entry.text,
+            operation: undefined as ToolOperation | undefined,
+            job: undefined as DelegationRecord | undefined,
+          })),
+      ].sort(
+        (a, b) =>
+          a.at.localeCompare(b.at) ||
+          (timelineEntries.get(a.id)?.index ?? -1) -
+            (timelineEntries.get(b.id)?.index ?? -1) ||
+          a.id.localeCompare(b.id),
+      )
     : [];
+  const groups: { id: string; entries: typeof entries }[] = [];
+  const visibleEntries = new Set(
+    entries.slice(-count).map((entry) => entry.id),
+  );
+  // Group before paging so the same work keeps its DOM key when older entries
+  // are revealed. Native details retain the user's expanded state on updates.
+  for (const entry of entries) {
+    const previous = groups.at(-1);
+    if (entry.operation && previous?.entries[0].operation)
+      previous.entries.push(entry);
+    else groups.push({ id: entry.id, entries: [entry] });
+  }
   return (
     <section
-      className="task-history"
+      className={`task-history ${record?.run.timeline?.some((entry) => entry.kind === "commentary") ? "has-commentary" : ""}${runOutcome(summary).quiet ? " is-quiet" : ""}`}
       id={`task-${summary.id}`}
       aria-label={t("任務紀錄")}
     >
@@ -417,67 +518,129 @@ export function RunHistory({
         </span>
       </button>
       <div id={`task-record-${summary.id}`} hidden={!open}>
-        {open && (
-          <>
-            {error ? (
-              <p role="alert">
-                {t("無法讀取任務紀錄，請重試。")}{" "}
+        <>
+          {error ? (
+            <p role="alert">
+              {t("無法讀取任務紀錄，請重試。")}{" "}
+              <button
+                className="task-load-more"
+                onClick={() => setRetry((r) => r + 1)}
+              >
+                {t("重新載入")}
+              </button>
+            </p>
+          ) : (
+            !record && <p role="status">{t("正在讀取紀錄…")}</p>
+          )}
+          {record && (
+            <>
+              <div className="work-timeline">
+                {groups
+                  .filter((group) =>
+                    group.entries.some((entry) => visibleEntries.has(entry.id)),
+                  )
+                  .map((group) => {
+                    const first = group.entries[0];
+                    if (first.commentary !== undefined)
+                      return (
+                        <div className="work-commentary" key={group.id}>
+                          <div
+                            dangerouslySetInnerHTML={{
+                              __html: renderMarkdown(first.commentary),
+                            }}
+                          />
+                          <time dateTime={first.at}>
+                            {taskElapsed(locale, summary.createdAt, first.at)}
+                          </time>
+                        </div>
+                      );
+                    if (first.job)
+                      return (
+                        <DelegationRow
+                          key={group.id}
+                          job={first.job}
+                          select={select}
+                          available={available}
+                        />
+                      );
+                    const operations = group.entries
+                      .filter((entry) => visibleEntries.has(entry.id))
+                      .map((entry) => entry.operation!);
+                    const working = operations.some(
+                      (operation) => operation.status === "started",
+                    );
+                    const failed = operations.some((operation) =>
+                      ["failed", "unknown"].includes(operation.status),
+                    );
+                    return (
+                      <details className="task-tool-group" key={group.id}>
+                        <summary>
+                          <ActivityMark
+                            state={
+                              working
+                                ? "working"
+                                : failed
+                                  ? "failed"
+                                  : "completed"
+                            }
+                          />
+                          <span>
+                            {operationGroupLabel(operations)
+                              .slice(0, 3)
+                              .map(
+                                ({ label, count }) =>
+                                  `${t(label)}${count > 1 ? ` × ${count}` : ""}`,
+                              )
+                              .join(" · ")}
+                          </span>
+                          <small>
+                            {taskCount(locale, operations.length, "operations")}
+                          </small>
+                        </summary>
+                        {operations.map((operation) => (
+                          <OperationRow
+                            key={operation.id}
+                            operation={operation}
+                          />
+                        ))}
+                      </details>
+                    );
+                  })}
+              </div>
+              {entries.length > count && (
                 <button
                   className="task-load-more"
-                  onClick={() => setRetry((r) => r + 1)}
+                  onClick={() => setCount((c) => c + 10)}
                 >
-                  {t("重新載入")}
+                  {taskEarlier(locale, entries.length - count)}
                 </button>
-              </p>
-            ) : (
-              !record && <p role="status">{t("正在讀取紀錄…")}</p>
-            )}
-            {record && (
-              <>
-                {entries
-                  .slice(-count)
-                  .map((entry) =>
-                    entry.operation ? (
-                      <OperationRow
-                        key={entry.id}
-                        operation={entry.operation}
-                      />
-                    ) : (
-                      <DelegationRow
-                        key={entry.id}
-                        job={entry.job!}
-                        select={select}
-                        available={available}
-                      />
-                    ),
+              )}
+              {!entries.length && (
+                <p className="muted">
+                  {t(
+                    live
+                      ? "尚未收到工具操作，模型回報後會顯示在這裡。"
+                      : "這次任務沒有工具操作或 Bot 協作。",
                   )}
-                {entries.length > count && (
-                  <button
-                    className="task-load-more"
-                    onClick={() => setCount((c) => c + 10)}
-                  >
-                    {taskEarlier(locale, entries.length - count)}
-                  </button>
-                )}
-                {!entries.length && (
-                  <p className="muted">
-                    {t(
-                      live
-                        ? "尚未收到工具操作，模型回報後會顯示在這裡。"
-                        : "這次任務沒有工具操作或 Bot 協作。",
-                    )}
-                  </p>
-                )}
-                {!!record.run.activity.length && (
-                  <details className="task-raw-activity">
-                    <summary>{t("原始活動紀錄")}</summary>
-                    <pre>{record.run.activity.join("\n")}</pre>
-                  </details>
-                )}
-              </>
-            )}
-          </>
-        )}
+                </p>
+              )}
+              {!!combinedOperations.length && (
+                <details className="task-raw-activity">
+                  <summary>{t("派工工具詳情")}</summary>
+                  {combinedOperations.map((operation) => (
+                    <OperationRow key={operation.id} operation={operation} />
+                  ))}
+                </details>
+              )}
+              {!!record.run.activity.length && (
+                <details className="task-raw-activity">
+                  <summary>{t("原始活動紀錄")}</summary>
+                  <pre>{record.run.activity.join("\n")}</pre>
+                </details>
+              )}
+            </>
+          )}
+        </>
       </div>
     </section>
   );

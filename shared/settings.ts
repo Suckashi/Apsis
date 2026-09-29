@@ -31,11 +31,12 @@ export interface SettingsValues {
 }
 
 export interface Settings extends SettingsValues {
-  revision: number;
+  /** Content hash of settings.toml; includes manual edits and model settings. */
+  revision: string;
 }
 
 export type SettingsPatch = Partial<SettingsValues>;
-export type SettingsUpdate = SettingsPatch & { revision: number };
+export type SettingsUpdate = SettingsPatch & { revision: string };
 export type RuntimeSettings = Pick<
   SettingsValues,
   | "maxTurns"

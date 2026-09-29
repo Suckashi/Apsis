@@ -3,6 +3,19 @@ import type { Memory, StoreState } from "../shared/types.ts";
 import { normalizeFact, rankMemories } from "./knowledge.ts";
 import { estimateTokens } from "./context-budget.ts";
 
+export const memoryOwner = (agentId: string | undefined, scopeKey?: string) =>
+  scopeKey?.startsWith("project:") || scopeKey?.startsWith("task:")
+    ? undefined
+    : agentId;
+export const visibleMemory = (
+  memory: Memory,
+  agentId: string | undefined,
+  scopeKey: string,
+) =>
+  (memory.scopeKey === scopeKey &&
+    memory.agentId === memoryOwner(agentId, scopeKey)) ||
+  (memory.scopeKey === "global" && memory.agentId === agentId);
+
 const conflict = (message: string): never => {
   throw Object.assign(new Error(message), { status: 409 });
 };
@@ -20,7 +33,9 @@ export function changeMemory(
     mergeRevisions?: Record<string, number>;
   },
   source: NonNullable<Memory["source"]>,
+  scopeKey?: string,
 ) {
+  scope = memoryOwner(scope, scopeKey);
   if (!input || typeof input !== "object" || Array.isArray(input))
     throw new Error("記憶資料格式錯誤。");
   if (
@@ -33,7 +48,10 @@ export function changeMemory(
   )
     throw new Error("記憶資料格式錯誤。");
   const existing = input.id
-    ? state.memories.find((m) => m.id === input.id && m.agentId === scope)
+    ? state.memories.find(
+        (m) =>
+          m.id === input.id && m.agentId === scope && m.scopeKey === scopeKey,
+      )
     : undefined;
   if (input.id && !existing)
     throw Object.assign(new Error("找不到記憶。"), { status: 404 });
@@ -56,7 +74,11 @@ export function changeMemory(
     throw new Error("只有使用者能變更鎖定狀態。");
   const merged = (input.mergeIds || []).map((id) => {
     const memory = state.memories.find(
-      (m) => m.id === id && m.agentId === scope && m.id !== existing?.id,
+      (m) =>
+        m.id === id &&
+        m.agentId === scope &&
+        m.scopeKey === scopeKey &&
+        m.id !== existing?.id,
     );
     if (!memory) throw new Error("找不到合併來源。");
     check(memory, input.mergeRevisions?.[id]);
@@ -66,6 +88,7 @@ export function changeMemory(
     const duplicate = state.memories.find(
       (m) =>
         m.agentId === scope &&
+        m.scopeKey === scopeKey &&
         m.enabled !== false &&
         !m.mergedInto &&
         normalizeFact(m.content) === normalizeFact(content),
@@ -79,6 +102,7 @@ export function changeMemory(
       .filter(
         (m) =>
           m.agentId === scope &&
+          m.scopeKey === scopeKey &&
           m.id !== existing?.id &&
           !merged.includes(m) &&
           m.tier === "core" &&
@@ -92,6 +116,7 @@ export function changeMemory(
   const duplicate = state.memories.find(
     (m) =>
       m.agentId === scope &&
+      m.scopeKey === scopeKey &&
       m.enabled !== false &&
       !m.mergedInto &&
       m.id !== existing?.id &&
@@ -105,6 +130,7 @@ export function changeMemory(
   const memory: Memory = existing ?? {
     id: randomUUID(),
     agentId: scope,
+    scopeKey,
     content,
     createdAt: new Date().toISOString(),
     revision: 0,

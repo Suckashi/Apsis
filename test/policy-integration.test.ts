@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -174,7 +174,10 @@ test("task grants inherit down delegation, survive retries, and do not leak into
   t.after(f.close);
   const parent = await f.product.create(),
     child = await f.product.create();
-  f.product.settings.update({ approvalMode: "manual" }, 0);
+  f.product.settings.update(
+    { approvalMode: "manual" },
+    f.product.settings.read().revision,
+  );
   const args = { command: "echo granted" };
   const root = {
     ...job(parent.id, "root"),
@@ -225,7 +228,10 @@ test("legacy permanent grants are inert and current grants can be revoked", asyn
   const f = await fixture();
   t.after(f.close);
   const bot = await f.product.create();
-  f.product.settings.update({ approvalMode: "manual" }, 0);
+  f.product.settings.update(
+    { approvalMode: "manual" },
+    f.product.settings.read().revision,
+  );
   const args = { command: "echo fixture" };
   f.product.db.put("allow", {
     id: "old",
@@ -263,7 +269,10 @@ test("task approval survives process restart without authorizing a new context",
     await rm(directory, { recursive: true, force: true });
   });
   const bot = await app.product.create();
-  app.product.settings.update({ approvalMode: "manual" }, 0);
+  app.product.settings.update(
+    { approvalMode: "manual" },
+    app.product.settings.read().revision,
+  );
   const args = { command: "echo persisted" };
   const pending = app.product.authorize(
     bot.id,
@@ -445,6 +454,7 @@ test("generated document and published copy destinations are authorized before f
   const f = await fixture();
   t.after(f.close);
   const bot = await f.product.create();
+  const workspace = f.tasks.locations.workspace(f.product.workLocation(bot));
   const setRules = (permissionRules: PermissionRule[]) =>
     f.product.settings.update({
       revision: f.product.settings.read().revision,
@@ -463,19 +473,19 @@ test("generated document and published copy destinations are authorized before f
     assert.deepEqual(await readdir(join(f.directory, "work")), []);
     assert.equal(f.product.db.all("artifact").length, 0);
   }
-  await f.tasks.workspace.write("source.txt", "original");
+  await workspace.write("source.txt", "original");
   setRules([deny("write_file", "published")]);
   await assert.rejects(
     f.product.publish(bot, "run", "source.txt", "report"),
     forbidden,
   );
-  assert.deepEqual(await readdir(join(f.directory, "work")), ["source.txt"]);
-  assert.equal(await f.tasks.workspace.read("source.txt"), "original");
+  assert.deepEqual(await readdir(workspace.root), ["source.txt"]);
+  assert.equal(await workspace.read("source.txt"), "original");
   assert.equal(f.product.db.all("artifact").length, 0);
   setRules([]);
   const artifact = await f.product.publish(bot, "run", "source.txt", "report");
-  assert.match(artifact.path, /^published\//);
-  assert.equal(await f.tasks.workspace.read(artifact.path), "original");
+  assert.ok(artifact.snapshotPath);
+  assert.equal(await readFile(join(f.directory, "data", "artifacts", artifact.snapshotPath!), "utf8"), "original");
 });
 
 test("draft send rechecks connector selection, readonly and ancestor/global denies before contacting MCP", async (t) => {
@@ -517,7 +527,7 @@ test("draft send rechecks connector selection, readonly and ancestor/global deni
   t.after(f.close);
   const parent = await f.product.create("parent"),
     child = await f.product.create("child");
-  const connector = f.product.db.put("connector", {
+  const connector = f.product.connectors.put({
     id: randomUUID(),
     name: "MCP fixture",
     enabled: true,
@@ -563,16 +573,68 @@ test("draft send rechecks connector selection, readonly and ancestor/global deni
     }
   }
   f.product.settings.update({
-    revision: 0,
+    revision: f.product.settings.read().revision,
     permissionRules: [deny("mcp_call")],
   });
   assert.equal((await send()).status, 403);
   assert.equal(requests, 0);
-  f.product.settings.update({ revision: 1, permissionRules: [] });
+  f.product.settings.update({
+    revision: f.product.settings.read().revision,
+    permissionRules: [],
+  });
   const sent = await send();
   assert.equal(sent.status, 200);
   assert.equal(sent.data.status, "sent");
   assert.equal(calls, 1);
+});
+
+test("changing an MCP endpoint invalidates a pending approval and remembered grant", async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const connector = f.product.connectors.put({
+    id: "changing-endpoint",
+    name: "Changing endpoint",
+    enabled: true,
+    url: "https://original.example/mcp",
+  });
+  const bot = await f.product.create("MCP", { connectorIds: [connector.id] });
+  f.product.settings.update(
+    { approvalMode: "manual" },
+    f.product.settings.read().revision,
+  );
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const pending = f.product.authorize(
+    bot.id,
+    "test-run",
+    "mcp_call",
+    {
+      connectorId: connector.id,
+      tool: "send_note",
+      arguments: "{}",
+    },
+    controller.signal,
+  );
+  const first = f.product.db
+    .all<Approval>("approval")
+    .find((a) => a.status === "pending")!;
+  f.product.connectors.put({
+    ...connector,
+    url: "https://changed.example/mcp",
+  });
+  f.product.decide(first.id, { approved: true, remember: true });
+  await until(() =>
+    f.product.db
+      .all<Approval>("approval")
+      .some((a) => a.id !== first.id && a.status === "pending"),
+  );
+  assert.equal(f.product.db.all("session-allow").length, 0);
+  const second = f.product.db
+    .all<Approval>("approval")
+    .find((a) => a.status === "pending")!;
+  f.product.decide(second.id, { approved: true, remember: true });
+  await pending;
+  assert.equal(f.product.db.all("session-allow").length, 1);
 });
 
 test("remembered approvals are task-scoped, precede asks, and never override denies", async (t) => {

@@ -155,7 +155,7 @@ test("DeepAgents applies model budgets, excludes bypass tools, and retains priva
     const name = nextTool;
     nextTool = undefined;
     const args =
-      name === "write_file"
+      name === "scratch_write_file"
         ? { file_path: "/private.txt", content: "scratch only" }
         : name === "task"
           ? { description: "bypass", subagent_type: "general-purpose" }
@@ -220,12 +220,24 @@ test("DeepAgents applies model budgets, excludes bypass tools, and retains priva
   await runDeep(base);
   assert.equal(requests[0].max_tokens, 4096);
   const names = requests[0].tools.map((tool: any) => tool.function.name);
-  assert.ok(names.includes("write_file"));
+  assert.ok(names.includes("scratch_write_file"));
+  for (const name of [
+    "ls",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "delete",
+    "glob",
+    "grep",
+  ]) {
+    assert.ok(names.includes(`scratch_${name}`));
+    assert.ok(!names.includes(name));
+  }
   assert.ok(names.includes("shell"));
   assert.ok(!names.includes("task"));
   assert.ok(!names.includes("execute"));
   assert.equal(requests[0].reasoning_effort, undefined);
-  for (const name of ["task", "execute", "write_file"]) {
+  for (const name of ["task", "execute", "scratch_write_file"]) {
     nextTool = name;
     const start = requests.length;
     const options = {
@@ -240,7 +252,7 @@ test("DeepAgents applies model budgets, excludes bypass tools, and retains priva
     assert.equal(requests[start].model, "fixture");
     assert.equal(requests[start].max_tokens, 8192);
     assert.equal(requests.length - start, 2);
-    if (name === "write_file") {
+    if (name === "scratch_write_file") {
       assert.equal(result.engineState?.version, 1);
       assert.ok(
         await import("node:fs/promises").then((fs) =>
@@ -262,14 +274,14 @@ test("DeepAgents applies model budgets, excludes bypass tools, and retains priva
     }
   }
   const start = requests.length;
-  nextTool = "write_file";
+  nextTool = "scratch_write_file";
   const limited = { ...base, maxTurns: 1 };
   await assert.rejects(runDeep(limited), /recursion|limit/i);
   assert.ok(
     requests.length - start <= 1,
     "maxTurns=1 must not silently become 48",
   );
-  nextTool = "write_file";
+  nextTool = "scratch_write_file";
   const configured = {
     ...base,
     maxTurns: 48,

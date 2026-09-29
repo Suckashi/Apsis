@@ -1,3 +1,4 @@
+import { fixtureStyle } from "./browser-style.ts";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -35,21 +36,27 @@ await app.connections.setDefault({
   model: connection.model,
 });
 // Existing installations can still carry a readable Codex connection record.
-app.connections.rows.push({
-  id: "legacy-codex-fixture",
-  name: "ChatGPT Codex",
-  provider: "codex",
-  model: "legacy-model",
-  models: ["legacy-model"],
+await app.connections.mutate((rows) =>
+  rows.push({
+    id: "legacy-codex-fixture",
+    name: "ChatGPT Codex",
+    provider: "codex",
+    model: "legacy-model",
+    models: ["legacy-model"],
+  }),
+);
+app.store.skills.create({
+  id: "skill-a",
+  name: "Settings Skill A",
+  content: "Fixture A",
 });
-await app.store.mutate((state) => {
-  state.skills.push(
-    { id: "skill-a", name: "Settings Skill A", content: "Fixture A" },
-    { id: "skill-b", name: "Settings Skill B", content: "Fixture B" },
-  );
+app.store.skills.create({
+  id: "skill-b",
+  name: "Settings Skill B",
+  content: "Fixture B",
 });
 for (const suffix of ["A", "B"])
-  app.product.db.put<Connector>("connector", {
+  app.product.connectors.put({
     id: `connector-${suffix}`,
     name: `Settings MCP ${suffix}`,
     url: "http://127.0.0.1:1/mcp",
@@ -466,10 +473,7 @@ try {
       for (const name of [
         "Execution & language",
         "Model connections",
-        "Connectors",
-        "Skills",
         "Bot templates",
-        "Auto approvals",
       ])
         await expect(
           dialog(page)
@@ -480,6 +484,51 @@ try {
         "Settings & tools",
       );
       await expect(page.getByLabel("Maximum turns per task")).toHaveValue("25");
+    },
+  );
+  await check(
+    "simplified navigation and approval revocation preserve unsaved settings",
+    async () => {
+      await openSettings(page);
+      const navigation = dialog(page).locator(".settings-tabs");
+      await expect(navigation.getByRole("button")).toHaveCount(3);
+      for (const name of ["Telegram", "Connectors", "Skills", "Auto approvals"])
+        await expect(
+          navigation.getByRole("button", { name, exact: true }),
+        ).toHaveCount(0);
+      const saved = app.product.settings.read();
+      await page.getByLabel("Maximum turns per task").fill("31");
+      app.product.db.put("allow", {
+        id: "browser-legacy-approval",
+        tool: "shell",
+        args: { command: "echo fixture" },
+      });
+      const advanced = page.locator(".execution-settings .settings-advanced");
+      if (
+        !(await advanced.evaluate((node) => (node as HTMLDetailsElement).open))
+      )
+        await advanced.locator(":scope > summary").click();
+      await advanced
+        .getByRole("button", { name: "Load remembered approvals" })
+        .click();
+      const record = advanced
+        .locator(".rule")
+        .filter({ hasText: "echo fixture" });
+      await expect(record).toContainText("Legacy record");
+      await record.getByRole("button", { name: "Revoke approval" }).click();
+      await expect(record).toHaveCount(0);
+      await expect(page.getByLabel("Maximum turns per task")).toHaveValue("31");
+      assert.deepEqual(app.product.settings.read(), saved);
+      assert.equal(
+        app.product.db.get("allow", "browser-legacy-approval"),
+        undefined,
+      );
+      await dialog(page)
+        .getByRole("button", { name: "Cancel", exact: true })
+        .click();
+      await expect(page.getByLabel("Maximum turns per task")).toHaveValue(
+        String(saved.maxTurns),
+      );
     },
   );
   await check(
@@ -635,13 +684,15 @@ try {
     },
   );
   await check(
-    "per-Bot skill/MCP choices, read-only rules, and template save/create",
+    "shared skills, per-Bot MCP choices, read-only rules, and template save/create",
     async () => {
       await page.goto(url);
       await page.getByTitle(bot.name, { exact: true }).click();
       await page.locator(".header-profile").click();
       const profile = page.locator(".profile-form");
-      await profile.getByLabel("Settings Skill B", { exact: true }).uncheck();
+      await expect(
+        profile.getByLabel("Settings Skill B", { exact: true }),
+      ).toHaveCount(0);
       await profile.getByLabel("Settings MCP B", { exact: true }).uncheck();
       await profile
         .getByLabel(/工作區權限|Workspace access/)
@@ -682,7 +733,7 @@ try {
         profile.getByText(/已儲存變更|Changes saved/, { exact: true }),
       ).toBeVisible();
       const saved = app.product.bot(bot.id);
-      assert.deepEqual(saved.skillIds, ["skill-a"]);
+      assert.deepEqual(saved.skillIds, ["skill-a", "skill-b"]);
       assert.deepEqual(saved.connectorIds, ["connector-A"]);
       assert.equal(saved.permissionMode, "readonly");
       assert.equal(saved.permissionRules?.[0].effect, "deny");
@@ -691,7 +742,7 @@ try {
         await page.locator(".header-profile").click();
       await expect(
         profile.getByLabel("Settings Skill B", { exact: true }),
-      ).not.toBeChecked();
+      ).toHaveCount(0);
       await expect(
         profile.getByLabel("Settings MCP B", { exact: true }),
       ).not.toBeChecked();
@@ -727,7 +778,7 @@ try {
         prompt: "fixture",
       });
       await expect.poll(() => calls.length).toBe(1);
-      assert.deepEqual(calls[0].agent?.skillIds, ["skill-a"]);
+      assert.deepEqual(calls[0].agent?.skillIds, ["skill-a", "skill-b"]);
       assert.equal(
         calls[0].runtimeSettings?.maxTurns,
         app.product.settings.read().maxTurns,
@@ -960,7 +1011,7 @@ try {
               );
             }
             if (width === 375) {
-              const large = await p.addStyleTag({
+              const large = await fixtureStyle(p, {
                 content: "html { font-size: 200% }",
               });
               await modes.scrollIntoViewIfNeeded();
@@ -974,7 +1025,9 @@ try {
                 path: join(output, `settings-modes-${theme}-200pct.png`),
                 fullPage: true,
               });
-              await large.evaluate((node) => node.parentNode?.removeChild(node));
+              await large.evaluate((node) =>
+                node.parentNode?.removeChild(node),
+              );
             }
             if (width === 375) {
               await p
@@ -1008,7 +1061,7 @@ try {
               fullPage: true,
             });
             if (width === 375) {
-              await p.addStyleTag({ content: "html { font-size: 200% }" });
+              await fixtureStyle(p, { content: "html { font-size: 200% }" });
               const bounds = await menu.boundingBox();
               assert.ok(
                 bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1,
