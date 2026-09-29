@@ -693,6 +693,7 @@ try {
       await expect(
         profile.getByLabel("Settings Skill B", { exact: true }),
       ).toHaveCount(0);
+      await profile.locator(".profile-advanced > summary").click();
       await profile.getByLabel("Settings MCP B", { exact: true }).uncheck();
       await profile
         .getByLabel(/工作區權限|Workspace access/)
