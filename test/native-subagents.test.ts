@@ -16,6 +16,7 @@ import type { AgentDefinition, Session } from "../shared/types.ts";
 for (const scenario of [
   "success",
   "denied",
+  "pre-cancelled",
   "cancelled",
   "model-cancelled",
 ] as const)
@@ -25,6 +26,11 @@ for (const scenario of [
     const events: any[] = [];
     const operations: any[] = [];
     const authorized: string[] = [];
+    let childRequests = 0;
+    let releaseChildren!: () => void;
+    const childrenStarted = new Promise<void>((resolve) => {
+      releaseChildren = resolve;
+    });
     const upstream = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(chunk);
@@ -34,6 +40,16 @@ for (const scenario of [
       const child = messages.find(
         (m: any) => m.role === "user" && /^Analyze [AB]$/.test(m.content),
       )?.content;
+      if (
+        child &&
+        (scenario === "cancelled" || scenario === "model-cancelled")
+      ) {
+        // Both initial child calls are already in flight before cancellation.
+        // Wait for the server to observe them before triggering the abort;
+        // late receipt of an existing call is not a new model turn.
+        if (++childRequests === 2) releaseChildren();
+        await childrenStarted;
+      }
       if (scenario === "model-cancelled" && child) {
         res.writeHead(200, { "Content-Type": "text/event-stream" });
         res.write(": child model running\n\n");
@@ -117,6 +133,7 @@ for (const scenario of [
       createdAt: new Date().toISOString(),
       messages: [],
     };
+    if (scenario === "pre-cancelled") controller.abort();
     const execution = runAgent({
       mode: "deepagents",
       session,
@@ -146,6 +163,12 @@ for (const scenario of [
         }
       },
     });
+    if (scenario === "pre-cancelled") {
+      await assert.rejects(execution, { name: "AbortError" });
+      assert.equal(requests.length, 0);
+      assert.equal(authorized.length, 0);
+      return;
+    }
     if (scenario === "cancelled" || scenario === "model-cancelled") {
       await assert.rejects(execution);
       const children = events
@@ -158,6 +181,7 @@ for (const scenario of [
         ),
       );
       const count = requests.length;
+      assert.equal(count, 3, "parent and both initial child requests executed");
       await new Promise((r) => setTimeout(r, 100));
       assert.equal(requests.length, count);
       return;
