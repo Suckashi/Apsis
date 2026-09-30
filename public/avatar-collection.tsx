@@ -10,7 +10,6 @@ import {
 import {
   botAvatars,
   botAvatarSeries,
-  avatarAchievements,
   type AvatarCollection,
   type AvatarDraw,
   type AvatarDrawResponse,
@@ -119,12 +118,6 @@ export function AvatarCollectionProvider({
   );
 }
 
-const achievementLabels = {
-  collaboration: "首次 Bot 協作",
-  routine: "首次完成排程",
-  delivery: "首次成果交付",
-} as const;
-
 export function AvatarPicker({
   value,
   onChange,
@@ -138,6 +131,12 @@ export function AvatarPicker({
   const [ownedOnly, setOwnedOnly] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState("all");
   const groupId = useId();
+  const selected =
+    botAvatars.find((avatar) => avatar.id === value) ?? botAvatars[0];
+  const avatarLabel = (avatar: (typeof botAvatars)[number]) =>
+    uiText(avatar.label);
+  const seriesLabel = (series: (typeof botAvatarSeries)[number]) =>
+    uiText(series.label);
   const owned = new Set(
     collection?.owned.map((a) => a.avatarId) ??
       botAvatars.filter((a) => a.series === "basic").map((a) => a.id),
@@ -157,18 +156,25 @@ export function AvatarPicker({
   return (
     <fieldset className="avatar-picker collection-picker">
       <legend>{uiText("Bot 圖示")}</legend>
-      <section className="collection-wallet" aria-label={uiText("頭像收藏")}>
-        <div className="collection-companions" aria-hidden="true">
-          <span>
-            <BrandMark avatar="captain" size={38} />
-          </span>
-          <span>
-            <BrandMark avatar="elf" size={44} />
-          </span>
-          <span>
-            <BrandMark avatar="doctor" size={38} />
+      <section className="avatar-preview" aria-label={uiText("目前選擇的夥伴")}>
+        <div
+          className="avatar-preview-art"
+          style={{ "--companion-color": selected.color } as CSSProperties}
+        >
+          <BrandMark avatar={selected.id} size={104} />
+        </div>
+        <div className="avatar-preview-copy" aria-live="polite">
+          <span className="collection-eyebrow">{uiText("目前選擇的夥伴")}</span>
+          <strong>{avatarLabel(selected)}</strong>
+          <p>{uiText("會顯示在 Bot 名單與對話中。")}</p>
+          <span className="avatar-preview-badge">
+            {uiText(
+              selected.series === "basic" ? "基本款 · 免費選用" : "收藏頭像",
+            )}
           </span>
         </div>
+      </section>
+      <section className="collection-wallet" aria-label={uiText("頭像收藏")}>
         <div className="collection-wallet-heading">
           <div>
             <span className="collection-eyebrow">{uiText("頭像收藏")}</span>
@@ -194,7 +200,7 @@ export function AvatarPicker({
           />
         </div>
         <p className="collection-invitation">
-          {uiText("把小夥伴，一個個帶回家。")}
+          {uiText("完成一次主要工作 +10 點 · 30 點抽一位新夥伴")}
         </p>
         <button
           type="button"
@@ -245,24 +251,10 @@ export function AvatarPicker({
         )}
         <details className="collection-rules">
           <summary>{uiText("如何獲得點數")}</summary>
+          <p>{uiText("成功完成一次主要工作 +10 點，30 點迎接一位新夥伴。")}</p>
           <p>
             {uiText(
-              "成功完成主要任務 +10 點；協作子任務不另計。舊任務不補算。",
-            )}
-          </p>
-          <ul>
-            {avatarAchievements.map((key) => (
-              <li key={key}>
-                <span>{uiText(achievementLabels[key])}</span>
-                <span>
-                  {collection?.achievements[key] ? uiText("已達成") : "+20"}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p>
-            {uiText(
-              "首次獎勵各限一次，可同時達成。成果需成功交付檔案，上傳附件不計。",
+              "聊天與排程使用同一規則；協作子任務、失敗或取消的工作不另計點。舊工作不補算。",
             )}
           </p>
         </details>
@@ -285,7 +277,7 @@ export function AvatarPicker({
           </span>
           <div>
             <span className="collection-eyebrow">{uiText(resultLabel)}</span>
-            <strong>{uiText(last.label)}</strong>
+            <strong>{avatarLabel(last)}</strong>
             <span className="collection-result-balance">
               {uiText("剩餘 {0} 點", [collection?.balance ?? 0])}
             </span>
@@ -329,9 +321,9 @@ export function AvatarPicker({
           aria-describedby={`${groupId}-pool-hint`}
         >
           <option value="all">{uiText("全部系列")}</option>
-          {botAvatarSeries.map(({ id, label }) => (
-            <option key={id} value={id}>
-              {uiText(label)}
+          {botAvatarSeries.map((series) => (
+            <option key={series.id} value={series.id}>
+              {seriesLabel(series)}
             </option>
           ))}
         </select>
@@ -344,7 +336,9 @@ export function AvatarPicker({
           {uiText("這個系列還沒有已擁有的夥伴。切換「全部」看看吧！")}
         </p>
       )}
-      {botAvatarSeries.map(({ id, label }) => {
+      {botAvatarSeries.map((series) => {
+        const { id } = series;
+        const label = seriesLabel(series);
         const items = visibleAvatars.filter((a) => a.series === id);
         return items.length ? (
           <section
@@ -405,7 +399,7 @@ export function AvatarPicker({
                         </span>
                       )}
                       <span className="avatar-label">
-                        {uiText(avatar.label)}
+                        {avatarLabel(avatar)}
                       </span>
                       {locked && (
                         <span

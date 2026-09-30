@@ -194,7 +194,7 @@ try {
     fullPage: true,
   });
   await page.locator(".profile-avatar-disclosure > summary").click();
-  await page.getByRole("radio", { name: "藍色雲朵" }).check();
+  await page.getByRole("radio", { name: "藍色雲朵", exact: true }).check();
   await page.locator(".profile-avatar-disclosure > summary").click();
   await page.screenshot({
     path: join(output, "mobile-create-bot.png"),

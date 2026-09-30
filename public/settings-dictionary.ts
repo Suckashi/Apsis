@@ -2,6 +2,16 @@ import { getSettingsLocale } from "./settings-locale.ts";
 
 // Source messages are stable dictionary keys. User content is never translated.
 export const english: Record<string, string> = {
+  目前選擇的夥伴: "Selected companion",
+  "基本款 · 免費選用": "Original · Free to use",
+  收藏頭像: "Collected avatar",
+  "會顯示在 Bot 名單與對話中。": "Shown in your Bot list and conversations.",
+  "完成一次主要工作 +10 點 · 30 點抽一位新夥伴":
+    "Complete a main task: +10 points · Meet a new friend: 30 points",
+  "成功完成一次主要工作 +10 點，30 點迎接一位新夥伴。":
+    "Complete a main task for +10 points. Meet a new companion for 30 points.",
+  "聊天與排程使用同一規則；協作子任務、失敗或取消的工作不另計點。舊工作不補算。":
+    "Chats and schedules follow the same rule. Delegated, failed or cancelled tasks earn no points. Earlier work is not counted.",
   專案設定: "Project settings",
   "正在處理…": "Working…",
   處理失敗: "Could not finish",

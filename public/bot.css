@@ -3019,6 +3019,55 @@ label textarea::placeholder {
   container-type: inline-size;
   width: 100%;
 }
+.avatar-preview {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+}
+.avatar-preview-art {
+  display: grid;
+  place-items: center;
+  width: 120px;
+  height: 120px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--companion-color) 22%, var(--surface)),
+    color-mix(in srgb, var(--companion-color) 5%, var(--surface)) 72%
+  );
+}
+.avatar-preview-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+.avatar-preview-copy strong {
+  font-size: 1.25rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.avatar-preview-copy p {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.avatar-preview-badge {
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--accent);
+  border-radius: 6px;
+  padding: 3px 7px;
+  background: var(--selected);
+}
 .collection-picker .collection-wallet {
   padding: 16px;
   border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line));
@@ -3371,6 +3420,18 @@ label textarea::placeholder {
   background: var(--hover);
 }
 @container (max-width: 320px) {
+  .avatar-preview {
+    gap: 10px;
+    padding: 14px 10px;
+  }
+  .avatar-preview-art {
+    width: 88px;
+    height: 88px;
+  }
+  .avatar-preview-art svg {
+    width: 80px;
+    height: 80px;
+  }
   .collection-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

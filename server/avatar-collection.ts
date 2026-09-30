@@ -9,7 +9,7 @@ import {
   type AvatarDrawResponse,
   type BotAvatarId,
 } from "../shared/bot-avatars.ts";
-import type { Artifact, Job } from "../shared/product.ts";
+import type { Job } from "../shared/product.ts";
 import type { ProductDB } from "./product-db.ts";
 
 interface CollectionRecord {
@@ -87,36 +87,14 @@ export class AvatarCollectionService {
         !!job.delegatedBy ||
         !!job.parentJobId ||
         job.contextKind === "delegation";
-      let points = delegated ? 0 : 10;
-      const earned: AvatarAchievement[] = [];
-      const award = (key: AvatarAchievement, qualifies: boolean) => {
-        if (qualifies && !state.achievements[key]) {
-          state.achievements[key] = at;
-          earned.push(key);
-          points += 20;
-        }
-      };
-      award("collaboration", delegated);
-      award("routine", job.contextKind === "routine");
-      award(
-        "delivery",
-        !state.achievements.delivery &&
-          !!job.runId &&
-          this.db
-            .all<Artifact>("artifact")
-            .some(
-              (a) =>
-                a.kind === "result" &&
-                a.runId === job.runId &&
-                a.botId === job.botId,
-            ),
-      );
+      // One rule for chat, schedules and delivered files. Existing bonuses remain in history.
+      const points = delegated ? 0 : 10;
       state.balance += points;
       state.revision++;
       this.db.put("avatar-reward", {
         id: job.id,
         points,
-        achievements: earned,
+        achievements: [],
         createdAt: at,
       });
       this.db.put("avatar-collection", state);

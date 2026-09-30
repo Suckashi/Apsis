@@ -10,6 +10,7 @@ import { createApp } from "../server/app.ts";
 import { browserExecutable } from "../server/bot-browser.ts";
 import type { Job } from "../shared/product.ts";
 import { botAvatars, botAvatarSeries } from "../shared/bot-avatars.ts";
+import { fixtureStyle } from "./browser-style.ts";
 
 const output = "artifacts/avatar-collection";
 await mkdir(output, { recursive: true });
@@ -64,7 +65,67 @@ try {
   await expect(page.locator(".collection-empty")).toBeVisible();
   await page.getByRole("button", { name: "全部", exact: true }).click();
   await page.getByLabel("頭像系列", { exact: true }).selectOption("all");
-  await expect(page.getByRole("radio", { name: /頭像 07/ })).toBeDisabled();
+  // Use the real rendered SVGs for a reviewable contact sheet, not a second art implementation.
+  const art = await page
+    .locator(".collection-grid [data-avatar]")
+    .evaluateAll((nodes) =>
+      Object.fromEntries(
+        nodes.map((node) => [
+          node.getAttribute("data-avatar")!,
+          node.outerHTML,
+        ]),
+      ),
+    );
+  const escapeHtml = (value: string) =>
+    value.replace(
+      /[&<>\"]/g,
+      (character) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character]!,
+    );
+  const galleryHtml = `<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>Bot avatars</title>
+    <style>
+      *{box-sizing:border-box}body{margin:0;padding:40px;background:#f7f6f2;color:#292934;font-family:system-ui,"Microsoft JhengHei",sans-serif}
+      header{display:flex;justify-content:space-between;align-items:center;margin-bottom:26px}h1{font-size:34px;margin:0 0 6px;letter-spacing:-1px}
+      header p{margin:0;font-size:14px;color:#65656f}.count{font-size:13px;color:#65656f}
+      main{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:12px}
+      article{display:flex;flex-direction:column;align-items:center;padding:14px 8px 12px;border:1px solid #e4e1db;border-radius:18px;background:#fff}
+      .art{width:96px;height:96px;display:grid;place-items:center;border-radius:50%;background:color-mix(in srgb,var(--color) 14%,#fff)}
+      .art svg{width:88px;height:88px}strong{font-size:14px;margin-top:8px}.english{font-size:11px;color:#65656f;margin-top:2px}
+      .free{border-color:#c8bddb;background:#fcfaff}body[data-theme=dark]{background:#141419;color:#fafafa}
+      body[data-theme=dark] article{background:#202027;border-color:#383840}body[data-theme=dark] .art{background:color-mix(in srgb,var(--color) 15%,#202027)}
+      body[data-theme=dark] .free{border-color:#79689b}body[data-theme=dark] p,body[data-theme=dark] .english,body[data-theme=dark] .count{color:#b1b1ba}
+    </style><header><div><h1>Bot 大頭貼</h1><p>熟悉的夥伴，更簡單的收藏。</p></div><span class="count">48 款頭像 · 前 6 款免費選用</span></header><main>
+    ${botAvatars.map((a) => `<article class="${a.series === "basic" ? "free" : ""}"><div class="art" style="--color:${a.color}">${art[a.id]}</div><strong>${escapeHtml(a.label)}</strong><span class="english">${escapeHtml(a.series === "basic" ? "Free" : "Collectible")}</span></article>`).join("")}
+    </main></html>`;
+  assert.equal(
+    new Set(
+      Object.values(art).map((svg) => svg.replace(/data-avatar="[^"]+"/g, "")),
+    ).size,
+    botAvatars.length,
+    "every collected companion has a distinct rendered appearance",
+  );
+  await writeFile(join(output, "avatar-gallery.html"), galleryHtml);
+  const gallery = await context.newPage();
+  await gallery.setViewportSize({ width: 1200, height: 1120 });
+  await gallery.setContent(galleryHtml);
+  await gallery.screenshot({
+    path: join(output, "avatar-gallery-light.png"),
+    fullPage: true,
+  });
+  await gallery.evaluate(() =>
+    document.body.setAttribute("data-theme", "dark"),
+  );
+  await gallery.screenshot({
+    path: join(output, "avatar-gallery-dark.png"),
+    fullPage: true,
+  });
+  await gallery.close();
+  await expect(
+    page.getByRole("radio", {
+      name: botAvatars.find((a) => a.id === "captain")!.label,
+      exact: false,
+    }),
+  ).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "抽一次 · 30 點" }),
   ).toBeDisabled();
@@ -72,7 +133,21 @@ try {
   await expect(page.getByRole("radio")).toHaveCount(6);
   await page.getByRole("button", { name: "全部", exact: true }).click();
   await page.getByLabel("名稱", { exact: true }).fill("收藏夥伴");
-  await page.getByRole("radio", { name: "藍色雲朵", exact: true }).check();
+  await page
+    .getByRole("radio", {
+      name: botAvatars.find((a) => a.id === "cloud")!.label,
+      exact: true,
+    })
+    .check();
+  await expect(
+    page.locator('.avatar-preview [data-avatar="cloud"]'),
+  ).toBeVisible();
+  await expect(page.locator(".avatar-preview-copy strong")).toHaveText(
+    "藍色雲朵",
+  );
+  await expect(page.locator(".collection-grid svg[data-avatar]")).toHaveCount(
+    botAvatars.length,
+  );
   await page.getByRole("button", { name: "建立 Bot", exact: true }).click();
   await expect(page.locator(".header-profile")).toBeVisible();
   const bot = app.product.snapshot().bots[0];
@@ -132,6 +207,9 @@ try {
     "drawing does not equip automatically",
   );
   await page.getByRole("button", { name: "選用此頭像" }).click();
+  await expect(
+    page.locator(`.avatar-preview [data-avatar="${avatar}"]`),
+  ).toBeVisible();
   await page.getByRole("button", { name: "儲存變更", exact: true }).click();
   await expect.poll(() => app.product.bot(bot.id).avatar).toBe(avatar);
   await expect(
@@ -150,10 +228,14 @@ try {
     .locator(".collection-picker")
     .screenshot({ path: join(output, "collection-dark.png") });
   await page
-    .locator('[aria-label="系列 2"]')
+    .locator(
+      `.collection-series[aria-label="${botAvatarSeries.find((s) => s.id === "voyage")!.label}"]`,
+    )
     .screenshot({ path: join(output, "voyage-avatars.png") });
   await page
-    .locator('[aria-label="系列 3"]')
+    .locator(
+      `.collection-series[aria-label="${botAvatarSeries.find((s) => s.id === "magic")!.label}"]`,
+    )
     .screenshot({ path: join(output, "magic-avatars.png") });
   for (const series of botAvatarSeries.slice(3)) {
     await page.getByLabel("頭像系列", { exact: true }).selectOption(series.id);
@@ -190,7 +272,9 @@ try {
   await page.getByLabel("頭像系列", { exact: true }).selectOption("sanrio");
   await expect(page.getByRole("radio")).toHaveCount(6);
   await page
-    .locator('.collection-series[aria-label="系列 9"]')
+    .locator(
+      `.collection-series[aria-label="${botAvatarSeries.find((s) => s.id === "sanrio")!.label}"]`,
+    )
     .screenshot({ path: join(output, "sanrio-mobile.png") });
   assert.equal(
     await page.evaluate(
@@ -237,7 +321,21 @@ try {
     exact: true,
   });
   await seriesFilter.selectOption("sanrio");
-  await expect(page.getByRole("radio", { name: /Avatar 44/ })).toHaveCount(1);
+  await expect(
+    page.getByRole("radio", {
+      name: new RegExp("Avatar 44"),
+    }),
+  ).toHaveCount(1);
+  await expect(page.locator(".avatar-preview-copy strong")).toHaveText(
+    avatar === "cloud"
+      ? "Blue cloud"
+      : avatar === "orbit"
+        ? "Purple orbit"
+        : `Avatar ${String(botAvatars.findIndex((a) => a.id === avatar) + 1).padStart(2, "0")}`,
+  );
+  await expect(page.locator(".collection-invitation")).toContainText(
+    "+10 points",
+  );
   await seriesFilter.focus();
   await page.keyboard.press("Home");
   await page.keyboard.press("Enter");
@@ -246,6 +344,54 @@ try {
   await selectedRadio.focus();
   await page.keyboard.press("ArrowLeft");
   await expect(page.locator(".collection-grid input:checked")).toBeEnabled();
+  const responsiveChecks: string[] = [];
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate(
+      (theme) => document.documentElement.setAttribute("data-theme", theme),
+      theme,
+    );
+    for (const width of [1440, 1280, 1024, 768, 390, 375]) {
+      await page.setViewportSize({ width, height: 1080 });
+      await expect(page.locator(".avatar-preview")).toBeVisible();
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+        true,
+        `${theme} at ${width}px has no page overflow`,
+      );
+      await page.locator(".avatar-preview").screenshot({
+        path: join(output, `avatar-preview-${theme}-${width}.png`),
+      });
+      responsiveChecks.push(`${theme}: ${width}px, English template picker`);
+    }
+  }
+  await page.setViewportSize({ width: 740, height: 375 });
+  await expect(page.locator(".avatar-preview")).toBeVisible();
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+    "narrow landscape has no page overflow",
+  );
+  await page.setViewportSize({ width: 1280, height: 1080 });
+  const zoomStyle = await fixtureStyle(page, {
+    content: "html { font-size: 200% !important; }",
+  });
+  await expect(page.locator(".avatar-preview")).toBeVisible();
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+    "200% text zoom has no page overflow",
+  );
+  await page
+    .locator(".avatar-preview")
+    .screenshot({ path: join(output, "avatar-preview-text-zoom.png") });
+  await zoomStyle.evaluate((style) => style.remove());
+  await zoomStyle.dispose();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.locator(".collection-picker")).toHaveCount(0);
   assert.deepEqual(errors, []);
@@ -255,10 +401,10 @@ try {
       {
         passed: true,
         checks: [
-          `${botAvatars.length} SVG avatars`,
-          "all series filters, empty owned state, mobile Sanrio and keyboard series selection",
+          `${botAvatars.length} original SVG avatars and selected companion preview`,
+          "all series filters, empty owned state, mobile collection and keyboard series selection",
           "locked previews and filters",
-          "task points",
+          "flat +10 task points, 30-point draw and preserved IDs",
           "SSE across tabs",
           "lost response and refresh retry",
           "single debit",
@@ -267,7 +413,9 @@ try {
           "English template picker and keyboard selection",
           "light/dark/mobile",
           "reduced motion",
+          "narrow landscape and 200% text zoom",
         ],
+        responsiveChecks,
         drawnAvatar: avatar,
         errors,
       },

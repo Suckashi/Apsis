@@ -71,7 +71,7 @@ test("collection starts empty and rewards only eligible successful work once acr
   assert.equal(f.db.all("avatar-reward").length, 2);
 });
 
-test("first bonuses combine once, delegated jobs have no base points, uploads and failed deliveries do not count", async (t) => {
+test("successful main jobs earn a flat 10 points regardless of schedules or files; delegated jobs earn zero", async (t) => {
   const f = await fixture(t);
   f.artifact("uploaded", "attachment");
   f.collection.finish(f.job({ runId: "uploaded" }));
@@ -83,18 +83,22 @@ test("first bonuses combine once, delegated jobs have no base points, uploads an
   f.collection.finish(
     f.job({ runId: "routine-result", contextKind: "routine" }),
   );
-  assert.equal(f.collection.view().balance, 60);
+  assert.equal(f.collection.view().balance, 20);
   f.collection.finish(f.job({ contextKind: "routine" }));
-  assert.equal(f.collection.view().balance, 70);
+  assert.equal(f.collection.view().balance, 30);
   f.collection.finish(
     f.job({ contextKind: "delegation", delegatedBy: "bot-b" }),
   );
-  assert.equal(f.collection.view().balance, 90);
+  assert.equal(f.collection.view().balance, 30);
   f.collection.finish(
     f.job({ contextKind: "delegation", delegatedBy: "bot-b" }),
   );
-  assert.equal(f.collection.view().balance, 90);
-  assert.equal(Object.keys(f.collection.view().achievements).length, 3);
+  assert.equal(f.collection.view().balance, 30);
+  // Every delegation marker suppresses points, even if a legacy job has no contextKind.
+  f.collection.finish(f.job({ parentJobId: "parent", contextKind: "chat" }));
+  f.collection.finish(f.job({ delegatedBy: "bot-b", contextKind: "chat" }));
+  assert.equal(f.collection.view().balance, 30);
+  assert.deepEqual(f.collection.view().achievements, {});
 });
 
 test("30 points per draw, no duplicates, retry is idempotent even after collection completion", async (t) => {
@@ -214,4 +218,33 @@ test("collection survives deleted source jobs and reopening the database", async
   assert.deepEqual(collection.draw(requestId).draw, draw.draw);
   collection.finish(jobs[0]);
   assert.equal(collection.view().balance, 10);
+});
+
+test("simplified rewards retain historical bonuses and never re-credit their jobs", async (t) => {
+  const f = await fixture(t);
+  const previous = f.job({ contextKind: "routine" });
+  const at = f.collection.view().startedAt;
+  const receipt = {
+    id: previous.id,
+    points: 30,
+    achievements: ["routine"],
+    createdAt: at,
+  };
+  f.db.put("avatar-reward", receipt);
+  f.db.put("avatar-collection", {
+    id: "global",
+    startedAt: at,
+    revision: 1,
+    balance: 30,
+    acquired: { captain: at },
+    achievements: { routine: at },
+  });
+  f.collection.init();
+  f.collection.finish(previous);
+  assert.equal(f.collection.view().balance, 30);
+  assert.deepEqual(f.db.get("avatar-reward", previous.id), receipt);
+  assert.equal(f.collection.requireOwned("captain"), "captain");
+  f.collection.finish(f.job({ contextKind: "routine" }));
+  assert.equal(f.collection.view().balance, 40);
+  assert.deepEqual(f.collection.view().achievements, { routine: at });
 });
