@@ -1,7 +1,5 @@
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "./context-budget.ts";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type {
   ConnectionSelection,
   Environment,
@@ -42,7 +40,6 @@ const keys = {
   anthropic: "ANTHROPIC_API_KEY",
   "openai-compatible": "COMPATIBLE_API_KEY",
   ollama: "",
-  codex: "",
 };
 export class Connections {
   readonly config: ConfigStore;
@@ -55,30 +52,11 @@ export class Connections {
     this.config = new ConfigStore(directory);
   }
   async init() {
-    this.config.init(this.directory);
+    this.config.init();
     return this;
   }
   attachDB(db: ProductDB) {
     this.db = db;
-    if (!db.get("migration", "connection-verification-v1")) {
-      const legacyFile = join(this.directory, "connections.json");
-      if (existsSync(legacyFile)) {
-        try {
-          for (const row of JSON.parse(
-            readFileSync(legacyFile, "utf8"),
-          ) as SavedConnection[])
-            if (row.verification)
-              db.put("connection-verification", {
-                id: row.id,
-                verification: row.verification,
-                fingerprint: this.rowFingerprint(row),
-              });
-        } catch {
-          /* Optional historical diagnostics must not block valid settings. */
-        }
-      }
-      db.put("migration", { id: "connection-verification-v1" });
-    }
   }
   get rows(): SavedConnection[] {
     return this.config.read().value.connections.map((row) => {
@@ -142,15 +120,13 @@ export class Connections {
         ),
         credentialConfigured:
           !!(apiKeyEnv ? process.env[apiKeyEnv] : apiKey) ||
-          ["ollama", "codex"].includes(row.provider),
+          row.provider === "ollama",
       }));
   }
   selection(connectionId: unknown, model?: unknown): ConnectionSelection {
     if (typeof connectionId !== "string") error("請選擇模型連線。");
     const connection = this.view().find((row) => row.id === connectionId);
     if (!connection) error("找不到可用的模型連線。");
-    if (connection.provider === "codex")
-      error("Codex 接入已移除，請重新選擇模型。");
     const selectedModel = model === undefined ? connection.model : model;
     if (
       typeof selectedModel !== "string" ||
@@ -164,7 +140,6 @@ export class Connections {
     const saved = this.savedDefault;
     if (saved) {
       const connection = visible.find((row) => row.id === saved.connectionId);
-      if (connection?.provider === "codex") return null;
       if (connection)
         return {
           connectionId: connection.id,
@@ -178,9 +153,7 @@ export class Connections {
       (row.provider === "openai-compatible"
         ? Boolean(row.url)
         : row.credentialConfigured);
-    const preferred = visible.find(
-      (row) => row.provider !== "codex" && ready(row),
-    );
+    const preferred = visible.find((row) => ready(row));
     return preferred
       ? { connectionId: preferred.id, model: preferred.model }
       : null;
@@ -204,7 +177,6 @@ export class Connections {
     const publicRow = this.view().find((r) => r.id === id);
     if (!publicRow) error("找不到可用的模型連線。");
     const row = this.rows.find((r) => r.id === id)!;
-    if (row.provider === "codex") error("Codex 接入已移除，請重新選擇模型。");
     return {
       MODEL_PROVIDER: row.provider,
       MODEL_ID: model || row.model,
@@ -273,7 +245,6 @@ export class Connections {
     };
     const provider = input.provider as Provider;
     if (!Object.hasOwn(keys, provider)) error("未知供應商。");
-    if (provider === "codex") error("Codex 接入已移除，請選擇其他供應商。");
     const model = text("model", 200);
     if (provider === "ollama") ollamaModelName(model);
     const suppliedModels = input.models;

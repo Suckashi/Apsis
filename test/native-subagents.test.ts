@@ -9,9 +9,8 @@ import test from "node:test";
 import { runAgent } from "../server/agent.ts";
 import { Store } from "../server/store.ts";
 import { Workspace } from "../server/workspace.ts";
-import { createTools } from "../server/tools.ts";
-import { toolSchema } from "../server/engines/common.ts";
-import type { AgentDefinition, Session } from "../shared/types.ts";
+
+import type { Session } from "../shared/types.ts";
 
 for (const scenario of [
   "success",
@@ -129,13 +128,12 @@ for (const scenario of [
     const session: Session = {
       id: "test",
       title: "test",
-      mode: "deepagents",
+
       createdAt: new Date().toISOString(),
       messages: [],
     };
     if (scenario === "pre-cancelled") controller.abort();
     const execution = runAgent({
-      mode: "deepagents",
       session,
       store,
       workspace,

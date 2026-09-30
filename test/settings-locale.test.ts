@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { parsers } from "prettier/plugins/typescript";
 import { english, uiError, uiText } from "../public/settings-dictionary.ts";
@@ -34,16 +34,10 @@ test("fixed UI dictionary calls have English entries and matching placeholders",
     );
   }
   let checked = 0;
-  for (const file of [
-    "bot.tsx",
-    "provider-settings.tsx",
-    "bot-ui.tsx",
-    "avatar-collection.tsx",
-    "mcp-json.ts",
-    "settings-controls.tsx",
-    "settings-templates.tsx",
-    "markdown.ts",
-  ]) {
+  const files = (await readdir(new URL("../public/", import.meta.url))).filter(
+    (file) => /\.tsx?$/.test(file),
+  );
+  for (const file of files) {
     const source = await readFile(
       new URL(`../public/${file}`, import.meta.url),
       "utf8",

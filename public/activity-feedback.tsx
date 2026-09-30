@@ -1,4 +1,3 @@
-import React from "react";
 import { useSettingsLocale } from "./settings-locale.ts";
 import { taskText } from "./task-locale.ts";
 

@@ -30,7 +30,7 @@ await app.connections.setDefault({
   connectionId: connection.id,
   model: connection.model,
 });
-const bot = await app.product.create("檔案助理");
+const bot = await app.product.bots.create("檔案助理");
 const location = app.product.workLocation(bot);
 await app.product.files.save(
   location.id,

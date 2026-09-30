@@ -7,7 +7,6 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { createApp } from "../server/app.ts";
 import { git } from "../server/git-workspaces.ts";
-import { discardCodingTasks } from "../server/retired-tasks.ts";
 import type { RunOptions } from "../server/runtime.ts";
 import type { Job } from "../shared/product.ts";
 
@@ -38,7 +37,7 @@ async function fixture(
     url: "http://127.0.0.1:1/v1",
   });
   await app.connections.setDefault({ connectionId: c.id, model: c.model });
-  const bot = await app.product.create("Builder");
+  const bot = await app.product.bots.create("Builder");
   app.server.listen(0, "127.0.0.1");
   await once(app.server, "listening");
   const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}/api/v2`;
@@ -54,7 +53,6 @@ async function fixture(
     await app.product.close();
     app.server.closeAllConnections();
     await new Promise<void>((r) => app.server.close(() => r()));
-    app.product.db.db.close();
   });
   return {
     ...app,
@@ -81,7 +79,7 @@ test("one message endpoint handles chat, steering, retries and state races witho
   t.after(() => release());
   const first = await f.send({ requestId: "first", prompt: "Build it" });
   assert.equal(first.status, 202);
-  await until(() => f.product.steers.has(f.bot.id));
+  await until(() => f.product.execution.steers.has(f.bot.id));
   const input = { requestId: "follow", prompt: "Make it smaller" };
   const replies = await Promise.all([f.send(input), f.send(input)]);
   assert.equal(deliveries, 1);
@@ -100,25 +98,25 @@ test("one message endpoint handles chat, steering, retries and state races witho
   );
   assert.equal(f.product.db.all("job").length, 1);
   release();
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(
     (await f.send({ requestId: "after", prompt: "Next" })).status,
     202,
   );
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(f.product.db.all("job").length, 2);
   assert.equal(
     (await f.request("/coding-tasks", "POST", { prompt: "old" })).status,
     404,
   );
-  assert.ok(!("codingTasks" in f.product.snapshot()));
+  assert.ok(!("codingTasks" in f.product.queries.snapshot()));
   assert.ok(
-    !f.product
+    !f.product.toolRegistry
       .tools(f.bot, "unused")
       .some((tool) => tool.name === "create_coding_task"),
   );
   const oldContext = f.store.conversations.activeId(f.bot.sessionId);
-  const next = f.product.newContext(f.bot.id);
+  const next = f.product.messages.newContext(f.bot.id);
   assert.notEqual(next.id, oldContext);
   assert.ok(f.store.conversations.page(f.bot.sessionId).messages.length);
   assert.equal(
@@ -143,7 +141,7 @@ test("steering rejects foreign attachments and changed files; unconsumed message
   });
   t.after(() => release());
   await f.send({ requestId: "start", prompt: "begin" });
-  await until(() => f.product.steers.has(f.bot.id));
+  await until(() => f.product.execution.steers.has(f.bot.id));
   assert.equal(
     (
       await f.send({
@@ -174,7 +172,7 @@ test("steering rejects foreign attachments and changed files; unconsumed message
     prompt: "remember this",
   });
   release();
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(
     f.store.conversations.message(f.bot.sessionId, follow.data.messageId)
       ?.delivery?.state,
@@ -219,59 +217,12 @@ test("Git folder and isolated worktree remain in the same chat; source edits and
   assert.equal(changes.status, 200);
   assert.match(changes.data.files[0].before, /before/);
   await f.send({ requestId: "work", prompt: "check" });
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(
     (await f.request(route, "PUT", { contextId, path: repo })).status,
     409,
   );
   assert.equal(f.product.db.all<Job>("job")[0].workContextId, contextId);
-});
-
-test("retired tasks and dependent records are discarded without an archive", async (t) => {
-  const f = await fixture(t);
-  f.product.db.put("coding-task", {
-    id: "old",
-    botId: f.bot.id,
-    contextId: "old-context",
-    sessionId: "old-session",
-  });
-  f.product.db.put("job", { id: "old-job", taskId: "old", status: "running" });
-  f.product.db.put("job", {
-    id: "child",
-    parentJobId: "old-job",
-    workContextId: "child-context",
-    runId: "child-run",
-  });
-  f.product.db.put("approval", { id: "approval", runId: "child-run" });
-  f.product.db.put("artifact", {
-    id: "artifact",
-    workContextId: "child-context",
-  });
-  f.product.db.put("job", {
-    id: "chat-job",
-    botId: f.bot.id,
-    status: "completed",
-  });
-  await writeFile(join(f.dir, "work", "retained.txt"), "keep");
-  await discardCodingTasks(f.product.db, f.store);
-  assert.equal(f.product.db.all("coding-task").length, 0);
-  assert.deepEqual(
-    f.product.db.all<{ id: string }>("job").map((j) => j.id),
-    ["chat-job"],
-  );
-  assert.equal(f.product.db.all("approval").length, 0);
-  assert.equal(f.product.db.all("artifact").length, 0);
-  assert.equal(f.product.db.all("archived:job").length, 0);
-  assert.equal(f.product.db.get("migration", "chat-only-v1"), undefined);
-  await assert.rejects(readFile(join(f.store.directory, "archives")), {
-    code: "ENOENT",
-  });
-  assert.equal(
-    await readFile(join(f.dir, "work", "retained.txt"), "utf8"),
-    "keep",
-  );
-  await discardCodingTasks(f.product.db, f.store);
-  assert.equal(f.product.bot(f.bot.id).name, "Builder");
 });
 
 test("scheduled code work has its own context and worktree without changing active chat", async (t) => {
@@ -287,7 +238,7 @@ test("scheduled code work has its own context and worktree without changing acti
   const branch = (await git(repo, "branch", "--show-current")).trim();
   const project = await f.tasks.projects.add({ name: "Scheduled", path: repo });
   const active = f.store.conversations.activeId(f.bot.sessionId);
-  const routine = await f.product.routine(f.bot.id, {
+  const routine = await f.product.routines.routine(f.bot.id, {
     name: "Review",
     prompt: "Review code",
     cron: "0 9 * * *",
@@ -295,14 +246,17 @@ test("scheduled code work has its own context and worktree without changing acti
     projectId: project.id,
     branch,
   });
-  const job = await f.product.runRoutine(routine, "routine-run");
-  await until(() => !f.product.active.size);
+  const job = await f.product.routines.runRoutine(routine, "routine-run");
+  await until(() => !f.product.execution.active.size);
   assert.notEqual(job.workContextId, active);
   assert.equal(job.contextKind, "routine");
   assert.equal(job.location?.kind, "worktree");
   assert.notEqual(job.location?.path, repo);
   assert.equal(f.store.conversations.activeId(f.bot.sessionId), active);
-  assert.equal((await f.product.runRoutine(routine, "routine-run")).id, job.id);
+  assert.equal(
+    (await f.product.routines.runRoutine(routine, "routine-run")).id,
+    job.id,
+  );
   assert.equal(f.product.db.all("job").length, 1);
 });
 
@@ -327,7 +281,7 @@ test("PR follow-ups use the active conversation, deduplicate evidence and stop a
       pullRequest: { ...context.pullRequest!, checkedAt: "2000-01-01" },
     });
     await f.product.workspaces.checkPullRequests();
-    await until(() => !f.product.active.size);
+    await until(() => !f.product.execution.active.size);
   };
   await poll();
   await poll();
@@ -342,7 +296,7 @@ test("PR follow-ups use the active conversation, deduplicate evidence and stop a
   assert.ok(
     f.product.db.all<Job>("job").every((j) => j.workContextId === contextId),
   );
-  f.product.newContext(f.bot.id);
+  f.product.messages.newContext(f.bot.id);
   await f.product.workspaces.checkPullRequests();
   assert.equal(f.product.db.all("job").length, 3);
 });

@@ -118,7 +118,7 @@ const c = await app.connections.save({
   url: "http://127.0.0.1:1/v1",
 });
 await app.connections.setDefault({ connectionId: c.id, model: c.model });
-const bot = await app.product.create("工具進度測試");
+const bot = await app.product.bots.create("工具進度測試");
 app.server.listen(0, "127.0.0.1");
 await once(app.server, "listening");
 const browser = await chromium.launch({ headless: true, channel: "msedge" });

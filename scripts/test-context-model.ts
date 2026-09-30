@@ -1,8 +1,9 @@
+import { appDirectories } from "../server/app-directories.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { Connections } from "../server/connections.ts";
 import { contextBudget } from "../server/context-budget.ts";
@@ -13,7 +14,7 @@ import { runDeep } from "../server/engines/deep.ts";
 
 // Uses configured credentials without modifying the real conversation store.
 // Each run invokes the selected model and incurs the provider's normal usage.
-const connections = await new Connections(resolve(".apsis")).init();
+const connections = await new Connections(appDirectories().dataDir).init();
 const selected = process.argv[2]
   ? connections.selection(process.argv[2], process.argv[3])
   : connections.defaultSelection();
@@ -27,15 +28,13 @@ let store = await new Store(join(dir, "data")).init();
 const workspace = await new Workspace(join(dir, "workspace")).init();
 const id = randomUUID(),
   code = "APSIS-" + randomUUID().slice(0, 8);
-await store.mutate((state) =>
-  state.sessions.push({
-    id,
-    title: "Context verification",
-    mode: "deepagents",
-    createdAt: new Date().toISOString(),
-    messages: [],
-  }),
-);
+await store.conversations.saveSession({
+  id,
+  title: "Context verification",
+
+  createdAt: new Date().toISOString(),
+  messages: [],
+});
 const contextId = store.conversations.activeId(id);
 try {
   for (let cycle = 0; cycle < 3; cycle++) {
@@ -70,7 +69,7 @@ try {
       store,
       workspace,
       session: store.conversations.load(id),
-      mode: "deepagents",
+
       env,
       modelSettings: settings,
       prompt: "請簡短回答專案識別碼，以及仍未完成的工作。不要執行工具。",

@@ -101,9 +101,6 @@ export class ConfigFile<T> {
           configError(`${basename(this.file)} 遺失；請恢復檔案或備份。`);
         const text = create();
         this.decode(text);
-        // A permanent first-version backup makes partial migration recoverable.
-        if (!existsSync(`${this.file}.migration.bak`))
-          atomicWrite(`${this.file}.migration.bak`, text);
         atomicWrite(this.file, text);
       }
       this.read();

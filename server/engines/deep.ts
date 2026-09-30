@@ -197,8 +197,11 @@ export async function runDeep(options: RunOptions) {
     name: "ApsisContextBudget",
     wrapModelCall: async (request, handler) => {
       const memories = selectMemories(
-        scopedState(options.store.state, options.agent, options.memoryKey)
-          .memories,
+        scopedState(
+          options.store.skillState(),
+          options.agent,
+          options.memoryKey,
+        ).memories,
         options.prompt,
         budget.memory,
       );
@@ -660,7 +663,7 @@ export async function runDeep(options: RunOptions) {
                 source: usage?.usage_metadata ? "provider" : "estimate",
                 omittedCoreIds: selectMemories(
                   scopedState(
-                    options.store.state,
+                    options.store.skillState(),
                     options.agent,
                     options.memoryKey,
                   ).memories,

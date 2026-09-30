@@ -216,7 +216,7 @@ test("authenticated remote requests reach the Bot workspace and keep CSRF checks
   });
   assert.equal(state.status, 200);
   const location = app.product.workLocation(
-    await app.product.create("Preview Bot"),
+    await app.product.bots.create("Preview Bot"),
   );
   await app.product.files.save(
     location.id,

@@ -124,14 +124,14 @@ app.product.settings.update(
   },
   app.product.settings.read().revision,
 );
-const model = await app.tasks.connections!.save({
+const model = await app.connections.save({
   name: "測試模型",
   provider: "openai-compatible",
   model: "fixture-model",
   modelSettings: { "fixture-model": { contextWindowTokens: 128000 } },
   url: "http://127.0.0.1:1/v1",
 });
-await app.tasks.connections!.setDefault({
+await app.connections.setDefault({
   connectionId: model.id,
   model: model.model,
 });
@@ -160,8 +160,8 @@ page.on("response", (response) => {
   if (response.status() >= 400)
     console.error(`Browser HTTP ${response.status()}: ${response.url()}`);
 });
-// Exercise the legacy empty-roster onboarding path; fresh installs are covered by verify-coding-workspace.
-app.product!.db.put("migration", { id: "bot-first-v1" });
+// Exercise onboarding after all Bots are removed; fresh installs use default bootstrap.
+app.product!.db.put("bootstrap", { id: "default-bot" });
 try {
   await page.goto(url);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -378,7 +378,7 @@ try {
   });
   await page.getByRole("button", { name: "移除 ui-check.txt" }).click();
   assert.equal(await page.locator(".attachment-chips").count(), 0);
-  assert.equal(app.product!.snapshot().bots[0].avatar, "cloud");
+  assert.equal(app.product!.queries.snapshot().bots[0].avatar, "cloud");
   await page.getByRole("button", { name: /新 Bot 想做什麼/ }).click();
   await page.getByLabel("名稱", { exact: true }).fill("研究助理");
   await page.locator(".profile-avatar-disclosure > summary").click();
@@ -423,7 +423,7 @@ try {
     fullPage: true,
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  assert.equal(app.product!.snapshot().bots[0].avatar, "spark");
+  assert.equal(app.product!.queries.snapshot().bots[0].avatar, "spark");
   await page.getByRole("button", { name: "關閉 Bot 設定" }).click();
   await page
     .getByRole("textbox", { name: "傳送訊息" })
@@ -453,7 +453,7 @@ try {
   );
   assert.equal(
     app
-      .product!.detail(app.product!.snapshot().bots[0].id)
+      .product!.queries.detail(app.product!.queries.snapshot().bots[0].id)
       .runs[0].operations.find((o) => o.name === "shell")?.status,
     "succeeded",
   );
@@ -770,8 +770,8 @@ try {
   } finally {
     await touchContext.close();
   }
-  const bot = app.product!.bot(app.product!.snapshot().bots[0].id);
-  delegateWorkerId = (await app.product!.create("協作助理")).id;
+  const bot = app.product!.bots.bot(app.product!.queries.snapshot().bots[0].id);
+  delegateWorkerId = (await app.product!.bots.create("協作助理")).id;
   await page.getByRole("button", { name: "回覆", exact: true }).first().click();
   await page.locator(".reply-chip").waitFor();
   await page
@@ -995,15 +995,15 @@ try {
     .waitFor();
   await page.locator(".queue-feedback").waitFor({ state: "detached" });
   await page.unroute(stopRoute);
-  await app.product!.remove(delegateWorkerId);
-  const pdf = await app.product!.createDocument(bot, "fixture", {
+  await app.product!.bots.remove(delegateWorkerId);
+  const pdf = await app.product!.artifacts.createDocument(bot, "fixture", {
     format: "pdf",
     name: "PDF report",
     content: "Research result: 42",
   });
   assert.match(
     String(
-      await app.product!.readDocument(
+      await app.product!.artifacts.readDocument(
         pdf.path,
         app.tasks.locations.workspace(app.product.workLocation(bot)),
       ),
@@ -1021,14 +1021,14 @@ try {
     image!,
   );
   const imageResult = await app
-    .product!.tools(bot, "fixture")
+    .product!.toolRegistry.tools(bot, "fixture")
     .find((t) => t.name === "read_image")!
     .execute("image", { path: screenshotPath });
   assert.equal(imageResult.content[0].type, "image");
   await page.locator(".header-profile").click();
   await page.getByRole("button", { name: "刪除 Bot", exact: true }).click();
   await page.getByRole("button", { name: "取消", exact: true }).click();
-  assert.equal(app.product!.bot(bot.id).id, bot.id);
+  assert.equal(app.product!.bots.bot(bot.id).id, bot.id);
   await page.getByRole("button", { name: "刪除 Bot", exact: true }).click();
   await page.screenshot({
     path: join(output, "mobile-delete-bot.png"),
@@ -1038,7 +1038,7 @@ try {
   await page.getByRole("button", { name: "建立第一個 Bot" }).waitFor();
   await page.reload();
   await page.getByRole("button", { name: "建立第一個 Bot" }).waitFor();
-  assert.equal(app.product!.snapshot().bots.length, 0);
+  assert.equal(app.product!.queries.snapshot().bots.length, 0);
   assert.equal(app.product!.browser.pages.has(bot.id), false);
   assert.deepEqual(errors, []);
   console.log(

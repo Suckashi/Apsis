@@ -1,5 +1,5 @@
 import { uiText } from "./settings-dictionary.ts";
-import React, { useEffect, useState } from "react";
+import { useLayoutEffect, useEffect, useState } from "react";
 import type { BotTemplate } from "../shared/product.ts";
 import {
   BotAccessFields,
@@ -7,7 +7,7 @@ import {
   type SettingsRequest,
 } from "./settings-controls.tsx";
 import { AvatarPicker } from "./bot-ui.tsx";
-import type { ProductService } from "../server/product.ts";
+import type { Snapshot } from "../shared/api.ts";
 import { settingsText as t, useSettingsLocale } from "./settings-locale.ts";
 
 export function TemplateSettings({
@@ -21,8 +21,7 @@ export function TemplateSettings({
 }) {
   useSettingsLocale();
   const [templates, setTemplates] = useState<BotTemplate[]>([]);
-  const [catalog, setCatalog] =
-    useState<ReturnType<ProductService["snapshot"]>>();
+  const [catalog, setCatalog] = useState<Snapshot>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -30,7 +29,7 @@ export function TemplateSettings({
   const [editing, setEditing] = useState<BotTemplate>();
   const [initialDraft, setInitialDraft] = useState("");
   const dirty = !!editing && JSON.stringify(editing) !== initialDraft;
-  useEffect(() => {
+  useLayoutEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
@@ -41,7 +40,7 @@ export function TemplateSettings({
     setLoading(true);
     void Promise.all([
       api<BotTemplate[]>("/templates"),
-      api<ReturnType<ProductService["snapshot"]>>("/state"),
+      api<Snapshot>("/state"),
     ])
       .then(([rows, state]) => {
         if (!cancelled) {
@@ -77,7 +76,6 @@ export function TemplateSettings({
     !editing?.connectionId ||
     !!catalog?.connections.some(
       (c) =>
-        c.provider !== "codex" &&
         c.id === editing.connectionId &&
         (c.models || [c.model]).includes(editing.model || ""),
     );
@@ -116,10 +114,11 @@ export function TemplateSettings({
                 onSubmit={(event) => {
                   event.preventDefault();
                   void perform(async () => {
+                    const { id: _id, ...request } = editing;
                     const next = await api<BotTemplate>(
                       `/templates/${template.id}`,
                       "PUT",
-                      editing,
+                      request,
                     );
                     setTemplates((rows) =>
                       rows.map((row) => (row.id === next.id ? next : row)),
@@ -186,19 +185,17 @@ export function TemplateSettings({
                       </option>
                     )}
                     <option value="">{t("defaultModel")}</option>
-                    {catalog?.connections
-                      .filter((c) => c.provider !== "codex")
-                      .flatMap((c) =>
-                        (c.models || [c.model]).map((model) => (
-                          <option
-                            key={`${c.id}:${model}`}
-                            value={JSON.stringify([c.id, model])}
-                          >
-                            {c.name} /{" "}
-                            {c.modelSettings?.[model]?.displayName || model}
-                          </option>
-                        )),
-                      )}
+                    {catalog?.connections.flatMap((c) =>
+                      (c.models || [c.model]).map((model) => (
+                        <option
+                          key={`${c.id}:${model}`}
+                          value={JSON.stringify([c.id, model])}
+                        >
+                          {c.name} /{" "}
+                          {c.modelSettings?.[model]?.displayName || model}
+                        </option>
+                      )),
+                    )}
                   </select>
                 </label>
                 {!validModel && (

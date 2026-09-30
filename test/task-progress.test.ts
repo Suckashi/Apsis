@@ -1,12 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { Bot, Job, Approval } from "../shared/product.ts";
-import type { TaskRun, ToolOperation, RunEvent } from "../shared/types.ts";
+import type { TaskRun, ToolOperation } from "../shared/types.ts";
 import { taskPresentation } from "../server/task-progress.ts";
-import {
-  codexProgress,
-  codexTurnNotifications,
-} from "../server/codex-progress.ts";
 
 const at = "2026-09-25T00:00:00.000Z";
 const bot = (id: string): Bot => ({
@@ -156,15 +152,15 @@ test("run summaries isolate turns, preserve repeated jobs, deduplicate bots and 
   assert.equal(workerView.records(nested).delegations[0].outgoing, false);
 });
 
-test("unlinked legacy records remain visible and terminal uncertainty is not success", () => {
+test("unlinked records remain visible and terminal uncertainty is not success", () => {
   const owner = bot("secretary"),
     task = run("old");
   const older = { ...job("legacy", "a"), delegatedBy: owner.id };
   task.status = "interrupted";
   task.operations = [operation("op", "unknown")];
   const result = taskPresentation(owner, [task], [older], [owner], []);
-  assert.equal(result.legacy[0].id, older.id);
-  assert.equal(result.legacy[0].peerName, "已刪除的 Bot");
+  assert.equal(result.unlinked[0].id, older.id);
+  assert.equal(result.unlinked[0].peerName, "已刪除的 Bot");
   assert.equal(result.summaries[0].warning, "有操作結果不明");
   assert.equal(result.summaries[0].progress, undefined);
 });
@@ -189,126 +185,4 @@ test("reloaded runs sort chronologically and finished parallel work clears stale
     ["first", "latest"],
   );
   assert.equal(result.summaries[1].progress?.label, "等待模型回應");
-});
-
-test("Codex forwards public progress and native operations without duplicating Apsis tools or revealing reasoning", async () => {
-  const events: RunEvent[] = [],
-    records: ToolOperation[] = [];
-  const progress = codexProgress({
-    emit: (event) => events.push(event),
-    recordOperation: async (o) => {
-      records.push(o);
-    },
-  });
-  const notifications = codexTurnNotifications((method, params) =>
-    progress.receive(method, params),
-  );
-  notifications.thread("thread");
-  const send = (
-    method: string,
-    item: unknown,
-    turnId = "turn",
-    threadId = "thread",
-  ) => notifications.receive(method, { threadId, turnId, item });
-  send("item/started", {
-    id: "cmd",
-    type: "commandExecution",
-    command: "echo ok",
-    status: "inProgress",
-  });
-  send(
-    "item/started",
-    {
-      id: "other",
-      type: "commandExecution",
-      command: "wrong",
-      status: "inProgress",
-    },
-    "other-turn",
-  );
-  notifications.turn("turn");
-  send("item/completed", {
-    id: "cmd",
-    type: "commandExecution",
-    command: "echo ok",
-    aggregatedOutput: "ok",
-    exitCode: 0,
-    status: "completed",
-  });
-  send("item/started", {
-    id: "mcp",
-    type: "mcpToolCall",
-    server: "apsis",
-    tool: "delegate_task",
-  });
-  send("item/completed", {
-    id: "private",
-    type: "reasoning",
-    text: "private reasoning",
-  });
-  send("item/started", {
-    id: "comment",
-    type: "agentMessage",
-    phase: "commentary",
-    text: "",
-  });
-  notifications.receive("item/agentMessage/delta", {
-    threadId: "thread",
-    turnId: "turn",
-    itemId: "comment",
-    delta: "正在整理資料",
-  });
-  send(
-    "item/completed",
-    {
-      id: "other-comment",
-      type: "agentMessage",
-      phase: "commentary",
-      text: "wrong",
-    },
-    "turn",
-    "other-thread",
-  );
-  await progress.flush();
-  assert.equal(records.length, 2);
-  assert.equal(records[0].id, records[1].id);
-  assert.equal(records[0].status, "started");
-  assert.equal(records[1].status, "succeeded");
-  assert.equal(records[1].evidence?.output, "ok");
-  assert.ok(
-    events.some((e) => e.type === "progress" && e.text === "正在整理資料"),
-  );
-  assert.doesNotMatch(JSON.stringify(events), /private reasoning|wrong/);
-});
-
-test("Codex failed commands and unknown outcomes cannot be marked completed", async () => {
-  const records: ToolOperation[] = [];
-  const progress = codexProgress({
-    emit: () => {},
-    recordOperation: async (o) => {
-      records.push(o);
-    },
-  });
-  progress.receive("item/completed", {
-    item: {
-      id: "failed",
-      type: "commandExecution",
-      command: "false",
-      status: "completed",
-      exitCode: 1,
-    },
-  });
-  progress.receive("item/completed", {
-    item: {
-      id: "unknown",
-      type: "fileChange",
-      changes: [],
-      status: "unrecognized",
-    },
-  });
-  await progress.flush();
-  assert.deepEqual(
-    records.map((r) => r.status),
-    ["failed", "unknown"],
-  );
 });

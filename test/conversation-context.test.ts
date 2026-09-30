@@ -22,7 +22,7 @@ import type { Session, StoreState } from "../shared/types.ts";
 const session = (id = "owner"): Session => ({
   id,
   title: id,
-  mode: "deepagents",
+
   createdAt: "2026-01-01",
   messages: [],
 });
@@ -40,9 +40,18 @@ test("context budgets default to 256K and reserve output with explicit 8K/32K/12
       b.keep <= 12000 && b.memory <= 1600 && b.memory <= b.input * 0.15,
     );
   }
-  for (const provider of ["ollama", "openai-compatible", "openai", "anthropic"]) {
+  for (const provider of [
+    "ollama",
+    "openai-compatible",
+    "openai",
+    "anthropic",
+  ]) {
     for (const model of ["gpt-4o", "unknown-model"]) {
-      for (const settings of [undefined, {}, { contextWindowTokens: undefined }]) {
+      for (const settings of [
+        undefined,
+        {},
+        { contextWindowTokens: undefined },
+      ]) {
         const budget = contextBudget(provider, model, settings);
         assert.equal(budget.windowTokens, 262144);
         assert.equal(budget.input, 262144 - 4096 - Math.ceil(262144 * 0.05));
@@ -142,84 +151,7 @@ test("10,000-message history is paged, searchable in Chinese/English, isolated a
   assert.equal(db.cachedSessions()[1].messages.length, 50);
   assert.equal(db.message("owner", "m0")?.content, "台灣專案 evidence 0");
 });
-test("legacy migration is retryable and keeps IDs, scratch and originals without storing history in JSON", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "apsis-migration-"));
-  const old = session();
-  old.messages = [
-    { id: "original", role: "user", content: "保留歷史", status: "complete" },
-  ];
-  old.engineState = {
-    messages: checkpoint({ messages: [new HumanMessage("old")] })!.messages,
-    files: { "/proof.txt": { content: ["proof", "second"] } },
-  };
-  const original = JSON.stringify({
-    schemaVersion: 2,
-    sessions: [old],
-    memories: [],
-    skills: [],
-  });
-  await writeFile(join(dir, "state.json"), original);
-  const db = new ConversationStore(dir);
-  await db.migrate([old], "retry");
-  await db.migrate([old], "retry");
-  db.db.close();
-  const store = await new Store(dir).init();
-  assert.equal(store.conversations.page(old.id).messages.length, 1);
-  assert.equal(store.conversations.message(old.id, "original")?.id, "original");
-  assert.equal(
-    (store.conversations.load(old.id).engineState as any).files,
-    undefined,
-  );
-  assert.equal(
-    await readFile(
-      join(
-        store.conversations.scratchRoot(
-          old.id,
-          store.conversations.activeId(old.id),
-        ),
-        "proof.txt",
-      ),
-      "utf8",
-    ),
-    "proof\nsecond",
-  );
-  assert.deepEqual(
-    JSON.parse(await readFile(join(dir, "state.json"), "utf8")).sessions,
-    [],
-  );
-  store.conversations.db.close();
-  const reopened = await new Store(dir).init();
-  t.after(() => reopened.conversations.db.close());
-  assert.equal(reopened.conversations.page(old.id).messages.length, 1);
-});
-test("partially imported history retries after a scratch conflict without duplication or lost content", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "apsis-migrate-retry-"));
-  const db = new ConversationStore(dir);
-  t.after(() => db.db.close());
-  const old = session();
-  old.messages = [
-    { id: "same-id", role: "user", content: "original", status: "complete" },
-  ];
-  old.engineState = {
-    messages: [],
-    files: { "/proof": { content: ["original proof"] } },
-  };
-  db.saveSession(old);
-  const root = db.scratchRoot(old.id, db.activeId(old.id));
-  await mkdir(root, { recursive: true });
-  await writeFile(join(root, "proof"), "conflicting file");
-  await assert.rejects(db.migrate([old], "same-import"));
-  assert.equal(
-    db.db.prepare("SELECT 1 FROM meta WHERE key='import:same-import'").get(),
-    undefined,
-  );
-  assert.equal(await readFile(join(root, "proof"), "utf8"), "conflicting file");
-  await writeFile(join(root, "proof"), "original proof");
-  await db.migrate([old], "same-import");
-  await db.migrate([old], "same-import");
-  assert.equal(db.page(old.id).messages.length, 1);
-  assert.equal(db.message(old.id, "same-id")?.content, "original");
-});
+
 test("scratch rejects traversal and links to other contexts", async () => {
   const dir = await mkdtemp(join(tmpdir(), "apsis-scratch-scope-"));
   const root = join(dir, "private"),
@@ -335,16 +267,16 @@ test("new task conflicts while busy; chat, routine and delegation contexts stay 
     modelSettings: { fixture: { contextWindowTokens: 32768 } },
   });
   await app.connections.setDefault({ connectionId: c.id, model: c.model });
-  const bot = await app.product.create("Context Bot");
+  const bot = await app.product.bots.create("Context Bot");
   const initial = app.tasks.store.conversations.activeId(bot.sessionId);
   const wait = async () => {
-    for (let i = 0; i < 500 && app.product.active.size; i++)
+    for (let i = 0; i < 500 && app.product.execution.active.size; i++)
       await new Promise((r) => setTimeout(r, 10));
-    assert.equal(app.product.active.size, 0);
+    assert.equal(app.product.execution.active.size, 0);
   };
-  await app.product.submit(bot.id, { requestId: "hold", prompt: "hold" });
-  assert.throws(() => app.product.newContext(bot.id), /排隊/);
-  const queued = await app.product.submit(bot.id, {
+  await app.product.jobs.submit(bot.id, { requestId: "hold", prompt: "hold" });
+  assert.throws(() => app.product.messages.newContext(bot.id), /排隊/);
+  const queued = await app.product.jobs.submit(bot.id, {
     requestId: "queued",
     prompt: "queued",
   });
@@ -353,12 +285,12 @@ test("new task conflicts while busy; chat, routine and delegation contexts stay 
   await wait();
   const oldMessage = app.tasks.store.conversations.page(bot.sessionId)
     .messages[0];
-  const fresh = app.product.newContext(bot.id);
+  const fresh = app.product.messages.newContext(bot.id);
   assert.equal(
     app.tasks.store.conversations.load(bot.sessionId).engineState,
     undefined,
   );
-  const routine = await app.product.submit(bot.id, {
+  const routine = await app.product.jobs.submit(bot.id, {
     requestId: "routine",
     prompt: "routine",
     contextKind: "routine",
@@ -366,7 +298,7 @@ test("new task conflicts while busy; chat, routine and delegation contexts stay 
   await wait();
   assert.notEqual(routine.workContextId, fresh.id);
   assert.equal(app.tasks.store.conversations.activeId(bot.sessionId), fresh.id);
-  await app.product.submit(bot.id, {
+  await app.product.jobs.submit(bot.id, {
     requestId: "chat",
     prompt: "reference",
     replyTo: oldMessage.id,
@@ -381,7 +313,7 @@ test("new task conflicts while busy; chat, routine and delegation contexts stay 
     status: "failed",
     permissionBotIds: [bot.id],
   });
-  const retried = await app.product.submit(bot.id, {
+  const retried = await app.product.jobs.submit(bot.id, {
     requestId: "retry",
     prompt: "recheck evidence before retry",
     retryOf: queued.id,
@@ -390,7 +322,7 @@ test("new task conflicts while busy; chat, routine and delegation contexts stay 
   assert.equal(retried.workContextId, initial);
   assert.equal(app.tasks.store.conversations.activeId(bot.sessionId), fresh.id);
   assert.deepEqual(retried.permissionBotIds, [bot.id]);
-  const delegated = await app.product.submit(
+  const delegated = await app.product.jobs.submit(
     bot.id,
     { requestId: "child", prompt: "assigned" },
     { delegatedBy: "source" },
@@ -402,7 +334,7 @@ test("new task conflicts while busy; chat, routine and delegation contexts stay 
   for await (const chunk of app.tasks.store.conversations.exportChunks())
     exported += chunk;
   assert.ok(JSON.parse(exported).contexts.length >= 4);
-  await app.product.remove(bot.id);
+  await app.product.bots.remove(bot.id);
   assert.throws(() => app.tasks.store.conversations.metadata(bot.sessionId));
 });
 test("real Deep Agents compacts three times, suppresses summary streams and resumes normalized checkpoints", async (t) => {
@@ -450,7 +382,7 @@ test("real Deep Agents compacts three times, suppresses summary streams and resu
   const dir = await mkdtemp(join(tmpdir(), "apsis-compaction-"));
   let store = await new Store(dir).init();
   const workspace = await new Workspace(join(dir, "work")).init();
-  await store.mutate((s) => s.sessions.push(session()));
+  store.conversations.saveSession(session());
   const contextId = store.conversations.activeId("owner");
   for (let cycle = 0; cycle < 3; cycle++) {
     const previous =
@@ -477,7 +409,7 @@ test("real Deep Agents compacts three times, suppresses summary streams and resu
       store,
       workspace,
       session: store.conversations.load("owner"),
-      mode: "deepagents",
+
       allowWrites: false,
       prompt: "Keep the latest correction and verify proof",
       modelSettings: { contextWindowTokens: 32768, maxOutputTokens: 1024 },
@@ -600,7 +532,7 @@ test("overflow retries once, oversized input and summary failure preserve the la
   const store = await new Store(dir).init();
   t.after(() => store.conversations.db.close());
   const workspace = await new Workspace(join(dir, "work")).init();
-  await store.mutate((s) => s.sessions.push(session()));
+  store.conversations.saveSession(session());
   const id = store.conversations.activeId("owner");
   const saved = checkpoint({
     messages: Array.from({ length: 20 }, (_, i) =>
@@ -612,7 +544,7 @@ test("overflow retries once, oversized input and summary failure preserve the la
     store,
     workspace,
     session: store.conversations.load("owner"),
-    mode: "deepagents" as const,
+
     allowWrites: false,
     prompt: "latest",
     modelSettings: { contextWindowTokens: 32768, maxOutputTokens: 1024 },
@@ -708,14 +640,14 @@ test("large tool output survives cancellation on disk with a complete tool check
   const dir = await mkdtemp(join(tmpdir(), "apsis-tool-offload-"));
   const store = await new Store(dir).init();
   const workspace = await new Workspace(join(dir, "work")).init();
-  await store.mutate((s) => s.sessions.push(session()));
+  store.conversations.saveSession(session());
   const text = "工具完整證據".repeat(5000);
   await assert.rejects(
     runDeep({
       store,
       workspace,
       session: store.conversations.load("owner"),
-      mode: "deepagents",
+
       prompt: "fetch proof",
       allowWrites: false,
       modelSettings: { contextWindowTokens: 32768, maxOutputTokens: 1024 },

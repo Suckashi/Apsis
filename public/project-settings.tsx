@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Memory, Project } from "../shared/types.ts";
 import { Modal } from "./bot-ui.tsx";
 

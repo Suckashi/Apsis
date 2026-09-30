@@ -42,17 +42,17 @@ async function fixture(
   app.server.listen(0, "127.0.0.1");
   await once(app.server, "listening");
   const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
-  const connection = await app.tasks.connections!.save({
+  const connection = await app.connections.save({
     name: "Steering fixture",
     provider: "openai-compatible",
     model: "fixture",
     url: "http://127.0.0.1:1/v1",
   });
-  await app.tasks.connections!.setDefault({
+  await app.connections.setDefault({
     connectionId: connection.id,
     model: connection.model,
   });
-  const bot = await app.product!.create();
+  const bot = await app.product!.bots.create();
   const request = async (action: string, body: unknown) => {
     const response = await fetch(`${base}/api/v2/bots/${bot.id}/${action}`, {
       method: "POST",
@@ -63,7 +63,6 @@ async function fixture(
   };
   const close = async () => {
     await app.product!.close();
-    app.product!.db.db.close();
     app.server.closeAllConnections();
     await new Promise<void>((resolve) => app.server.close(() => resolve()));
   };
@@ -87,7 +86,7 @@ test("steering receipts separate enqueue and adoption, deduplicate concurrent re
     await f.close();
   });
   await f.request("messages", { prompt: "begin", requestId: "job-1" });
-  await until(() => f.product.steers.has(f.bot.id));
+  await until(() => f.product.execution.steers.has(f.bot.id));
   const responses = await Promise.all([
     f.request("steer", { prompt: "add constraint", requestId: "same" }),
     f.request("steer", { prompt: "add constraint", requestId: "same" }),
@@ -118,7 +117,7 @@ test("steering receipts separate enqueue and adoption, deduplicate concurrent re
     "applied",
   );
   release.resolve();
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(
     f.tasks.store.conversations.message(f.bot.sessionId, id)?.delivery?.state,
     "applied",
@@ -151,14 +150,14 @@ test("stopping while waiting for approval makes unconsumed supplements not-appli
     f.product.settings.read().revision,
   );
   await f.request("messages", { prompt: "begin", requestId: "job-approval" });
-  await until(() => f.product.pending.size === 1);
+  await until(() => f.product.execution.pending.size === 1);
   const response = await f.request("steer", {
     prompt: "pending correction",
     requestId: "approval-steer",
   });
   assert.equal(response.data.delivery.state, "pending");
   await f.request("stop", {});
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(
     f.tasks.store.conversations.message(
       f.bot.sessionId,
@@ -188,13 +187,13 @@ for (const outcome of ["failed", "completed"] as const) {
       await f.close();
     });
     await f.request("messages", { prompt: "begin", requestId: "job" });
-    await until(() => f.product.steers.has(f.bot.id));
+    await until(() => f.product.execution.steers.has(f.bot.id));
     const response = await f.request("steer", {
       prompt: "constraint",
       requestId: "receipt",
     });
     release.resolve();
-    await until(() => !f.product.active.size);
+    await until(() => !f.product.execution.active.size);
     assert.equal(
       f.tasks.store.conversations.message(
         f.bot.sessionId,
@@ -205,7 +204,7 @@ for (const outcome of ["failed", "completed"] as const) {
   });
 }
 
-test("a run ending during receipt persistence rejects late enqueue and keeps a truthful receipt", async (t) => {
+test("cancellation during receipt persistence rejects late enqueue and keeps a truthful receipt", async (t) => {
   const release = deferred();
   const f = await fixture(async (options) => {
     options.registerSteer?.(async () =>
@@ -219,22 +218,17 @@ test("a run ending during receipt persistence rejects late enqueue and keeps a t
     await f.close();
   });
   await f.request("messages", { prompt: "begin", requestId: "job-boundary" });
-  await until(() => f.product.steers.has(f.bot.id));
-  const original = f.tasks.store.mutate.bind(f.tasks.store);
+  await until(() => f.product.execution.steers.has(f.bot.id));
+  const history = f.tasks.store.conversations;
+  const original = history.append.bind(history);
   let intercepted = false;
-  f.tasks.store.mutate = async (callback) => {
-    const result = await original(callback);
-    if (
-      !intercepted &&
-      f.tasks.store.conversations
-        .page(f.bot.sessionId)
-        .messages.some((message) => message.delivery?.state === "pending")
-    ) {
+  history.append = (sessionId, message, contextId) => {
+    original(sessionId, message, contextId);
+    if (!intercepted && message.delivery?.state === "pending") {
       intercepted = true;
+      f.tasks.running.get(f.bot.sessionId)!.controller.abort();
       release.resolve();
-      await until(() => !f.product.active.size);
     }
-    return result;
   };
   const response = await f.request("steer", {
     prompt: "late correction",
@@ -269,15 +263,13 @@ test("restart expires only pending delivery receipts and preserves adopted histo
       },
     }),
   );
-  await store.mutate((state) =>
-    state.sessions.push({
-      id: "owner",
-      title: "owner",
-      mode: "deepagents",
-      createdAt: "2026-09-29",
-      messages,
-    }),
-  );
+  await store.conversations.saveSession({
+    id: "owner",
+    title: "owner",
+
+    createdAt: "2026-09-29",
+    messages,
+  });
   store.conversations.db.close();
   store = await new Store(directory).init();
   assert.deepEqual(
@@ -315,33 +307,31 @@ test("real Deep engine acknowledges only at the next turn and closes its final a
   const directory = await mkdtemp(join(tmpdir(), "apsis-steering-engine-"));
   const store = await new Store(directory).init();
   t.after(() => store.conversations.db.close());
-  await store.mutate((state) =>
-    state.sessions.push({
-      id: "owner",
-      title: "owner",
-      mode: "deepagents",
-      createdAt: "2026-09-29",
-      messages: [
-        {
-          id: "unused",
-          role: "user",
-          content: "NEVER_ADOPTED",
-          status: "complete",
-          delivery: {
-            kind: "steer",
-            state: "not-applied",
-            updatedAt: "2026-09-29",
-          },
+  await store.conversations.saveSession({
+    id: "owner",
+    title: "owner",
+
+    createdAt: "2026-09-29",
+    messages: [
+      {
+        id: "unused",
+        role: "user",
+        content: "NEVER_ADOPTED",
+        status: "complete",
+        delivery: {
+          kind: "steer",
+          state: "not-applied",
+          updatedAt: "2026-09-29",
         },
-      ],
-    }),
-  );
+      },
+    ],
+  });
   const workspace = await new Workspace(join(directory, "work")).init();
   await runDeep({
     store,
     workspace,
     session: store.conversations.load("owner"),
-    mode: "deepagents",
+
     allowWrites: false,
     prompt: "initial request",
     env: {
@@ -381,7 +371,7 @@ test("real Deep engine acknowledges only at the next turn and closes its final a
       store,
       workspace,
       session: store.conversations.load("owner"),
-      mode: "deepagents",
+
       allowWrites: false,
       prompt: "request to stop",
       env: {

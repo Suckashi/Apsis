@@ -7,7 +7,7 @@ import { chromium, type Page } from "playwright";
 import { expect } from "@playwright/test";
 import { createApp } from "../server/app.ts";
 import { browserExecutable } from "../server/bot-browser.ts";
-import type { Bot, BotTemplate, Connector } from "../shared/product.ts";
+import type { Bot, BotTemplate } from "../shared/product.ts";
 import type { RunOptions } from "../server/runtime.ts";
 import { DEFAULT_SETTINGS } from "../shared/settings.ts";
 
@@ -35,16 +35,6 @@ await app.connections.setDefault({
   connectionId: connection.id,
   model: connection.model,
 });
-// Existing installations can still carry a readable Codex connection record.
-await app.connections.mutate((rows) =>
-  rows.push({
-    id: "legacy-codex-fixture",
-    name: "ChatGPT Codex",
-    provider: "codex",
-    model: "legacy-model",
-    models: ["legacy-model"],
-  }),
-);
 app.store.skills.create({
   id: "skill-a",
   name: "Settings Skill A",
@@ -62,8 +52,7 @@ for (const suffix of ["A", "B"])
     url: "http://127.0.0.1:1/mcp",
     enabled: true,
   });
-const bot = await app.product.create("Settings fixture Bot", {
-  skillIds: ["skill-a", "skill-b"],
+const bot = await app.product.bots.create("Settings fixture Bot", {
   connectorIds: ["connector-A", "connector-B"],
 });
 await new Promise<void>((resolve) =>
@@ -513,8 +502,16 @@ try {
         ).toHaveCount(0);
       const saved = app.product.settings.read();
       await page.getByLabel("Maximum turns per task").fill("31");
-      app.product.db.put("allow", {
-        id: "browser-legacy-approval",
+      app.product.db.put("session-allow", {
+        id: "browser-task-approval",
+        version: 1,
+        botId: bot.id,
+        ownerBotId: bot.id,
+        scopeKey: app.product.approvals.permissionContext(bot.id, "fixture-run")
+          .scopeKey,
+        key: app.product.approvals.approvalKey(bot.id, "fixture-run", "shell", {
+          command: "echo fixture",
+        }),
         tool: "shell",
         args: { command: "echo fixture" },
       });
@@ -529,13 +526,15 @@ try {
       const record = advanced
         .locator(".rule")
         .filter({ hasText: "echo fixture" });
-      await expect(record).toContainText("Legacy record");
+      await expect(record).toContainText(
+        "Original task and its delegated work only",
+      );
       await record.getByRole("button", { name: "Revoke approval" }).click();
       await expect(record).toHaveCount(0);
       await expect(page.getByLabel("Maximum turns per task")).toHaveValue("31");
       assert.deepEqual(app.product.settings.read(), saved);
       assert.equal(
-        app.product.db.get("allow", "browser-legacy-approval"),
+        app.product.db.get("session-allow", "browser-task-approval"),
         undefined,
       );
       await dialog(page)
@@ -748,8 +747,8 @@ try {
       await expect(
         profile.getByText(/已儲存變更|Changes saved/, { exact: true }),
       ).toBeVisible();
-      const saved = app.product.bot(bot.id);
-      assert.deepEqual(saved.skillIds, ["skill-a", "skill-b"]);
+      const saved = app.product.bots.bot(bot.id);
+
       assert.deepEqual(saved.connectorIds, ["connector-A"]);
       assert.equal(saved.permissionMode, "readonly");
       assert.equal(saved.permissionRules?.[0].effect, "deny");
@@ -785,22 +784,22 @@ try {
         }),
       ).toBeVisible();
       const copy = app.product.db.all<Bot>("bot").find((b) => b.id !== bot.id)!;
-      assert.deepEqual(copy.skillIds, saved.skillIds);
+
       assert.deepEqual(copy.connectorIds, saved.connectorIds);
       assert.equal(copy.permissionMode, "readonly");
       assert.equal(copy.permissionRules?.[0].effect, "deny");
-      await app.product.submit(copy.id, {
+      await app.product.jobs.submit(copy.id, {
         requestId: "settings-browser-run",
         prompt: "fixture",
       });
       await expect.poll(() => calls.length).toBe(1);
-      assert.deepEqual(calls[0].agent?.skillIds, ["skill-a", "skill-b"]);
+
       assert.equal(
         calls[0].runtimeSettings?.maxTurns,
         app.product.settings.read().maxTurns,
       );
       await assert.rejects(
-        app.product.authorize(copy.id, "fixture", "write_file", {
+        app.product.approvals.authorize(copy.id, "fixture", "write_file", {
           path: "blocked.txt",
         }),
         { status: 403 },
@@ -862,10 +861,10 @@ try {
     "template unsaved edits guard navigation and Escape without changing saved preferences",
     async () => {
       // Independent fixture: a profile-save regression must not hide guard coverage.
-      const before = app.product.template({
+      const before = app.product.bots.template({
         name: "Dirty guard template",
         permissionMode: "readonly",
-        skillIds: ["skill-a"],
+
         connectorIds: ["connector-A"],
       });
       await openSettings(page, /Bot 範本|Bot templates/);

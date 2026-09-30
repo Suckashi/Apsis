@@ -20,18 +20,16 @@ export async function testConnection(
   let called = false;
   let streaming = false;
   const store = new Store("");
-  store.state = { sessions: [], memories: [], skills: [] };
+  store.state = { memories: [], skills: [] };
   const agent = {
     id: "probe",
     name: "Connection test",
     description: "",
     instructions:
       "Use connection_probe exactly once, then reply with its returned nonce. Do not use other tools.",
-    engine: "deepagents" as const,
     provider: env.MODEL_PROVIDER as import("../shared/types.ts").Provider,
     model: env.MODEL_ID!,
     tools: [],
-    skillIds: [],
     memoryScope: "private" as const,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -39,16 +37,13 @@ export async function testConnection(
   const session: Session = {
     id: "probe",
     title: "Connection test",
-    mode: "deepagents",
     createdAt: new Date().toISOString(),
     messages: [],
-    agent,
   };
   let message = "",
     ok = false;
   try {
     const result = await runAgent({
-      mode: "deepagents",
       session,
       agent,
       store,

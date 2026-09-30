@@ -8,7 +8,6 @@ import { join } from "node:path";
 import test from "node:test";
 import { runDeep } from "../server/engines/deep.ts";
 import { boundedEvidence, ToolExecutionError } from "../server/evidence.ts";
-import { connectionsSchema } from "../server/storage-schema.ts";
 import { Store } from "../server/store.ts";
 import { Workspace } from "../server/workspace.ts";
 import { codingTools } from "../server/coding-tools.ts";
@@ -23,33 +22,7 @@ async function fixture() {
   };
 }
 
-test("connection model settings are optional and validate token budgets", () => {
-  const legacy = {
-    id: "20cc5dc1-5695-4321-952f-2957db4bc761",
-    name: "Legacy",
-    provider: "openai",
-    model: "fixture",
-  };
-  assert.deepEqual(connectionsSchema.parse([legacy]), [legacy]);
-  const current = {
-    ...legacy,
-    modelSettings: {
-      fixture: { displayName: "Friendly model", maxOutputTokens: 8192 },
-      other: {},
-    },
-  };
-  assert.deepEqual(connectionsSchema.parse([current]), [current]);
-  for (const maxOutputTokens of [0, -1, 1.5, Infinity, "8192"]) {
-    assert.equal(
-      connectionsSchema.safeParse([
-        { ...legacy, modelSettings: { fixture: { maxOutputTokens } } },
-      ]).success,
-      false,
-    );
-  }
-});
-
-test("evidence supports configured limits while retaining legacy defaults", () => {
+test("evidence supports configured limits while retaining default limits", () => {
   const output = "x".repeat(35000);
   assert.equal(boundedEvidence({ output }).output?.length, 24000);
   assert.equal(boundedEvidence({ output }, 30000).output?.length, 30000);
@@ -120,7 +93,7 @@ test("shell uses the configured default timeout", async () => {
   assert.ok(Date.now() - started < 8000);
 });
 
-test("shell retains the legacy timeout and clamps overrides to 1–120 seconds", async (t) => {
+test("shell uses the default timeout and clamps overrides to 1–120 seconds", async (t) => {
   const delays: number[] = [];
   const original = globalThis.setTimeout;
   t.mock.method(
@@ -195,11 +168,11 @@ test("DeepAgents applies model budgets, enables native task and excludes host ex
   });
   const base = {
     ...(await fixture()),
-    mode: "deepagents" as const,
+
     session: {
       id: "settings",
       title: "Settings",
-      mode: "deepagents" as const,
+
       createdAt: new Date().toISOString(),
       messages: [],
     },

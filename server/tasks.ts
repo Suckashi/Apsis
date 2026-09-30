@@ -1,19 +1,17 @@
 import { randomUUID } from "node:crypto";
-import { rejectLegacyCodex, runAgent } from "./agent.ts";
+import { runAgent } from "./agent.ts";
 import type { RunOptions } from "./runtime.ts";
 import type { Store } from "./store.ts";
 import type { Workspace } from "./workspace.ts";
 import type {
-  Mode,
   RunEvent,
   Session,
   SessionView,
-  AgentDefinition,
   Environment,
 } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
+import { finishRun, finishUserMessage } from "./task-lifecycle.ts";
 import { RunStore } from "./runs.ts";
-import type { Connections } from "./connections.ts";
 import type { RunPermissions, TaskRun } from "../shared/types.ts";
 import { Projects } from "./projects.ts";
 import { findBash, shellContext, shellMissing } from "./shell.ts";
@@ -26,7 +24,6 @@ export class TaskService {
   workspace: Workspace;
   runner: AgentRunner;
   runs: RunStore;
-  connections?: Connections;
   projects: Projects;
   locations: WorkLocations;
   running = new Map<
@@ -49,27 +46,33 @@ export class TaskService {
     this.store = store;
     this.workspace = workspace;
     this.runner = runner;
-    this.runs = new RunStore(store.directory);
+    this.runs = new RunStore(
+      store.directory,
+      (run) =>
+        !!store.conversations.db
+          .prepare(
+            "SELECT 1 FROM messages WHERE session_id=? AND channel='chat' AND json_extract(value,'$.runId')=? AND json_extract(value,'$.role')='assistant' AND json_extract(value,'$.status')='complete' LIMIT 1",
+          )
+          .get(run.sessionId, run.id),
+    );
     this.projects = new Projects(store, workspace);
     this.locations = new WorkLocations(store, this.projects, workspace);
   }
-  async create(
-    mode: Mode = "deepagents",
-    source: Session["source"] = "web",
-    agent?: AgentDefinition,
-    projectId?: string,
-  ) {
+  async create({
+    botId,
+    projectId,
+  }: { botId?: string; projectId?: string } = {}) {
     const session: Session = {
       project: this.projects.get(projectId),
       id: randomUUID(),
       title: "新的對話",
-      mode,
-      source,
+      botId,
       createdAt: new Date().toISOString(),
       messages: [],
-      ...(agent ? { agent: structuredClone(agent) } : {}),
     };
-    await this.store.mutate((s) => s.sessions.unshift(session));
+    this.store.conversations.transaction(() =>
+      this.store.conversations.saveSession(session),
+    );
     if (projectId)
       this.locations.bind(
         session.id,
@@ -80,7 +83,7 @@ export class TaskService {
   }
   view(id: string): SessionView {
     this.locations.ensure(id);
-    const session = this.store.state.sessions.find((s) => s.id === id);
+    const session = this.store.conversations.metadata(id);
     if (!session)
       throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
     const { engineState, ...view } = session;
@@ -118,8 +121,6 @@ export class TaskService {
       name: location.name,
       path: location.path,
     };
-    if (!session)
-      throw Object.assign(new Error("找不到工作階段。"), { status: 404 });
     if (this.running.has(id))
       throw Object.assign(new Error("此對話正在執行，請等待完成或停止。"), {
         status: 409,
@@ -128,7 +129,17 @@ export class TaskService {
       throw Object.assign(new Error("訊息需為 1–16000 字。"), { status: 400 });
     const controller = new AbortController();
     const runId = randomUUID();
-    const extensions = this.extensions?.(session, runId);
+    const configured = this.extensions?.(session, runId);
+    const extensions = configured && {
+      ...configured,
+      agent: configured.agent && structuredClone(configured.agent),
+      env: configured.env && { ...configured.env },
+      runtimeSettings:
+        configured.runtimeSettings &&
+        structuredClone(configured.runtimeSettings),
+      modelSettings:
+        configured.modelSettings && structuredClone(configured.modelSettings),
+    };
     const timeoutMs =
       extensions?.runtimeSettings?.taskTimeoutMs ?? this.timeoutMs;
     const grants = permissions || {
@@ -153,7 +164,7 @@ export class TaskService {
         abort();
       }
     }, 1000);
-    let env: Environment = {};
+    const env: Environment = extensions?.env || {};
     const userId = randomUUID();
     const run: TaskRun = {
       location,
@@ -161,10 +172,10 @@ export class TaskService {
       project: session.project || this.projects.get(),
       id: runId,
       sessionId: id,
-      engine: session.agent?.provider === "codex" ? "codex" : "deepagents",
-      agentName: session.agent?.name || "Apsis",
-      connectionId: session.agent?.connectionId || session.connectionId,
-      model: session.agent?.model || session.model || "",
+      engine: "deepagents",
+      agentName: extensions?.agent?.name || "Apsis",
+      connectionId: extensions?.agent?.connectionId,
+      model: extensions?.agent?.model || env.MODEL_ID || "",
       permissions: grants,
       status: "running",
       createdAt: new Date().toISOString(),
@@ -179,6 +190,20 @@ export class TaskService {
       [env.OPENAI_API_KEY, env.COMPATIBLE_API_KEY, env.ANTHROPIC_API_KEY]
         .filter((v): v is string => !!v)
         .reduce((text, key) => text.replaceAll(key, "[redacted]"), value);
+    let persistenceError: Error | undefined;
+    const failedPersistence = (error: unknown): never => {
+      persistenceError ||= new Error(
+        "任務日誌寫入失敗：" + asError(error).message,
+      );
+      controller.abort();
+      throw persistenceError;
+    };
+    const persist = (value: TaskRun) =>
+      this.runs.save(value).catch(failedPersistence);
+    const persistProgress = () => {
+      // RunStore retains failures for flush; the task also stops immediately.
+      void persist(run).catch(() => {});
+    };
     const emit = (event: RunEvent) => {
       if ("text" in event && typeof event.text === "string")
         event = { ...event, text: redact(event.text) };
@@ -189,7 +214,7 @@ export class TaskService {
           id: randomUUID(),
           at: new Date().toISOString(),
         });
-        void this.runs.save(run).catch(() => {});
+        persistProgress();
       }
       if (event.type === "delta") live.text += event.text;
       if (event.type === "commentary") {
@@ -219,7 +244,7 @@ export class TaskService {
         };
       }
       run.text = live.text;
-      if (event.type === "commentary") void this.runs.save(run).catch(() => {});
+      if (event.type === "commentary") persistProgress();
       try {
         onEvent(event);
       } catch {
@@ -227,41 +252,29 @@ export class TaskService {
       }
     };
     try {
-      await initialSave;
-      rejectLegacyCodex({ session });
+      await initialSave.catch(failedPersistence);
       const workspace = this.locations.workspace(location);
       await workspace.ready();
       const recovery = recoveryContext(this.runs, session);
       run.recoveryRunIds = recovery.ids;
-      if (session.agent?.connectionId) {
-        if (!this.connections) throw new Error("模型連線服務尚未初始化。");
-        env = this.connections.environment(
-          session.agent.connectionId,
-          session.agent.model,
+      this.store.conversations.transaction(() => {
+        if (!this.store.conversations.page(id, undefined, 1).messages.length)
+          this.store.conversations.updateSession(id, {
+            title: prompt.slice(0, 44),
+          });
+        this.store.conversations.append(
+          id,
+          {
+            createdAt: new Date().toISOString(),
+            id: userId,
+            runId,
+            workContextId: session.workContextId,
+            role: "user",
+            content: prompt,
+            status: "pending",
+          },
+          session.workContextId,
         );
-        if (env.MODEL_PROVIDER !== session.agent.provider)
-          throw new Error("連線供應商已變更，請編輯 agent 並建立新對話。");
-        run.model = env.MODEL_ID || "";
-      } else if (session.connectionId) {
-        if (!this.connections) throw new Error("模型連線服務尚未初始化。");
-        env = this.connections.environment(session.connectionId, session.model);
-        if (session.provider && env.MODEL_PROVIDER !== session.provider)
-          throw new Error("連線供應商已變更，請建立新對話。");
-        run.model = env.MODEL_ID || "";
-      }
-      rejectLegacyCodex({ session, env });
-      await this.store.mutate((s) => {
-        const row = s.sessions.find((x) => x.id === id)!;
-        if (!row.messages.length) row.title = prompt.slice(0, 44);
-        row.messages.push({
-          createdAt: new Date().toISOString(),
-          id: userId,
-          runId,
-          workContextId: session.workContextId,
-          role: "user",
-          content: prompt,
-          status: "pending",
-        });
       });
       controller.signal.throwIfAborted();
       emit({ type: "activity", text: "Apsis 正在處理任務。" });
@@ -271,7 +284,6 @@ export class TaskService {
         ...extensions,
         memoryKey: location.memoryKey,
         historyContextId: session.workContextId,
-        mode: session.mode,
         prompt,
         session,
         store: this.store,
@@ -281,7 +293,7 @@ export class TaskService {
         emit,
         signal: controller.signal,
         env,
-        agent: session.agent,
+        agent: extensions?.agent,
         permissions: grants,
         source: { sessionId: id, runId, messageId: userId },
         recordOperation: async (operation) => {
@@ -319,30 +331,43 @@ export class TaskService {
               at: new Date().toISOString(),
             });
           } else run.operations[index] = safe;
-          await this.runs.save(run);
+          await persist(run);
           emit({ type: "operation" });
         },
       } satisfies RunOptions);
       controller.signal.throwIfAborted();
-      await this.store.mutate((s) => {
-        const row = s.sessions.find((x) => x.id === id)!;
-        const user =
-          row.messages.find((m) => m.id === userId) ||
-          this.store.conversations.message(id, userId);
+      await this.runs.flush(run.id);
+      if (persistenceError) throw persistenceError;
+      controller.signal.throwIfAborted();
+      const completed = finishRun(
+        { ...run, text: result.text, usage: result.usage },
+        "completed",
+      );
+      await persist(completed);
+      controller.signal.throwIfAborted();
+      this.store.conversations.transaction(() => {
+        const user = this.store.conversations.message(id, userId);
         if (user) {
-          user.status = "complete";
-          this.store.conversations.append(id, user, session.workContextId);
+          this.store.conversations.append(
+            id,
+            finishUserMessage(user, "complete"),
+            session.workContextId,
+          );
         }
-        row.messages.push({
-          createdAt: new Date().toISOString(),
-          id: randomUUID(),
-          role: "assistant",
-          content: result.text,
-          runId,
-          workContextId: session.workContextId,
-          status: "complete",
-          activity: live.activity,
-        });
+        this.store.conversations.append(
+          id,
+          {
+            createdAt: new Date().toISOString(),
+            id: randomUUID(),
+            role: "assistant",
+            content: result.text,
+            runId,
+            workContextId: session.workContextId,
+            status: "complete",
+            activity: live.activity,
+          },
+          session.workContextId,
+        );
         if (result.engineState !== undefined)
           this.store.conversations.saveCheckpoint(
             id,
@@ -350,61 +375,57 @@ export class TaskService {
             result.engineState,
           );
       });
-      run.text = result.text;
-      run.status = "completed";
-      for (const operation of run.operations) {
-        if (operation.status === "started") {
-          operation.status = "unknown";
-          operation.endedAt = new Date().toISOString();
-        }
-      }
-      run.endedAt = new Date().toISOString();
-      run.usage = result.usage;
-      await this.runs.save(run);
+      Object.assign(run, completed);
       emit({ type: "done" });
       return result.text;
     } catch (caught) {
-      let message = controller.signal.aborted
-        ? timedOut
-          ? "任務超過執行時間上限，已停止。"
-          : "已停止執行。"
-        : asError(caught).message;
+      let message = persistenceError
+        ? persistenceError.message
+        : controller.signal.aborted
+          ? timedOut
+            ? "任務超過執行時間上限，已停止。"
+            : "已停止執行。"
+          : asError(caught).message;
       for (const key of [
         env.OPENAI_API_KEY,
         env.COMPATIBLE_API_KEY,
         env.ANTHROPIC_API_KEY,
       ].filter((v): v is string => !!v))
         message = message.replaceAll(key, "[redacted]");
-      await this.store.mutate((s) => {
-        const row = s.sessions.find((x) => x.id === id)!;
-        const user =
-          row.messages.find((m) => m.id === userId) ||
-          this.store.conversations.message(id, userId);
+      this.store.conversations.transaction(() => {
+        const user = this.store.conversations.message(id, userId);
         if (user) {
-          user.status = "failed";
-          this.store.conversations.append(id, user, session.workContextId);
+          this.store.conversations.append(
+            id,
+            finishUserMessage(user, "failed"),
+            session.workContextId,
+          );
         }
-        row.messages.push({
-          id: randomUUID(),
-          role: "assistant",
-          content: live.text ? live.text + "\n\n" + message : message,
-          runId,
-          workContextId: session.workContextId,
-          status: "error",
-          activity: live.activity,
-        });
+        this.store.conversations.append(
+          id,
+          {
+            id: randomUUID(),
+            role: "assistant",
+            content: live.text ? live.text + "\n\n" + message : message,
+            runId,
+            workContextId: session.workContextId,
+            status: "error",
+            activity: live.activity,
+          },
+          session.workContextId,
+        );
       });
       emit({ type: "error", text: message });
-      run.status =
-        controller.signal.aborted && !timedOut ? "cancelled" : "failed";
-      for (const operation of run.operations) {
-        if (operation.status === "started") {
-          operation.status = "unknown";
-          operation.endedAt = new Date().toISOString();
-        }
-      }
-      run.error = message;
-      run.endedAt = new Date().toISOString();
+      Object.assign(
+        run,
+        finishRun(
+          run,
+          controller.signal.aborted && !timedOut && !persistenceError
+            ? "cancelled"
+            : "failed",
+          message,
+        ),
+      );
       await this.runs.save(run);
       throw new Error(message);
     } finally {

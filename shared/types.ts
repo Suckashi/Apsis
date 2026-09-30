@@ -1,31 +1,20 @@
-export type Provider =
-  | "openai"
-  | "anthropic"
-  | "ollama"
-  | "openai-compatible"
-  | "codex";
-export type Mode = "deepagents" | "codex";
-export type AgentEngine = Mode;
+export type Provider = "openai" | "anthropic" | "ollama" | "openai-compatible";
 export interface AgentDefinition {
   connectionId?: string;
-  version?: number;
   id: string;
   name: string;
   description: string;
   instructions: string;
-  engine: AgentEngine;
   provider: Provider;
   model: string;
   tools: string[];
-  skillIds: string[];
   memoryScope: "private" | "shared";
   createdAt: string;
   updatedAt: string;
-  archived?: boolean;
 }
 export type Environment = Record<string, string | undefined>;
 export interface Memory {
-  /** Undefined is legacy data; never implicitly promote it to global memory. */
+  /** Global memory requires an explicit scope; absence never grants visibility. */
   scopeKey?: string;
   tier?: "core" | "reference";
   locked?: boolean;
@@ -78,15 +67,10 @@ export interface ChatMessage {
 export interface Session {
   workContextId?: string;
   project?: Project;
-  agent?: AgentDefinition;
-  connectionId?: string;
-  provider?: Provider;
-  model?: string;
+  botId?: string;
   engineState?: unknown;
-  source?: "web" | "telegram";
   id: string;
   title: string;
-  mode: Mode;
   createdAt: string;
   messages: ChatMessage[];
 }
@@ -101,13 +85,15 @@ export type SessionSummary = Omit<Session, "engineState" | "messages"> & {
   count: number;
   running: boolean;
 };
-export interface StoreState {
+export interface KnowledgeState {
   projects?: Project[];
   schemaVersion?: number;
-  agents?: AgentDefinition[];
-  sessions: Session[];
   memories: Memory[];
+  /** Bot-private skills; shared skills live in SKILL.md files. */
   skills: Skill[];
+}
+export interface StoreState extends KnowledgeState {
+  sessions: Session[];
 }
 export interface SubagentActivity {
   id: string;
@@ -180,7 +166,7 @@ export interface TaskRun {
   recoveryRunIds?: string[];
   id: string;
   sessionId: string;
-  engine: AgentEngine;
+  engine: "deepagents";
   agentName: string;
   connectionId?: string;
   model: string;
@@ -204,7 +190,7 @@ export interface WorkLocation {
   id: string;
   name: string;
   path: string;
-  kind: "task" | "worktree" | "folder" | "project" | "legacy";
+  kind: "task" | "worktree" | "folder" | "project";
   projectId?: string;
   memoryKey: string;
 }
@@ -232,7 +218,7 @@ export interface ModelConnection {
   credentialConfigured: boolean;
   archived?: boolean;
   verification?: {
-    engine: AgentEngine;
+    engine: "deepagents";
     model: string;
     at: string;
     ok: boolean;

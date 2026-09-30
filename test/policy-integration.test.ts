@@ -33,14 +33,14 @@ async function fixture(
     workspaceDir: join(directory, "work"),
     runner,
   });
-  const connection = await app.tasks.connections!.save({
+  const connection = await app.connections.save({
     name: "Fixture",
     provider: "openai-compatible",
     model: "fixture",
     modelSettings: { fixture: { contextWindowTokens: 128000 } },
     url: "http://127.0.0.1:1/v1",
   });
-  await app.tasks.connections!.setDefault({
+  await app.connections.setDefault({
     connectionId: connection.id,
     model: connection.model,
   });
@@ -62,10 +62,11 @@ async function fixture(
     },
     async close() {
       await app.product.close();
-      await until(() => !app.product.active.size && !app.tasks.running.size);
+      await until(
+        () => !app.product.execution.active.size && !app.tasks.running.size,
+      );
       app.server.closeAllConnections();
       await new Promise<void>((resolve) => app.server.close(() => resolve()));
-      app.product.db.db.close();
       await rm(directory, { recursive: true, force: true });
     },
   };
@@ -112,12 +113,12 @@ test("yolo executes guarded tools through the shared gate without model review o
     return { text: "done" };
   });
   t.after(f.close);
-  const bot = await f.product.create();
-  await f.product.submit(bot.id, {
+  const bot = await f.product.bots.create();
+  await f.product.jobs.submit(bot.id, {
     requestId: randomUUID(),
     prompt: "run fixtures",
   });
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.deepEqual(effects, ["shell", "mcp_call", "browser"]);
   assert.equal(f.product.db.all("approval").length, 0);
   const operations = [...f.tasks.runs.records.values()].flatMap(
@@ -143,27 +144,27 @@ test("dangerous commands stop before effects and cannot be remembered; preview u
     return { text: "done" };
   });
   t.after(f.close);
-  const bot = await f.product.create();
+  const bot = await f.product.bots.create();
   const preview = await f.post("/api/v2/permissions/preview", {
     botId: bot.id,
     tool: "shell",
     args: { command: "rm -rf important" },
   });
   assert.equal(preview.data.reason, "dangerous-command");
-  assert.equal(f.product.pending.size, 0);
+  assert.equal(f.product.execution.pending.size, 0);
   for (let i = 0; i < 2; i++) {
-    await f.product.submit(bot.id, {
+    await f.product.jobs.submit(bot.id, {
       requestId: randomUUID(),
       prompt: "fake destructive operation",
     });
-    await until(() => f.product.pending.size === 1);
+    await until(() => f.product.execution.pending.size === 1);
     assert.equal(effects, i);
     const approval = f.product.db
       .all<Approval>("approval")
       .find((a) => a.status === "pending")!;
     assert.equal(approval.rememberAllowed, false);
-    f.product.decide(approval.id, { approved: true, remember: true });
-    await until(() => !f.product.active.size);
+    f.product.approvals.decide(approval.id, { approved: true, remember: true });
+    await until(() => !f.product.execution.active.size);
   }
   assert.equal(f.product.db.all("session-allow").length, 0);
   assert.equal(effects, 2);
@@ -172,8 +173,8 @@ test("dangerous commands stop before effects and cannot be remembered; preview u
 test("task grants inherit down delegation, survive retries, and do not leak into new contexts", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const parent = await f.product.create(),
-    child = await f.product.create();
+  const parent = await f.product.bots.create(),
+    child = await f.product.bots.create();
   f.product.settings.update(
     { approvalMode: "manual" },
     f.product.settings.read().revision,
@@ -184,22 +185,30 @@ test("task grants inherit down delegation, survive retries, and do not leak into
     workContextId: f.tasks.store.conversations.activeId(parent.sessionId),
   };
   f.product.db.put("job", root);
-  const pending = f.product.authorize(parent.id, "root", "shell", args);
-  f.product.decide(f.product.db.all<Approval>("approval").at(-1)!.id, {
-    approved: true,
-    remember: true,
-  });
+  const pending = f.product.approvals.authorize(
+    parent.id,
+    "root",
+    "shell",
+    args,
+  );
+  f.product.approvals.decide(
+    f.product.db.all<Approval>("approval").at(-1)!.id,
+    {
+      approved: true,
+      remember: true,
+    },
+  );
   await pending;
   f.product.db.put("job", {
     ...job(child.id, "child", [parent.id, child.id]),
     parentJobId: root.id,
   });
   assert.equal(
-    f.product.policy(child.id, "child", "shell", args).reason,
+    f.product.approvals.policy(child.id, "child", "shell", args).reason,
     "session-approval",
   );
   assert.equal(
-    f.product.policy(child.id, "independent", "shell", args).effect,
+    f.product.approvals.policy(child.id, "independent", "shell", args).effect,
     "ask",
   );
   f.product.db.put("job", {
@@ -208,50 +217,57 @@ test("task grants inherit down delegation, survive retries, and do not leak into
     retryOf: root.id,
   });
   assert.equal(
-    f.product.policy(parent.id, "retry", "shell", args).reason,
+    f.product.approvals.policy(parent.id, "retry", "shell", args).reason,
     "session-approval",
   );
-  f.product.newContext(parent.id);
-  assert.equal(f.product.policy(parent.id, "new", "shell", args).effect, "ask");
+  f.product.messages.newContext(parent.id);
   assert.equal(
-    f.product.policy(parent.id, "root", "shell", args).effect,
+    f.product.approvals.policy(parent.id, "new", "shell", args).effect,
+    "ask",
+  );
+  assert.equal(
+    f.product.approvals.policy(parent.id, "root", "shell", args).effect,
     "allow",
   );
-  await f.product.update(parent.id, { permissionRules: [deny("shell")] });
+  await f.product.bots.update(parent.id, { permissionRules: [deny("shell")] });
   assert.equal(
-    f.product.policy(child.id, "child", "shell", args).effect,
+    f.product.approvals.policy(child.id, "child", "shell", args).effect,
     "deny",
   );
 });
 
-test("legacy permanent grants are inert and current grants can be revoked", async (t) => {
+test("current task grants can be revoked", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.create();
+  const bot = await f.product.bots.create();
   f.product.settings.update(
     { approvalMode: "manual" },
     f.product.settings.read().revision,
   );
   const args = { command: "echo fixture" };
-  f.product.db.put("allow", {
-    id: "old",
-    botId: bot.id,
-    key: f.product.approvalKey(bot.id, "one", "shell", args),
-  });
-  assert.equal(f.product.policy(bot.id, "one", "shell", args).effect, "ask");
-  const pending = f.product.authorize(bot.id, "one", "shell", args);
-  f.product.decide(f.product.db.all<Approval>("approval").at(-1)!.id, {
-    approved: true,
-    remember: true,
-  });
+  assert.equal(
+    f.product.approvals.policy(bot.id, "one", "shell", args).effect,
+    "ask",
+  );
+  const pending = f.product.approvals.authorize(bot.id, "one", "shell", args);
+  f.product.approvals.decide(
+    f.product.db.all<Approval>("approval").at(-1)!.id,
+    {
+      approved: true,
+      remember: true,
+    },
+  );
   const receipt = await pending;
   const grant = f.product.db.all<{ id: string }>("session-allow")[0];
   f.product.db.remove("session-allow", grant.id);
   assert.notEqual(
     receipt.fingerprint,
-    f.product.permissionFingerprint(bot.id, "one", "shell", args),
+    f.product.approvals.permissionFingerprint(bot.id, "one", "shell", args),
   );
-  assert.equal(f.product.policy(bot.id, "one", "shell", args).effect, "ask");
+  assert.equal(
+    f.product.approvals.policy(bot.id, "one", "shell", args).effect,
+    "ask",
+  );
 });
 
 test("task approval survives process restart without authorizing a new context", async (t) => {
@@ -265,42 +281,46 @@ test("task approval survives process restart without authorizing a new context",
   clearInterval(app.product.timer);
   t.after(async () => {
     await app.product.close();
-    app.product.db.db.close();
     await rm(directory, { recursive: true, force: true });
   });
-  const bot = await app.product.create();
+  const bot = await app.product.bots.create();
   app.product.settings.update(
     { approvalMode: "manual" },
     app.product.settings.read().revision,
   );
   const args = { command: "echo persisted" };
-  const pending = app.product.authorize(
+  const pending = app.product.approvals.authorize(
     bot.id,
     "before-restart",
     "shell",
     args,
   );
-  app.product.decide(app.product.db.all<Approval>("approval").at(-1)!.id, {
-    approved: true,
-    remember: true,
-  });
+  app.product.approvals.decide(
+    app.product.db.all<Approval>("approval").at(-1)!.id,
+    {
+      approved: true,
+      remember: true,
+    },
+  );
   await pending;
   await app.product.close();
-  app.product.db.db.close();
   app = await createApp(options);
   clearInterval(app.product.timer);
   assert.equal(
-    app.product.policy(bot.id, "resumed", "shell", args).reason,
+    app.product.approvals.policy(bot.id, "resumed", "shell", args).reason,
     "session-approval",
   );
   assert.equal(
-    app.product.policy(bot.id, "resumed", "shell", {
+    app.product.approvals.policy(bot.id, "resumed", "shell", {
       command: "echo different",
     }).effect,
     "ask",
   );
-  app.product.newContext(bot.id);
-  assert.equal(app.product.policy(bot.id, "new", "shell", args).effect, "ask");
+  app.product.messages.newContext(bot.id);
+  assert.equal(
+    app.product.approvals.policy(bot.id, "new", "shell", args).effect,
+    "ask",
+  );
 });
 
 test("permission changes between authorization and execution are rechecked without effects", async (t) => {
@@ -334,23 +354,26 @@ test("permission changes between authorization and execution are rechecked witho
     return { text: "done" };
   });
   t.after(f.close);
-  const bot = await f.product.create();
-  await f.product.submit(bot.id, {
+  const bot = await f.product.bots.create();
+  await f.product.jobs.submit(bot.id, {
     requestId: randomUUID(),
     prompt: "fixture",
   });
-  await until(() => f.product.pending.size === 1);
+  await until(() => f.product.execution.pending.size === 1);
   assert.equal(effects, 0);
   // A deny introduced while the user reviews must prevent execution too.
   f.product.settings.update(
     { permissionRules: [deny("shell")] },
     f.product.settings.read().revision,
   );
-  f.product.decide(f.product.db.all<Approval>("approval").at(-1)!.id, {
-    approved: true,
-    remember: true,
-  });
-  await until(() => !f.product.active.size);
+  f.product.approvals.decide(
+    f.product.db.all<Approval>("approval").at(-1)!.id,
+    {
+      approved: true,
+      remember: true,
+    },
+  );
+  await until(() => !f.product.execution.active.size);
   assert.equal(effects, 0);
   assert.equal(f.product.db.all("session-allow").length, 0);
   assert.equal(f.product.db.all<Job>("job")[0].status, "failed");
@@ -408,18 +431,18 @@ test("delegated routines retain parent denies through scheduled/manual runs and 
     return { text: "done" };
   });
   t.after(f.close);
-  const parent = await f.product.create("parent");
-  childId = (await f.product.create("child")).id;
-  grandchildId = (await f.product.create("grandchild")).id;
+  const parent = await f.product.bots.create("parent");
+  childId = (await f.product.bots.create("child")).id;
+  grandchildId = (await f.product.bots.create("grandchild")).id;
   await f.tasks.workspace.write("private/secret.txt", "must not escape");
-  await f.product.update(parent.id, {
+  await f.product.bots.update(parent.id, {
     permissionRules: [deny("read_file", "private")],
   });
-  await f.product.submit(parent.id, {
+  await f.product.jobs.submit(parent.id, {
     requestId: randomUUID(),
     prompt: "root",
   });
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   const routines = f.product.db.all<Routine>("routine");
   assert.equal(routines.length, 1);
   const routine = routines[0];
@@ -428,12 +451,12 @@ test("delegated routines retain parent denies through scheduled/manual runs and 
     ...routine,
     nextAt: "2000-01-01T00:00:00.000Z",
   });
-  await f.product.tick();
-  await until(() => !f.product.active.size);
+  await f.product.routines.tick();
+  await until(() => !f.product.execution.active.size);
   assert.equal(blocked, 1);
   const manual = await f.post(`/api/v2/routines/${routine.id}/test`, {});
   assert.equal(manual.status, 200);
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(blocked, 2);
   const jobs = f.product.db.all<Job>("job");
   assert.ok(
@@ -453,7 +476,7 @@ test("delegated routines retain parent denies through scheduled/manual runs and 
 test("generated document and published copy destinations are authorized before filesystem writes", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.create();
+  const bot = await f.product.bots.create();
   const workspace = f.tasks.locations.workspace(f.product.workLocation(bot));
   const setRules = (permissionRules: PermissionRule[]) =>
     f.product.settings.update({
@@ -463,7 +486,7 @@ test("generated document and published copy destinations are authorized before f
   for (const tool of ["*", "write_file"]) {
     setRules([deny(tool, "results")]);
     await assert.rejects(
-      f.product.createDocument(bot, "run", {
+      f.product.artifacts.createDocument(bot, "run", {
         format: "docx",
         name: "report",
         content: "blocked",
@@ -476,16 +499,27 @@ test("generated document and published copy destinations are authorized before f
   await workspace.write("source.txt", "original");
   setRules([deny("write_file", "published")]);
   await assert.rejects(
-    f.product.publish(bot, "run", "source.txt", "report"),
+    f.product.artifacts.publish(bot, "run", "source.txt", "report"),
     forbidden,
   );
   assert.deepEqual(await readdir(workspace.root), ["source.txt"]);
   assert.equal(await workspace.read("source.txt"), "original");
   assert.equal(f.product.db.all("artifact").length, 0);
   setRules([]);
-  const artifact = await f.product.publish(bot, "run", "source.txt", "report");
+  const artifact = await f.product.artifacts.publish(
+    bot,
+    "run",
+    "source.txt",
+    "report",
+  );
   assert.ok(artifact.snapshotPath);
-  assert.equal(await readFile(join(f.directory, "data", "artifacts", artifact.snapshotPath!), "utf8"), "original");
+  assert.equal(
+    await readFile(
+      join(f.directory, "data", "artifacts", artifact.snapshotPath!),
+      "utf8",
+    ),
+    "original",
+  );
 });
 
 test("draft send rechecks connector selection, readonly and ancestor/global denies before contacting MCP", async (t) => {
@@ -525,8 +559,8 @@ test("draft send rechecks connector selection, readonly and ancestor/global deni
   });
   const f = await fixture();
   t.after(f.close);
-  const parent = await f.product.create("parent"),
-    child = await f.product.create("child");
+  const parent = await f.product.bots.create("parent"),
+    child = await f.product.bots.create("child");
   const connector = f.product.connectors.put({
     id: randomUUID(),
     name: "MCP fixture",
@@ -534,9 +568,9 @@ test("draft send rechecks connector selection, readonly and ancestor/global deni
     url: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/mcp`,
   });
   for (const bot of [parent, child])
-    await f.product.update(bot.id, { connectorIds: [connector.id] });
+    await f.product.bots.update(bot.id, { connectorIds: [connector.id] });
   f.product.db.put("job", job(child.id, "draft-run", [parent.id, child.id]));
-  await f.product
+  await f.product.toolRegistry
     .tools(child, "draft-run")
     .find((tool) => tool.name === "create_draft")!
     .execute("draft", {
@@ -557,7 +591,7 @@ test("draft send rechecks connector selection, readonly and ancestor/global deni
       { permissionMode: "readonly" },
       { permissionRules: [deny("mcp_call")] },
     ]) {
-      await f.product.update(owner.id, restriction);
+      await f.product.bots.update(owner.id, restriction);
       assert.equal((await send()).status, 403);
       assert.equal(f.product.db.get<Draft>("draft", draft.id)?.status, "draft");
       assert.equal(
@@ -565,7 +599,7 @@ test("draft send rechecks connector selection, readonly and ancestor/global deni
         0,
         "Rejected sends must not contact the connector",
       );
-      await f.product.update(owner.id, {
+      await f.product.bots.update(owner.id, {
         connectorIds: [connector.id],
         permissionMode: "workspace",
         permissionRules: [],
@@ -597,14 +631,16 @@ test("changing an MCP endpoint invalidates a pending approval and remembered gra
     enabled: true,
     url: "https://original.example/mcp",
   });
-  const bot = await f.product.create("MCP", { connectorIds: [connector.id] });
+  const bot = await f.product.bots.create("MCP", {
+    connectorIds: [connector.id],
+  });
   f.product.settings.update(
     { approvalMode: "manual" },
     f.product.settings.read().revision,
   );
   const controller = new AbortController();
   t.after(() => controller.abort());
-  const pending = f.product.authorize(
+  const pending = f.product.approvals.authorize(
     bot.id,
     "test-run",
     "mcp_call",
@@ -622,7 +658,7 @@ test("changing an MCP endpoint invalidates a pending approval and remembered gra
     ...connector,
     url: "https://changed.example/mcp",
   });
-  f.product.decide(first.id, { approved: true, remember: true });
+  f.product.approvals.decide(first.id, { approved: true, remember: true });
   await until(() =>
     f.product.db
       .all<Approval>("approval")
@@ -632,7 +668,7 @@ test("changing an MCP endpoint invalidates a pending approval and remembered gra
   const second = f.product.db
     .all<Approval>("approval")
     .find((a) => a.status === "pending")!;
-  f.product.decide(second.id, { approved: true, remember: true });
+  f.product.approvals.decide(second.id, { approved: true, remember: true });
   await pending;
   assert.equal(f.product.db.all("session-allow").length, 1);
 });
@@ -640,15 +676,15 @@ test("changing an MCP endpoint invalidates a pending approval and remembered gra
 test("remembered approvals are task-scoped, precede asks, and never override denies", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const parent = await f.product.create("parent"),
-    child = await f.product.create("child");
+  const parent = await f.product.bots.create("parent"),
+    child = await f.product.bots.create("child");
   f.product.db.put("job", job(child.id, "solo"));
   f.product.db.put("job", job(child.id, "delegated", [parent.id, child.id]));
   const args = { command: "echo fixture", cwd: "", timeoutSeconds: 1 };
   const controller = new AbortController();
   t.after(() => controller.abort());
   const approve = async (runId: string) => {
-    const result = f.product.authorize(
+    const result = f.product.approvals.authorize(
       child.id,
       runId,
       "shell",
@@ -664,7 +700,10 @@ test("remembered approvals are task-scoped, precede asks, and never override den
       .all<Approval>("approval")
       .filter((entry) => entry.status === "pending");
     assert.equal(pending.length, 1, "A fresh approval must be requested");
-    f.product.decide(pending[0].id, { approved: true, remember: true });
+    f.product.approvals.decide(pending[0].id, {
+      approved: true,
+      remember: true,
+    });
     assert.equal(await outcome, null);
   };
   f.product.settings.update(
@@ -672,11 +711,17 @@ test("remembered approvals are task-scoped, precede asks, and never override den
     f.product.settings.read().revision,
   );
   await approve("solo");
-  await f.product.authorize(child.id, "solo", "shell", args, controller.signal);
+  await f.product.approvals.authorize(
+    child.id,
+    "solo",
+    "shell",
+    args,
+    controller.signal,
+  );
   assert.equal(f.product.db.all<Approval>("approval").length, 1);
   await approve("delegated");
   assert.equal(f.product.db.all<Approval>("approval").length, 2);
-  await f.product.authorize(
+  await f.product.approvals.authorize(
     child.id,
     "delegated",
     "shell",
@@ -684,10 +729,10 @@ test("remembered approvals are task-scoped, precede asks, and never override den
     controller.signal,
   );
   assert.equal(f.product.db.all<Approval>("approval").length, 2);
-  await f.product.update(parent.id, {
+  await f.product.bots.update(parent.id, {
     permissionRules: [{ ...deny("shell"), effect: "ask" }],
   });
-  await f.product.authorize(
+  await f.product.approvals.authorize(
     child.id,
     "delegated",
     "shell",
@@ -695,9 +740,9 @@ test("remembered approvals are task-scoped, precede asks, and never override den
     controller.signal,
   );
   assert.equal(f.product.db.all<Approval>("approval").length, 2);
-  await f.product.update(parent.id, { permissionRules: [deny("shell")] });
+  await f.product.bots.update(parent.id, { permissionRules: [deny("shell")] });
   await assert.rejects(
-    f.product.authorize(
+    f.product.approvals.authorize(
       child.id,
       "delegated",
       "shell",

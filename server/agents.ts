@@ -23,9 +23,7 @@ export function scopedState(
         (agent ? s.agentId === agent.id || !s.agentId : !s.agentId),
     ),
     sessions: state.sessions.filter((s) =>
-      scope
-        ? s.agent?.id === scope
-        : !s.agent || s.agent.memoryScope === "shared",
+      scope ? s.botId === scope : !s.botId,
     ),
   };
 }

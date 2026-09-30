@@ -47,8 +47,8 @@ const dictionary = {
     "No shared skills. Add SKILL.md in a skills folder.",
   ],
   noConnectors: [
-    "尚無連接器。請在 .apsis/mcp.json 設定。",
-    "No connectors. Configure .apsis/mcp.json.",
+    "尚無連接器。請在資料目錄的 mcp.json 設定。",
+    "No connectors. Configure mcp.json in the data directory.",
   ],
   disabled: ["已停用", "Disabled"],
   mode: ["工作區權限", "Workspace access"],

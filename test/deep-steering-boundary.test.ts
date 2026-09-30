@@ -54,15 +54,13 @@ async function fixture(
   const directory = await mkdtemp(join(tmpdir(), "apsis-deep-boundary-"));
   const store = await new Store(join(directory, "data")).init();
   const workspace = await new Workspace(join(directory, "work")).init();
-  await store.mutate((state) =>
-    state.sessions.push({
-      id: "fixture",
-      title: "fixture",
-      mode: "deepagents",
-      createdAt: new Date().toISOString(),
-      messages: [],
-    }),
-  );
+  await store.conversations.saveSession({
+    id: "fixture",
+    title: "fixture",
+
+    createdAt: new Date().toISOString(),
+    messages: [],
+  });
   return {
     requests,
     store,
@@ -71,7 +69,7 @@ async function fixture(
         store,
         workspace,
         session: store.conversations.load("fixture"),
-        mode: "deepagents",
+
         allowWrites: false,
         prompt: "inspect files",
         modelSettings: { contextWindowTokens: 128000 },

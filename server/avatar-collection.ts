@@ -73,7 +73,7 @@ export class AvatarCollectionService {
   /** Persist the terminal job and its reward together, including zero-point receipts. */
   finish(job: Job) {
     this.db.transaction(() => {
-      this.db.put("job", job);
+      this.db.jobs.put(job);
       const state = this.read();
       if (
         job.status !== "completed" ||

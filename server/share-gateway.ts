@@ -1,9 +1,4 @@
-import {
-  createServer,
-  request,
-  type IncomingMessage,
-  type ServerResponse,
-} from "node:http";
+import { createServer, request, type ServerResponse } from "node:http";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { htmlPreviewRoute } from "./html-preview.ts";

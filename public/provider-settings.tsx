@@ -2,7 +2,7 @@ import { ModelPicker, connectionModelOptions } from "./model-picker.tsx";
 import { uiText } from "./settings-dictionary.ts";
 import { useSettingsLocale } from "./settings-locale.ts";
 import { ActionFeedback } from "./activity-feedback.tsx";
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useEffect, useRef, useState } from "react";
 import type {
   ConnectionSelection,
   ModelConnection,
@@ -78,7 +78,7 @@ export function ProviderSettings({
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
-  const selectable = connections.filter((c) => c.provider !== "codex");
+  const selectable = connections;
   const validDefault = selectable.some(
     (c) => c.id === defaultModel?.connectionId,
   );
@@ -113,7 +113,6 @@ export function ProviderSettings({
     }
   };
   const open = (type: Provider, row?: ModelConnection) => {
-    if (type === "codex") return;
     initialDraft.current = JSON.stringify({
       provider: type,
       name:

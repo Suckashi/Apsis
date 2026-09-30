@@ -2,7 +2,6 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { Connector } from "../shared/product.ts";
 import { ConfigFile, configError } from "./config-file.ts";
-import { legacyRecords } from "./config-store.ts";
 
 const timeout = z.number().int().min(1).max(2147483647).optional();
 const schema = z.strictObject({
@@ -94,14 +93,12 @@ export class McpConfig {
   constructor(directory: string) {
     this.storage = new ConfigFile(join(directory, "mcp.json"), decode);
   }
-  init(directory: string) {
+  init() {
     this.storage.init(() => {
       const doc: McpDocument = {
         mcpServers: {},
         "x-apsis": { version: 1, serverNames: {} },
       };
-      for (const connector of legacyRecords<Connector>(directory, "connector"))
-        put(doc, connector);
       return JSON.stringify(doc, null, 2) + "\n";
     });
     return this;

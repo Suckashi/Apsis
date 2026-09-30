@@ -66,11 +66,10 @@ test("Deep Agents streams, reads a real workspace file, and continues saved hist
     name: "Researcher",
     description: "",
     instructions: "Read the requested file.",
-    engine: "deepagents",
     provider: "openai-compatible",
     model: "fixture",
     tools: ["read_file"],
-    skillIds: [],
+
     memoryScope: "private",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -78,14 +77,14 @@ test("Deep Agents streams, reads a real workspace file, and continues saved hist
   const session: Session = {
     id: "test-session",
     title: "Test",
-    mode: "deepagents",
+
     createdAt: new Date().toISOString(),
     messages: [],
-    agent,
+    botId: agent.id,
   };
   const base = {
     modelSettings: { contextWindowTokens: 128000 },
-    mode: "deepagents" as const,
+
     session,
     agent,
     store,
@@ -121,11 +120,10 @@ test("workspace edit tool uses structured Deep Agents arguments and records a pa
     name: "Editor",
     description: "",
     instructions: "",
-    engine: "deepagents",
     provider: "openai-compatible",
     model: "fixture",
     tools: ["edit_file"],
-    skillIds: [],
+
     memoryScope: "private",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -172,14 +170,14 @@ test("Deep Agents rejects a blank final response", async (t) => {
   const session: Session = {
     id: "empty-response",
     title: "Test",
-    mode: "deepagents",
+
     createdAt: new Date().toISOString(),
     messages: [],
   };
   await assert.rejects(
     runAgent({
       modelSettings: { contextWindowTokens: 128000 },
-      mode: "deepagents",
+
       session,
       store,
       workspace,

@@ -3,7 +3,15 @@ import { createApp } from "./app.ts";
 const port = Number(process.env.PORT || 3100);
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error("PORT 必須是 1–65535 的整數。");
-const { server } = await createApp();
+const { server, close } = await createApp();
+const shutdown = () => {
+  void close().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+};
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
 server.listen(port, "127.0.0.1", () =>
   console.log(
     "\n  Apsis  /  http://localhost:" +
@@ -18,4 +26,5 @@ server.on("error", (error) => {
       : error.message,
   );
   process.exitCode = 1;
+  shutdown();
 });

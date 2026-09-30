@@ -1078,7 +1078,7 @@ textarea {
   color: var(--text);
 }
 .task-history > div:not([hidden]),
-.legacy-history > section {
+.unlinked-history > section {
   border-left: 2px solid var(--line);
   padding-left: 12px;
 }

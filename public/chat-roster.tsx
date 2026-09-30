@@ -1,7 +1,7 @@
 import { BrandMark } from "./bot-ui.tsx";
 import { uiText } from "./settings-dictionary.ts";
 import { getSettingsLocale } from "./settings-locale.ts";
-import type { ProductService } from "../server/product.ts";
+import type { Snapshot } from "../shared/api.ts";
 const time = (at: string) => {
   const date = new Date(at);
   if (Number.isNaN(date.getTime())) return "";
@@ -40,7 +40,7 @@ export function ChatRoster({
   hidden,
   query,
 }: {
-  bots: ReturnType<ProductService["snapshot"]>["bots"];
+  bots: Snapshot["bots"];
   selected: string | null;
   select: (id: string) => void;
   hidden: boolean;

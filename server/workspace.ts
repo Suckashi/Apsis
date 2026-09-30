@@ -1,3 +1,4 @@
+import { DEFAULT_DATA_DIR } from "./app-directories.ts";
 import type { WorkspaceFile } from "../shared/types.ts";
 import { asError } from "../shared/errors.ts";
 import {
@@ -69,7 +70,9 @@ export class Workspace {
   }
   static allowed(name: string) {
     return (
-      ![".git", ".apsis", ".apsis-trash"].includes(name.toLowerCase()) &&
+      ![".git", ".apsis", DEFAULT_DATA_DIR, ".apsis-trash"].includes(
+        name.toLowerCase(),
+      ) &&
       name !== "." &&
       name !== ".." &&
       !/[\x00-\x1f<>:"|?*]/.test(name) &&

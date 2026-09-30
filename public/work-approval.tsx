@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Approval } from "../shared/product.ts";
 import { approvalReason } from "../shared/approval.ts";
 import { approvalPresentation } from "../shared/work-presentation.ts";

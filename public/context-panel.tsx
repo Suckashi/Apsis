@@ -245,9 +245,7 @@ export function ContextPanel({
                 ? "跨工作偏好"
                 : m.scopeKey?.startsWith("project:")
                   ? "專案記憶"
-                  : m.scopeKey === "legacy"
-                    ? "既有工作記憶"
-                    : "目前話題記憶",
+                  : "目前話題記憶",
             )}{" "}
             · {t(m.tier === "core" ? "核心" : "參考")} · v{m.revision ?? 1}{" "}
             {m.locked ? "🔒" : ""} {m.enabled === false ? t("已停用") : ""}
@@ -271,7 +269,13 @@ export function ContextPanel({
             e.preventDefault();
             void act(async () => {
               await api(base + "/memories", {
-                ...editing,
+                id: editing.id,
+                content: editing.content,
+                tier: editing.tier,
+                enabled: editing.enabled,
+                locked: editing.locked,
+                revision: editing.revision,
+                scopeKey: editing.scopeKey === "global" ? "global" : "current",
                 workContextId: usage?.context.id,
               });
               setEditing(undefined);

@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { skillIndex } from "./context.ts";
 import { scopedState } from "./agents.ts";
 import type { ToolOptions } from "./runtime.ts";
-import { normalizeFact, revise } from "./knowledge.ts";
+
 import type { ToolOperation } from "../shared/types.ts";
 
 export class ToolAuthorizationError extends Error {

@@ -6,15 +6,13 @@ export type ModelOption = { value: string; label: string; group?: string };
 export function connectionModelOptions(
   connections: ModelConnection[],
 ): ModelOption[] {
-  return connections
-    .filter((c) => c.provider !== "codex")
-    .flatMap((c) =>
-      (c.models || [c.model]).map((model) => ({
-        value: JSON.stringify([c.id, model]),
-        label: c.modelSettings?.[model]?.displayName || model,
-        group: c.name,
-      })),
-    );
+  return connections.flatMap((c) =>
+    (c.models || [c.model]).map((model) => ({
+      value: JSON.stringify([c.id, model]),
+      label: c.modelSettings?.[model]?.displayName || model,
+      group: c.name,
+    })),
+  );
 }
 
 /** Searchable, keyboard-accessible model selection. Selection commits only after save. */

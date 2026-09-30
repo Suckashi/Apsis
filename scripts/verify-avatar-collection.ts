@@ -44,8 +44,8 @@ const context = await browser.newContext({
 const page = await context.newPage();
 const errors: string[] = [];
 page.on("pageerror", (error) => errors.push(error.message));
-// Exercise the legacy empty-roster onboarding path; fresh installs are covered by verify-coding-workspace.
-app.product!.db.put("migration", { id: "bot-first-v1" });
+// Exercise onboarding after all Bots are removed; fresh installs use default bootstrap.
+app.product!.db.put("bootstrap", { id: "default-bot" });
 try {
   await page.goto(url);
   await page.getByRole("button", { name: "建立第一個 Bot" }).click();
@@ -150,7 +150,7 @@ try {
   );
   await page.getByRole("button", { name: "建立 Bot", exact: true }).click();
   await expect(page.locator(".header-profile")).toBeVisible();
-  const bot = app.product.snapshot().bots[0];
+  const bot = app.product.queries.snapshot().bots[0];
   for (let i = 0; i < 3; i++) {
     await page
       .getByRole("textbox", { name: "傳送訊息" })
@@ -163,7 +163,7 @@ try {
             .length,
       )
       .toBe(i + 1);
-    await expect.poll(() => app.product.active.size).toBe(0);
+    await expect.poll(() => app.product.execution.active.size).toBe(0);
   }
   assert.equal(app.product.avatarCollection.view().balance, 30);
   await page.locator(".header-profile").click();
@@ -202,7 +202,7 @@ try {
   assert.equal(app.product.avatarCollection.view().balance, 0);
   const avatar = app.product.avatarCollection.view().lastDraw!.avatarId;
   assert.equal(
-    app.product.bot(bot.id).avatar,
+    app.product.bots.bot(bot.id).avatar,
     "cloud",
     "drawing does not equip automatically",
   );
@@ -211,7 +211,7 @@ try {
     page.locator(`.avatar-preview [data-avatar="${avatar}"]`),
   ).toBeVisible();
   await page.getByRole("button", { name: "儲存變更", exact: true }).click();
-  await expect.poll(() => app.product.bot(bot.id).avatar).toBe(avatar);
+  await expect.poll(() => app.product.bots.bot(bot.id).avatar).toBe(avatar);
   await expect(
     page.locator(`.header-profile [data-avatar="${avatar}"]`),
   ).toBeVisible();

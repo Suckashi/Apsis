@@ -1,16 +1,17 @@
 # Settings platform
 
-## Runtime and migration
+## Current runtime and format
 
-Deep Agents is the only active engine. The app does not initialize Codex, advertise
-it, or expose its login/MCP routes. Legacy provider/session/run types and historical
-files remain readable. This does not uninstall Codex or remove local credentials.
+Deep Agents is the only runtime. Supported providers are OpenAI, Anthropic,
+Ollama and OpenAI-compatible APIs. There are no Codex bridges, provider aliases
+or automatic data migrations. Local knowledge uses schema 4; older stores are
+rejected before any database is opened. This version defaults to `.apsis-v4/`;
+`APSIS_DATA_DIR` can select a custom location. Existing `.apsis/` data is not
+deleted or converted.
 
-Existing Codex Bots (including the old inherited default) retain their histories
-and files, are marked `needsModelSelection`, and have their routines disabled.
-Selecting an available explicit or global default model clears the blocker.
-Schedules must then be re-enabled explicitly; missed work is not replayed. There
-is no automatic API-billed fallback.
+Bot profiles are the only editable role/model source. Sessions store a `botId`
+and conversation metadata. A run resolves its Bot, model, credentials and limits
+once at startup, then keeps an immutable snapshot for that run.
 
 ## Settings and models
 
@@ -18,11 +19,10 @@ is no automatic API-billed fallback.
 (the SHA-256 of `settings.toml`). `PATCH /api/v2/settings` requires that revision
 and a partial update. Writes preserve TOML comments and use a file lock, a backup,
 and an atomic replacement; stale writes return 409 without replacing user edits.
-General settings and providers/models now share `.apsis/settings.toml`; HTTP MCP
-declarations live in `.apsis/mcp.json`. Legacy SQLite settings/connectors and
-connection JSON files are imported on first startup and retained without dual
-writes. See [configuration files](config-files-design.md) for the implemented
-format, migration, backups and editing behavior.
+General settings and providers/models now share `.apsis-v4/settings.toml`; HTTP MCP
+declarations live in `.apsis-v4/mcp.json`. New stores create these files directly. Retired SQLite settings/connectors and
+connection JSON files are not read. See [configuration files](config-files-design.md) for the implemented
+format, backups and editing behavior.
 
 Defaults: 100 agent steps, 30 minutes of active task time, 60 seconds per shell
 command (120-second maximum), 24,000 evidence characters, 3 delegation levels,
@@ -51,13 +51,12 @@ private StateBackend scratch filesystem is not the user's filesystem.
 Child work retains ancestor restrictions. Approval defaults to yolo, with manual
 and auto also available. The dangerous-command guard precedes task approval history;
 history precedes configured asks. Exact-operation grants are scoped to the work
-context and inherited only down its delegation tree. Old permanent grants are
-inactive. Settings and grant changes are rechecked before execution. Shell is Bash
+context and inherited only down its delegation tree. Settings and grant changes are rechecked before execution. Shell is Bash
 on all platforms and is not an OS sandbox; path rules do not constrain shell code.
-See [approval modes and Bash](approval-modes.md) for the full ordering and migration.
+See [approval modes and Bash](approval-modes.md) for the full ordering.
 
 All Bots automatically receive shared skills from `<dataDir>/skills` (normally
-`.apsis/skills`) and `~/.agents/skills`. Each skill is a directory with `SKILL.md`;
+`.apsis-v4/skills`) and `~/.agents/skills`. Each skill is a directory with `SKILL.md`;
 YAML `name` and `description` are optional. Apsis-local skills win name collisions.
 Discovery refreshes on list/context reads without a watcher. Invalid skills are
 skipped and reported in Execution & language. Full content and relative text
@@ -65,15 +64,13 @@ resources are loaded on demand with `read_skill`; resource paths cannot escape
 the skill directory, including through symlinks. Scripts still require normal
 shell authorization. File limits are 1 MiB, UTF-8 text.
 
-Shared legacy skills are migrated once, preserving IDs in `x-apsis-id` frontmatter.
-`skills/.legacy-backup.json` retains the original records and
-`skills/.migrated-v1.json` prevents deleted files from being reimported. Keep both
-when backing up. Bot-private skills stay private in the existing store.
+Bot-private skills stay private in the knowledge store. Shared skills exist only
+as `SKILL.md` directories; there is no Bot/template `skillIds` selection.
 `GET /api/skills` lists shared skills; POST creates a local skill and returns 409
 for a different body with an existing name. Global skills are never written by
-these APIs. Old Bot/template `skillIds` are retained but no longer limit access.
+these APIs.
 
-Bots still select MCP connectors explicitly. Configure them in `.apsis/mcp.json`;
+Bots still select MCP connectors explicitly. Configure them in `.apsis-v4/mcp.json`;
 the setup page is hidden, but connector APIs and per-Bot selection remain.
 The sidebar contains Execution & language, Model connections, and Bot templates.
 Remembered approvals live under Advanced permissions; the three modes and policy
@@ -84,7 +81,7 @@ or channel routes; old configuration and historical data remain untouched.
 
 `GET/POST /api/v2/templates` and `PUT/DELETE /api/v2/templates/:id` manage lightweight
 templates. `POST /api/v2/bots` accepts `templateId`, copying the role, avatar, model,
-legacy skill references, connectors and rules. Rules are rebound to the new Bot. Credentials,
+connectors and rules. Rules are rebound to the new Bot. Credentials,
 messages, memories and runtime state are never copied. Changing a template does
 not change existing Bots. Invalid model references must be replaced before use.
 

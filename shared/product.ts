@@ -13,8 +13,6 @@ export interface Bot {
   connectionId?: string;
   model?: string;
   deletedAt?: string;
-  needsModelSelection?: boolean;
-  skillIds?: string[];
   connectorIds?: string[];
   permissionMode?: "workspace" | "readonly";
   permissionRules?: PermissionRule[];
@@ -26,7 +24,6 @@ export interface BotTemplate {
   avatar: string;
   connectionId?: string;
   model?: string;
-  skillIds: string[];
   connectorIds: string[];
   permissionMode: "workspace" | "readonly";
   permissionRules: PermissionRule[];

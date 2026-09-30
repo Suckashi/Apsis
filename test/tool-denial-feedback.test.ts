@@ -31,35 +31,38 @@ async function fixture(
     runner,
   });
   clearInterval(app.product.timer);
-  const connection = await app.tasks.connections!.save({
+  const connection = await app.connections.save({
     name: "Fixture",
     provider: "openai-compatible",
     model: "fixture",
     modelSettings: { fixture: { contextWindowTokens: 128000 } },
     url: "http://127.0.0.1:1/v1",
   });
-  await app.tasks.connections!.setDefault({
+  await app.connections.setDefault({
     connectionId: connection.id,
     model: connection.model,
   });
-  const bot = await app.product.create("Fixture");
+  const bot = await app.product.bots.create("Fixture");
   return {
     ...app,
     bot,
     async run() {
-      await app.product.submit(bot.id, {
+      await app.product.jobs.submit(bot.id, {
         requestId: randomUUID(),
         prompt: "fixture",
       });
-      await until(() => !app.product.active.size && !app.tasks.running.size);
+      await until(
+        () => !app.product.execution.active.size && !app.tasks.running.size,
+      );
       const run = app.tasks.runs.list(bot.sessionId)[0];
       assert.equal(run.status, "completed", run.error);
       return run;
     },
     async close() {
       await app.product.close();
-      await until(() => !app.product.active.size && !app.tasks.running.size);
-      app.product.db.db.close();
+      await until(
+        () => !app.product.execution.active.size && !app.tasks.running.size,
+      );
       await rm(directory, { recursive: true, force: true });
     },
   };

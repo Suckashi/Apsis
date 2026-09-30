@@ -3,7 +3,6 @@ import type {
   Environment,
   Session,
   RunEvent,
-  RunResult,
   RunPermissions,
   ToolOperation,
 } from "../shared/types.ts";
@@ -63,6 +62,5 @@ export interface RunOptions extends ToolOptions {
   prompt: string;
   emit: (event: RunEvent) => void;
   signal: AbortSignal;
-  mode: Session["mode"];
   session: Session;
 }

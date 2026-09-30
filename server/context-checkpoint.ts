@@ -62,14 +62,13 @@ export function checkpoint(value: DeepValue): ContextCheckpoint | undefined {
 export function restoreCheckpoint(value: unknown): DeepValue | undefined {
   if (!value) return undefined;
   const saved = value as ContextCheckpoint;
-  if (saved.version === 1 && saved.engine !== "deepagents@1.14.0")
+  if (saved.engine !== "deepagents@1.14.0")
     throw new Error("不支援的 checkpoint 引擎版本。");
-  if (saved.version !== undefined && saved.version !== 1)
+  if (saved.version !== 1)
     throw new Error("不支援的 context checkpoint 版本。");
   if (!Array.isArray(saved.messages))
     throw new Error("Context checkpoint 格式錯誤。");
-  // Legacy messages are retained intact. New checkpoints already contain the
-  // summary, so a previous cutoff must never be applied again.
+  // Checkpoints already contain the summary; never apply an earlier cutoff.
   return {
     messages: mapStoredMessagesToChatMessages(saved.messages),
     todos: saved.todos,

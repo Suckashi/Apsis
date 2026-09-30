@@ -71,14 +71,13 @@ test("native invalid path returns to model, workspace correction succeeds, retry
   const session: Session = {
     id: "recovery",
     title: "Test",
-    mode: "deepagents",
+
     createdAt: new Date().toISOString(),
     messages: [],
   };
   store.conversations.saveSession(session);
   session.workContextId = store.conversations.activeId(session.id);
   const result = await runAgent({
-    mode: "deepagents",
     session,
     store,
     workspace,

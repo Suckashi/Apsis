@@ -1,13 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import { initSync, parse, stringify, edit } from "@rainbowatcher/toml-edit-js";
 import { z } from "zod";
 import type { ConnectionSelection, ModelConnection } from "../shared/types.ts";
 import type { SettingsValues } from "../shared/settings.ts";
 import { validateSettings } from "./settings-validation.ts";
-import { connectionsSchema } from "./storage-schema.ts";
 import { ConfigFile, configError } from "./config-file.ts";
 import { compatibleUrl } from "./compatible.ts";
 import { ollamaModelName, ollamaUrl } from "./ollama.ts";
@@ -25,7 +22,7 @@ const identifier = z
   .refine((s) => s.trim() === s && !/[\x00-\x1f\x7f]/.test(s));
 const providerSchema = z.strictObject({
   name: z.string().min(1).max(100),
-  type: z.enum(["openai", "anthropic", "ollama", "openai-compatible", "codex"]),
+  type: z.enum(["openai", "anthropic", "ollama", "openai-compatible"]),
   vendor: z
     .enum([
       "ollama",
@@ -142,7 +139,7 @@ function decode(text: string): ConfigValues {
       url = ollamaUrl(url);
       for (const [, m] of entries) ollamaModelName(m.model);
     } else if (provider.type === "openai-compatible") url = compatibleUrl(url);
-    else if (url !== undefined && provider.type !== "codex")
+    else if (url !== undefined)
       configError(
         `settings.toml providers.${id}.baseUrl：自訂網址請使用 openai-compatible。`,
       );
@@ -298,97 +295,6 @@ export function setConnections(
     : "";
 }
 
-/** Read only the records being migrated, including committed WAL data. */
-export function legacyRecords<T>(directory: string, kind: string): T[] {
-  const file = join(directory, "product.sqlite");
-  if (!existsSync(file)) return [];
-  const db = new DatabaseSync(file, { readOnly: true });
-  try {
-    if (
-      !db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='records'",
-        )
-        .get()
-    )
-      return [];
-    return db
-      .prepare("SELECT value FROM records WHERE kind=? ORDER BY rowid")
-      .all(kind)
-      .map((row) => JSON.parse(String(row.value)) as T);
-  } finally {
-    db.close();
-  }
-}
-
-function initialText(directory: string) {
-  const legacy = legacyRecords<
-    SettingsValues & { id: string; revision: unknown }
-  >(directory, "settings").find((s) => s.id === "global");
-  const { id: _id, revision: _revision, ...values } = legacy || {};
-  const doc: SettingsDocument = {
-    version: 1,
-    ui: {},
-    runtime: {},
-    permissions: {},
-    defaults: {},
-    providers: {},
-    models: {},
-  };
-  setSettings(doc, validateSettings(values));
-  const file = join(directory, "connections.json");
-  let rows: SavedConnection[] = [];
-  if (existsSync(file)) {
-    let input: unknown;
-    try {
-      input = JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
-    } catch {
-      configError("connections.json 格式錯誤，已停止遷移。");
-    }
-    if (!connectionsSchema.safeParse(input).success)
-      configError("connections.json 資料格式錯誤，已停止遷移。");
-    rows = input as SavedConnection[];
-  }
-  let selection: ConnectionSelection | null = null;
-  const defaultFile = join(directory, "connection-default.json");
-  if (existsSync(defaultFile)) {
-    try {
-      selection = z
-        .object({ connectionId: z.string(), model: z.string() })
-        .parse(JSON.parse(readFileSync(defaultFile, "utf8")));
-    } catch {
-      configError("connection-default.json 格式錯誤，已停止遷移。");
-    }
-    const row = rows.find(
-      (r) => r.id === selection!.connectionId && !r.archived,
-    );
-    selection = row
-      ? {
-          connectionId: row.id,
-          model: (row.models || [row.model]).includes(selection.model)
-            ? selection.model
-            : row.model,
-        }
-      : null;
-  }
-  if (!selection) {
-    // Keep legacy Codex defaults visible for the existing Bot compatibility migration.
-    const row = rows.find(
-      (r) =>
-        !r.archived &&
-        (r.provider === "codex" ||
-          r.provider === "ollama" ||
-          (r.provider === "openai-compatible" ? !!r.url : !!r.apiKey)),
-    );
-    if (row) selection = { connectionId: row.id, model: row.model };
-  }
-  setConnections(doc, rows, selection);
-  return (
-    "# Apsis 設定：可加註解；儲存後重新整理設定頁或重新啟動。\n# MCP 伺服器請放在同目錄的 mcp.json。\n" +
-    stringify(doc)
-  );
-}
-
 /** Apply only changed leaves, retaining unrelated TOML comments and formatting. */
 function updateToml(
   text: string,
@@ -424,8 +330,22 @@ export class ConfigStore {
   constructor(directory: string) {
     this.storage = new ConfigFile(join(directory, "settings.toml"), decode);
   }
-  init(directory: string) {
-    this.storage.init(() => initialText(directory));
+  init() {
+    this.storage.init(() => {
+      const doc: SettingsDocument = {
+        version: 1,
+        ui: {},
+        runtime: {},
+        permissions: {},
+        defaults: {},
+        providers: {},
+        models: {},
+      };
+      setSettings(doc, validateSettings({}));
+      return (
+        "# Apsis 設定；MCP 伺服器請放在同目錄的 mcp.json。\n" + stringify(doc)
+      );
+    });
     return this;
   }
   read() {

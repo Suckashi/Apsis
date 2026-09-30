@@ -1,13 +1,8 @@
-import { isDeepStrictEqual } from "node:util";
-import { restoreCheckpoint, checkpoint } from "./context-checkpoint.ts";
-import {
-  mapChatMessagesToStoredMessages,
-  HumanMessage,
-  AIMessage,
-} from "@langchain/core/messages";
+import { finishDelivery } from "./task-lifecycle.ts";
+import { sessionSchema } from "./storage-schema.ts";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile, rm } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type {
   ChatMessage,
@@ -84,7 +79,14 @@ export class ConversationStore {
       ) ?? fail("找不到工作階段。")
     );
   }
+  updateSession(
+    id: string,
+    patch: Partial<Pick<Session, "title" | "project">>,
+  ) {
+    this.saveSession({ ...this.metadata(id), ...patch });
+  }
   saveSession(session: Session) {
+    sessionSchema.parse(session);
     const { messages, engineState, ...metadata } = session;
     const previous = this.db
       .prepare("SELECT active_context FROM sessions WHERE id=?")
@@ -204,6 +206,34 @@ export class ConversationStore {
         message.content,
         JSON.stringify(value),
       );
+  }
+  updateDelivery(
+    sessionId: string,
+    messageId: string,
+    state: "applied" | "not-applied",
+  ) {
+    const message = this.message(sessionId, messageId);
+    if (message?.delivery?.state !== "pending") return;
+    this.append(
+      sessionId,
+      finishDelivery(message, state),
+      message.workContextId,
+    );
+  }
+  finishSteering(sessionId: string, runId: string) {
+    this.transaction(() => {
+      const pending = this.db
+        .prepare(
+          "SELECT value FROM messages WHERE session_id=? AND channel='chat' AND json_extract(value,'$.runId')=? AND json_extract(value,'$.delivery.kind')='steer' AND json_extract(value,'$.delivery.state')='pending'",
+        )
+        .all(sessionId, runId);
+      for (const row of pending)
+        this.updateDelivery(
+          sessionId,
+          (JSON.parse(String(row.value)) as ChatMessage).id,
+          "not-applied",
+        );
+    });
   }
   message(sessionId: string, id: string): ChatMessage | undefined {
     const row = this.db
@@ -429,95 +459,6 @@ export class ConversationStore {
       throw new Error("Invalid context directory");
     await rm(target, { recursive: true, force: true });
     this.db.prepare("DELETE FROM sessions WHERE id=?").run(sessionId);
-  }
-  async migrate(sessions: Session[], fingerprint: string) {
-    if (
-      this.db
-        .prepare("SELECT 1 FROM meta WHERE key=?")
-        .get("import:" + fingerprint)
-    )
-      return;
-    // Prepare scratch first; a failed/repeated migration never overwrites files.
-    for (const session of sessions) {
-      this.transaction(() => this.saveSession(session));
-      const legacy = session.engineState as
-        | { files?: Record<string, { content: string[] }> }
-        | undefined;
-      const root = this.scratchRoot(session.id, this.activeId(session.id));
-      for (const [path, file] of Object.entries(legacy?.files || {})) {
-        const relative = path.replace(/^\/+/, "");
-        if (!relative || relative.includes("..") || /[\\:]/.test(relative))
-          throw new Error("舊暫存檔路徑不合法，遷移已停止。");
-        const dest = resolve(root, relative);
-        if (!dest.startsWith(resolve(root) + sep))
-          throw new Error("Invalid scratch path");
-        await mkdir(join(dest, ".."), { recursive: true });
-        const content = file.content.join("\n");
-        try {
-          await writeFile(dest, content, { flag: "wx" });
-        } catch (error) {
-          if (
-            (error as NodeJS.ErrnoException).code !== "EEXIST" ||
-            (await readFile(dest, "utf8")) !== content
-          )
-            throw error;
-        }
-      }
-      if (session.mode === "deepagents") {
-        const restored = restoreCheckpoint(session.engineState) || {
-          messages: session.messages
-            .filter((m) => m.status === "complete")
-            .map((m) =>
-              m.role === "user"
-                ? new HumanMessage({ content: m.content, id: m.id })
-                : new AIMessage({ content: m.content, id: m.id }),
-            ),
-        };
-        restored.messages.forEach((message, index) => {
-          message.id ||= session.id + ":legacy:" + index;
-        });
-        this.archiveEngine(
-          session.id,
-          this.activeId(session.id),
-          "legacy",
-          mapChatMessagesToStoredMessages(restored.messages),
-        );
-        // Keep incomplete legacy tool sequences as evidence only; never replay them.
-        const safe = checkpoint(restored);
-        if (safe)
-          this.saveCheckpoint(session.id, this.activeId(session.id), safe);
-        else
-          this.saveCheckpoint(session.id, this.activeId(session.id), {
-            version: 1,
-            engine: "deepagents@1.14.0",
-            messages: [],
-            todos: restored.todos,
-          });
-      }
-      const count = Number(
-        this.db
-          .prepare(
-            "SELECT count(*) AS n FROM messages WHERE session_id=? AND channel='chat'",
-          )
-          .get(session.id)!.n,
-      );
-      if (count !== session.messages.length)
-        throw new Error("對話遷移筆數不符，已保留原始資料。");
-      for (const message of session.messages) {
-        const actual = this.message(session.id, message.id)!;
-        const expected = {
-          ...message,
-          workContextId: message.workContextId || this.activeId(session.id),
-        };
-        delete actual.sequence;
-        delete expected.sequence;
-        if (!isDeepStrictEqual(actual, expected))
-          throw new Error("對話遷移內容不符。");
-      }
-    }
-    this.db
-      .prepare("INSERT INTO meta VALUES(?,?)")
-      .run("import:" + fingerprint, new Date().toISOString());
   }
   async *exportChunks(): AsyncGenerator<string> {
     const snapshot = new DatabaseSync(

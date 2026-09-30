@@ -35,7 +35,7 @@ const app = await createApp({
     return { text: "Fixture reply" };
   },
 });
-const bot = await app.product.create("UX fixture");
+const bot = await app.product.bots.create("UX fixture");
 app.server.listen(0, "127.0.0.1");
 await once(app.server, "listening");
 const browser = await chromium.launch({

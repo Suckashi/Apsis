@@ -57,12 +57,8 @@ test("settings TOML persistence, revision conflicts, rollback and detached resul
   t.after(async () => {
     await rm(directory, { recursive: true, force: true });
   });
-  const service = new SettingsService(
-    new ConfigStore(directory).init(directory),
-  );
-  const second = new SettingsService(
-    new ConfigStore(directory).init(directory),
-  );
+  const service = new SettingsService(new ConfigStore(directory).init());
+  const second = new SettingsService(new ConfigStore(directory).init());
   const initial = service.read();
   assert.deepEqual(initial, {
     ...DEFAULT_SETTINGS,

@@ -5,7 +5,7 @@ import {
   approvalModes,
 } from "./approval-mode-picker.tsx";
 import { ComposerPopover } from "./composer-popover.tsx";
-import React, { useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { ApprovalMode, Settings } from "../shared/settings.ts";
 import type { SettingsRequest } from "./settings-controls.tsx";
 import { uiText } from "./settings-dictionary.ts";

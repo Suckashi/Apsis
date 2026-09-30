@@ -1,3 +1,4 @@
+import { appDirectories } from "../server/app-directories.ts";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -5,6 +6,10 @@ import { mkdir, writeFile, appendFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { once } from "node:events";
 import { createShareGateway } from "../server/share-gateway.ts";
+
+const { dataDir, workspaceDir } = appDirectories();
+const connectionFile = join(dataDir, "share-connection.json");
+const tunnelLog = join(dataDir, "share-tunnel.log");
 
 const port = Number(process.env.PORT || 3100);
 const sharePort = Number(process.env.SHARE_PORT || 3102);
@@ -63,7 +68,7 @@ async function shutdown(code = 0) {
     }
   if (ready)
     await writeFile(
-      ".apsis/share-connection.json",
+      connectionFile,
       JSON.stringify(
         { active: false, stoppedAt: new Date().toISOString() },
         null,
@@ -83,16 +88,19 @@ async function appReady() {
     if (!response.ok) return false;
     const state = await response.json();
     return (
-      (state.runtime === "deepagents" ||
-        (Array.isArray(state.runtimes) && state.runtimes.includes("deepagents"))) &&
-      state.workspace === ".apsis/workspace"
+      Array.isArray(state.runtimes) &&
+      state.runtimes.includes("deepagents") &&
+      typeof state.dataDir === "string" &&
+      resolve(state.dataDir) === dataDir &&
+      typeof state.workspace === "string" &&
+      resolve(state.workspace) === workspaceDir
     );
   } catch {
     return false;
   }
 }
 try {
-  await mkdir(".apsis", { recursive: true });
+  await mkdir(dataDir, { recursive: true });
   gateway.server.listen(sharePort, "127.0.0.1");
   await once(gateway.server, "listening");
   if (await appReady())
@@ -137,21 +145,21 @@ try {
   );
   children.push(tunnel);
   timeout = setTimeout(() => {
-    console.error("建立分享逾時，詳見 .apsis/share-tunnel.log");
+    console.error(`建立分享逾時，詳見 ${tunnelLog}`);
     void shutdown(1);
   }, 60000);
   let log = "";
   const output = (chunk: Buffer) => {
     const text = chunk.toString();
     log = (log + text).slice(-10000);
-    void appendFile(".apsis/share-tunnel.log", text).catch(() => {});
+    void appendFile(tunnelLog, text).catch(() => {});
     const url = log.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com\b/)?.[0];
     if (url && !ready && !stopping) {
       gateway.setPublicOrigin(url);
       ready = true;
       clearTimeout(timeout);
       void writeFile(
-        ".apsis/share-connection.json",
+        connectionFile,
         JSON.stringify(
           { active: true, url, password, startedAt: new Date().toISOString() },
           null,

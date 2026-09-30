@@ -1,10 +1,10 @@
 # Apsis 設定檔
 
-一般設定和模型連線使用 `.apsis/settings.toml`，MCP 使用 `.apsis/mcp.json`。
+一般設定和模型連線使用 `.apsis-v4/settings.toml`，MCP 使用 `.apsis-v4/mcp.json`。
 設定頁與手動編輯讀寫同一份檔案。這份文件已由最初的 JSON 設計稿更新為實作說明。
 
-路徑由 `createApp({ dataDir })` 決定，預設是啟動目錄下的 `.apsis`。
-從本專案根目錄啟動時，位置為 `D:\Code\Apsis\.apsis`。
+路徑由 `createApp({ dataDir })` 決定，預設是啟動目錄下的 `.apsis-v4`。
+從本專案根目錄啟動時，位置為 `D:\Code\Apsis\.apsis-v4`。
 目前只有這一層設定，不會自動讀取 Bot 工作目錄內的同名檔案。
 
 ## 分工
@@ -16,7 +16,6 @@
 | `product.sqlite`       | Bot、範本、任務、排程、核准歷史、連線測試結果等資料   |
 | `conversations.sqlite` | 對話資料                                              |
 | `skills/`              | Apsis 共用技能，與 `~/.agents/skills/` 合併讀取       |
-| `telegram.json`        | 已停用的舊資料，保留但不再讀取                        |
 | 瀏覽器 localStorage    | 主題、版面、上次選取的 Bot，維持現況                  |
 
 設定格式參考 Kimi Code 的主設定與 MCP 分離，以及 providers/models 結構。
@@ -91,7 +90,7 @@ contextWindowTokens = 131072
   相關 `models` 項目的 `provider`，並重新選擇使用該連線的 Bot 模型。
   若也修改模型別名，需同步更新 `defaults.model` 和供應商的 `defaultModel`。
 - `type` 支援 `openai`、`anthropic`、`ollama`、`openai-compatible`。
-  舊 Codex 紀錄可保留查閱但不能執行；自訂 API 網址使用 openai-compatible。
+  自訂 API 網址使用 openai-compatible；Codex 不屬於本版格式。
 - `models` 的 key 是別名；`model` 才是送到服務端的真實模型 ID。
   新增模型使用 `供應商別名/模型ID`，一般斜線和句點保留，特殊引號等字元會跳脫。
   同一 provider 不接受重複的真實模型 ID。
@@ -120,7 +119,7 @@ contextWindowTokens = 131072
 }
 ```
 
-- key 是 connector ID；遷移保留原 ID，因此 Bot 和 Draft 引用不變。
+- key 是 connector ID，Bot 與 Draft 使用此 ID 引用。
 - 可使用 `headers` 設定靜態 HTTP headers，或使用 `bearerTokenEnvVar` 指向 token。
   Authorization header 與 bearerTokenEnvVar 互斥；列表與模型提示不包含憑證。
 - `enabled` 預設 true；連線逾時預設 15000ms，工具呼叫逾時預設 60000ms。
@@ -146,41 +145,29 @@ contextWindowTokens = 131072
   寫入前後檢查原內容；出錯保留舊檔，損毀檔不重置成預設值。
 - 外部編輯器不遵守應用的鎖，仍有檢查後至 rename 前的極短競態。
   不保證同時在文字編輯器與 UI 儲存能自動合併；保留備份供恢復。
-- `.bak` 保存上一次應用成功寫入前的有效內容；`.migration.bak` 保存第一次
-  產生的遷移輸出；`.initialized` 用於避免檔案遺失後重新匯入過期設定。
+- `.bak` 保存上一次應用成功寫入前的有效內容；`.initialized` 記錄檔案已建立，
+  避免設定遺失後靜默重置成預設值。
   程序崩潰的鎖可在確認 PID 已結束後自動回收。
 - Runtime 限制在新任務開始時建立快照；權限在下一次工具執行前重新判定。
   MCP endpoint 或憑證變動會使原核准指紋失效，需依當前模式重新核准；
   不承諾撤回已送出的外部操作。
 
-## 自動遷移與復原
+## 初始化與復原
 
-啟動時按檔案分別遷移，不更動原 ID：
+新資料目錄直接建立目前格式的 `settings.toml` 與 `mcp.json`，不讀取舊 JSON、
+舊 SQLite 設定或連接器紀錄。知識資料只接受 schema 4；舊格式不會被轉換、
+刪除或覆寫。預設使用 `.apsis-v4/`，原本 `.apsis/` 不讀取、不修改；
+`APSIS_DATA_DIR` 可指定自訂資料目錄，工作資料夾預設位於該目錄的 `workspace/`。
 
-| 舊來源                            | 新位置                                                |
-| --------------------------------- | ----------------------------------------------------- |
-| product.sqlite 的 settings/global | settings.toml 的 ui/runtime/permissions               |
-| connections.json                  | settings.toml 的 providers/models                     |
-| connection-default.json           | settings.toml 的 defaults.model                       |
-| product.sqlite 的 connector 紀錄  | mcp.json 的 mcpServers 與名稱對照                     |
-| 舊連線 verification               | product.sqlite 的 connection-verification；附設定指紋 |
-
-SQLite 來源透過唯讀連線讀取，可看到已提交的 WAL 資料；不直接複製開啟中的
-主資料庫當備份。舊 JSON 與 DB 紀錄保留，不再雙寫；新設定存在時以新檔為準。
-兩份檔案可獨立恢復：若第一份已成功、第二份失敗，重啟會保留第一份並重試第二份。
-現有但格式錯誤的目標檔會阻止啟動，不會被遷移覆蓋。
-
-供應商段落名稱就是識別碼；啟動時不補寫 `id`，也不轉換舊 UUID 引用。
-
-如果新檔遺失但 `.initialized` 還在，請把 `.bak` 或 `.migration.bak` 複製回
-正式檔名再啟動。不要只刪除初始化標記，否則可能重新載入舊設定。
-回到舊版程式前先保存新檔；舊程式仍讀舊來源，不會自動取得遷移後的變更。
+設定檔格式錯誤會阻止啟動。若檔案遺失但 `.initialized` 還在，請恢復完整備份
+或把 `.bak` 複製回正式檔名；不會靜默建立空白設定。復原完整資料時須停機，
+一起還原 SQLite、state.json、設定、run journals、scratch 與工作檔案。
 
 ## 實作與驗證
 
 `ConfigFile` 管理鎖、內容版本與原子寫入；`ConfigStore` 管理 TOML 與模型映射；
 `McpConfig` 管理 MCP JSON。SettingsService 和 Connections 使用同一設定來源。
 
-測試涵蓋 WAL 遷移、重跑、固定 ID、註解與引號、外部編輯衝突、寫入失敗、
+測試涵蓋目前資料格式驗證、固定 ID、註解與引號、外部編輯衝突、寫入失敗、
 無效/遺失檔案保留、環境變數憑證、HTTP MCP headers 和核准失效。
 既有設定頁瀏覽器測試驗證儲存、跨視窗同步、衝突、模型參數及 Bot 工具選取。

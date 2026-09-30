@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
 import {
@@ -22,9 +22,8 @@ import { ConfigStore, modelAlias } from "../server/config-store.ts";
 import { ConfigConflictError } from "../server/config-file.ts";
 import { McpConfig } from "../server/mcp-config.ts";
 import { SettingsService } from "../server/settings.ts";
-import { ProductDB } from "../server/product-db.ts";
+
 import { withConnector } from "../server/bot-connectors.ts";
-import { DEFAULT_SETTINGS } from "../shared/settings.ts";
 
 async function directory(t: TestContext) {
   const dir = await mkdtemp(join(tmpdir(), "apsis-config-"));
@@ -79,99 +78,6 @@ test("provider keys are the only identity and display-name edits preserve them",
   assert.equal(reopened.selection("my-kimi").model, "qwen3.5");
   assert.throws(() => reopened.selection("kimi"));
   assert.equal(reopened.defaultSelection()?.connectionId, "my-kimi");
-});
-
-test("legacy WAL settings, model IDs, credentials and MCP migrate once without dual writes", async (t) => {
-  let db: ProductDB;
-  t.after(() => db?.db.close());
-  const dir = await directory(t);
-  db = await new ProductDB().init(dir);
-  // Keep SQLite open to exercise committed data still in the WAL.
-  const settings = { ...DEFAULT_SETTINGS, locale: "en", maxTurns: 27 };
-  db.put("settings", { id: "global", revision: 7, ...settings });
-  const connector = {
-    id: "existing-mcp",
-    name: "原本工具",
-    enabled: true,
-    url: "https://example.com/mcp",
-    token: "legacy-mcp-secret",
-  };
-  db.put("connector", connector);
-  db.put("bot", { id: "existing-bot", connectorIds: [connector.id] });
-  const id = randomUUID();
-  const legacyRows = [
-    {
-      id,
-      name: "測試連線",
-      provider: "openai-compatible",
-      url: "https://example.com/v1",
-      apiKey: "legacy-model-secret",
-      model: "a.b",
-      models: ["a.b", "other/model"],
-      modelSettings: {
-        "a.b": { maxOutputTokens: 1234, contextWindowTokens: 32768 },
-      },
-    },
-  ];
-  const legacyText = JSON.stringify(legacyRows);
-  await writeFile(join(dir, "connections.json"), legacyText);
-  await writeFile(
-    join(dir, "connection-default.json"),
-    JSON.stringify({ connectionId: id, model: "other/model" }),
-  );
-  const connections = await new Connections(dir).init();
-  const service = new SettingsService(connections.config);
-  const mcp = new McpConfig(dir).init(dir);
-  assert.equal(service.read().maxTurns, 27);
-  assert.equal(service.read().locale, "en");
-  assert.equal(connections.rows[0].id, id);
-  assert.deepEqual(connections.defaultSelection(), {
-    connectionId: id,
-    model: "other/model",
-  });
-  assert.deepEqual(
-    connections.rows[0].modelSettings,
-    legacyRows[0].modelSettings,
-  );
-  assert.equal(
-    connections.environment(id).COMPATIBLE_API_KEY,
-    "legacy-model-secret",
-  );
-  assert.equal(
-    mcp.get(connector.id)?.headers?.Authorization,
-    "Bearer legacy-mcp-secret",
-  );
-  assert.deepEqual(db.get("bot", "existing-bot"), {
-    id: "existing-bot",
-    connectorIds: [connector.id],
-  });
-  assert.doesNotMatch(
-    JSON.stringify({
-      settings: service.read(),
-      models: connections.view(),
-      mcp: mcp.view(),
-    }),
-    /legacy-model-secret|legacy-mcp-secret/,
-  );
-  service.update({ locale: "zh-Hant" }, service.read().revision);
-  mcp.remove(connector.id);
-  assert.equal(db.get<{ locale: string }>("settings", "global")?.locale, "en");
-  assert.equal(
-    await readFile(join(dir, "connections.json"), "utf8"),
-    legacyText,
-  );
-  assert.equal(
-    db.get<{ token: string }>("connector", connector.id)?.token,
-    "legacy-mcp-secret",
-  );
-  const reopened = new ConfigStore(dir).init(dir);
-  assert.equal(reopened.read().value.settings.locale, "zh-Hant");
-  assert.deepEqual(new McpConfig(dir).init(dir).all(), []);
-  assert.equal(
-    parse(await readFile(join(dir, "settings.toml.migration.bak"), "utf8")).ui
-      .locale,
-    "en",
-  );
 });
 
 test("TOML comments, quoted names, model edits and permission arrays round-trip", async (t) => {
@@ -247,15 +153,15 @@ test("manual edits invalidate stale settings and provider forms, including after
     connections.save({ ...model, name: "Stale overwrite" }, model.id),
     ConfigConflictError,
   );
-  const reopened = new SettingsService(new ConfigStore(dir).init(dir));
+  const reopened = new SettingsService(new ConfigStore(dir).init());
   assert.throws(() => reopened.update(previous), { status: 409 });
   assert.equal(await readFile(path, "utf8"), changed);
   assert.equal(reopened.read().locale, "en");
 });
 
-test("invalid or missing migrated files are preserved and never replaced by defaults", async (t) => {
+test("invalid or missing initialized files are preserved and never replaced by defaults", async (t) => {
   const dir = await directory(t);
-  const store = new ConfigStore(dir).init(dir);
+  const store = new ConfigStore(dir).init();
   const path = store.storage.file;
   const valid = await readFile(path, "utf8");
   const secret = 'apiKey = "do-not-echo-this-secret"\nui = [unclosed';
@@ -265,19 +171,19 @@ test("invalid or missing migrated files are preserved and never replaced by defa
     (e: unknown) =>
       e instanceof Error && !e.message.includes("do-not-echo-this-secret"),
   );
-  assert.throws(() => new ConfigStore(dir).init(dir));
+  assert.throws(() => new ConfigStore(dir).init());
   assert.equal(await readFile(path, "utf8"), secret);
   await writeFile(path, valid);
   assert.equal(store.read().value.settings.locale, "zh-Hant");
   await writeFile(path, valid.replace("maxTurns = 100", "maxTurnz = 100"));
   assert.throws(() => store.read(), /runtime.maxTurnz/);
   await rm(path);
-  assert.throws(() => new ConfigStore(dir).init(dir), /遺失/);
+  assert.throws(() => new ConfigStore(dir).init(), /遺失/);
 });
 
 test("failed backup writes leave the last valid configuration intact", async (t) => {
   const dir = await directory(t);
-  const store = new ConfigStore(dir).init(dir);
+  const store = new ConfigStore(dir).init();
   const previous = store.read();
   await mkdir(`${store.storage.file}.bak`);
   assert.throws(() =>
@@ -360,7 +266,7 @@ test("API keys can reference environment variables without being persisted or re
 
 test("MCP validates HTTP subset, disables removed servers, and checks stale file versions", async (t) => {
   const dir = await directory(t);
-  const mcp = new McpConfig(dir).init(dir);
+  const mcp = new McpConfig(dir).init();
   const saved = mcp.storage.read();
   await writeFile(
     mcp.storage.file,
@@ -444,7 +350,7 @@ test("HTTP MCP reads headers and environment tokens without exposing them in lis
     else process.env[envName] = original;
   });
   process.env[envName] = "mcp-env-secret";
-  const mcp = new McpConfig(dir).init(dir);
+  const mcp = new McpConfig(dir).init();
   mcp.put({
     id: "remote",
     name: "Remote",
@@ -484,7 +390,6 @@ test("readable and Unicode connection IDs work through HTTP update and delete ro
     await app.product.close();
     app.server.closeAllConnections();
     await new Promise<void>((resolve) => app.server.close(() => resolve()));
-    app.product.db.db.close();
     await rm(dir, { recursive: true, force: true });
   });
   await new Promise<void>((resolve) =>
@@ -514,7 +419,14 @@ test("readable and Unicode connection IDs work through HTTP update and delete ro
     const updated = await fetch(path, {
       method: "PUT",
       headers,
-      body: JSON.stringify({ ...row, name: "Renamed" }),
+      body: JSON.stringify({
+        name: "Renamed",
+        provider: row.provider,
+        model: row.model,
+        models: row.models,
+        url: row.url,
+        configRevision: row.configRevision,
+      }),
     });
     assert.equal(updated.status, 200);
     assert.equal((await updated.json()).id, expected);

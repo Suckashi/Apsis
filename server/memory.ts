@@ -20,7 +20,7 @@ const conflict = (message: string): never => {
   throw Object.assign(new Error(message), { status: 409 });
 };
 export function changeMemory(
-  state: StoreState,
+  state: Pick<StoreState, "memories">,
   scope: string | undefined,
   input: {
     id?: string;

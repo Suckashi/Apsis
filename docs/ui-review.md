@@ -83,8 +83,8 @@ every protocol or advanced field supported by the reference product.
   in an expandable detail. This changes presentation, not retry behavior.
 - Settings use a stable-size shell so switching categories does not move the
   navigation or close button. Shared spacing, borders and theme tokens remain.
-- Providers have a dedicated overview, add-provider catalog and editor. Codex
-  is retired; legacy connections remain visible but cannot run or be selected.
+- Providers have a dedicated overview, add-provider catalog and editor. The catalog
+  supports OpenAI, Anthropic, Ollama and OpenAI-compatible providers.
 - Model discovery is opt-in: fetching does not select or save every model.
   Search, checkboxes and manual IDs control the catalog. Existing selections are
   preserved; deselection can be undone before saving.
@@ -110,4 +110,4 @@ temporary data and local model endpoints; they do not change real API keys.
 - Model display names and maximum output tokens are supported. Unknown reasoning
   parameters, new protocols and modality controls are not guessed or exposed.
 - Permissions are enforced by the server, including inherited delegation limits.
-  See `settings-platform.md` for migration, precedence and compatibility details.
+  See `settings-platform.md` for current configuration format and policy precedence.

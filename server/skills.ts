@@ -48,33 +48,6 @@ export class SkillCatalog {
     this.global = resolve(global);
   }
 
-  migrate(skills: Skill[]) {
-    const marker = join(this.local, ".migrated-v1.json");
-    if (existsSync(marker)) {
-      if (JSON.parse(readFileSync(marker, "utf8")).version !== 1)
-        fail("技能遷移標記格式錯誤。");
-      return;
-    }
-    mkdirSync(this.local, { recursive: true });
-    const backup = join(this.local, ".legacy-backup.json");
-    if (!existsSync(backup)) writeNew(backup, JSON.stringify(skills, null, 2));
-    // Resume from the original backup after interruption, never from a partial migration.
-    const original: Skill[] = JSON.parse(readFileSync(backup, "utf8"));
-    for (const skill of original.filter(
-      (s) => !s.agentId && s.enabled !== false && !s.mergedInto,
-    )) {
-      const folder = join(
-        this.local,
-        `migrated-${digest(skill.id).slice(0, 24)}`,
-      );
-      const file = join(folder, "SKILL.md");
-      if (!existsSync(file)) this.write(skill, folder);
-      else if (this.parse(file, true).id !== skill.id)
-        fail(`技能遷移遇到既有檔案：${file}`);
-    }
-    writeNew(marker, JSON.stringify({ version: 1 }));
-  }
-
   private text(file: string) {
     if (!statSync(file).isFile() || statSync(file).size > 1024 * 1024)
       fail("技能檔案需為 1 MiB 以內的文字檔。");

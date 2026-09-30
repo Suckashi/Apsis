@@ -1,5 +1,5 @@
 import { renderMarkdown } from "./markdown.ts";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { approvalReason } from "../shared/approval.ts";
 import {
   type DelegationRecord,
@@ -267,7 +267,7 @@ function DelegationRow({
   );
 }
 
-export function LegacyDelegations({
+export function UnlinkedDelegations({
   jobs,
   select,
   available,
@@ -281,7 +281,7 @@ export function LegacyDelegations({
   const t = (text: string) => taskText(locale, text);
   if (!jobs.length) return null;
   return (
-    <details className="task-history legacy-history">
+    <details className="task-history unlinked-history">
       <summary>
         {t("較早協作紀錄")} · {taskCount(locale, jobs.length, "records")}
       </summary>

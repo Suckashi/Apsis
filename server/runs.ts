@@ -1,7 +1,15 @@
-import { mkdir, readFile, readdir, writeFile, rename } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  writeFile,
+  rename,
+  rm,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TaskRun } from "../shared/types.ts";
+import { recoverRun } from "./task-lifecycle.ts";
 import { runSchema } from "./storage-schema.ts";
 
 /** Run journals are independent of conversation storage; tool boundaries are durable. */
@@ -9,8 +17,14 @@ export class RunStore {
   directory: string;
   records = new Map<string, TaskRun>();
   tails = new Map<string, Promise<void>>();
-  constructor(directory: string) {
+  private readonly failures = new Map<string, unknown>();
+  private readonly completionCommitted?: (run: TaskRun) => boolean;
+  constructor(
+    directory: string,
+    completionCommitted?: (run: TaskRun) => boolean,
+  ) {
     this.directory = join(directory, "runs");
+    this.completionCommitted = completionCommitted;
   }
   async init() {
     await mkdir(this.directory, { recursive: true });
@@ -22,14 +36,13 @@ export class RunStore {
       if (run.id + ".json" !== name || !runSchema.safeParse(run).success)
         throw new Error("Invalid run journal: " + name);
       this.records.set(run.id, run);
-      if (run.status === "running") {
-        run.status = "interrupted";
-        run.endedAt = new Date().toISOString();
-        run.error = "服務重新啟動，任務中斷；請先檢查已完成與結果不明的操作。";
-        for (const operation of run.operations)
-          if (operation.status === "started") operation.status = "unknown";
-        await this.save(run);
-      }
+      const recovered = recoverRun(
+        run,
+        run.status !== "completed" ||
+          !this.completionCommitted ||
+          this.completionCommitted(run),
+      );
+      if (recovered !== run) await this.save(recovered);
     }
     return this;
   }
@@ -44,15 +57,44 @@ export class RunStore {
           this.directory,
           run.id + "-" + randomUUID() + ".tmp",
         );
-        await writeFile(temporary, JSON.stringify(snapshot), { mode: 0o600 });
-        await rename(temporary, join(this.directory, run.id + ".json"));
-      });
+        try {
+          await writeFile(temporary, JSON.stringify(snapshot), {
+            mode: 0o600,
+            flag: "wx",
+          });
+          await rename(temporary, join(this.directory, run.id + ".json"));
+        } finally {
+          await rm(temporary, { force: true });
+        }
+      })
+      .then(
+        () => {
+          this.failures.delete(run.id);
+        },
+        (error) => {
+          this.failures.set(run.id, error);
+          throw error;
+        },
+      );
     this.tails.set(run.id, next);
-    void next.catch(() => {});
+    // Observe rejection while retaining it for the caller and shutdown flush.
+    void next
+      .finally(() => {
+        if (this.tails.get(run.id) === next) this.tails.delete(run.id);
+      })
+      .catch(() => {});
     return next;
   }
-  async flush(id: string) {
-    await this.tails.get(id);
+  async flush(id?: string) {
+    const pending = id ? [this.tails.get(id)] : [...this.tails.values()];
+    await Promise.allSettled(pending);
+    const failures = id
+      ? this.failures.has(id)
+        ? [this.failures.get(id)]
+        : []
+      : [...this.failures.values()];
+    if (failures.length)
+      throw new AggregateError(failures, "任務日誌寫入失敗。");
   }
   list(sessionId?: string) {
     return [...this.records.values()]

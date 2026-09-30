@@ -21,7 +21,6 @@ async function fixture(t: TestContext) {
   });
   t.after(async () => {
     await app.product.close();
-    app.product.db.db.close();
     app.server.closeAllConnections();
     await new Promise<void>((resolve) => app.server.close(() => resolve()));
   });
@@ -58,8 +57,8 @@ async function fixture(t: TestContext) {
     botId: string,
     prompt = "API verification fixture",
   ) => {
-    const context = app.product.newContext(botId);
-    const bot = app.product.bot(botId);
+    const context = app.product.messages.newContext(botId);
+    const bot = app.product.bots.bot(botId);
     const task: Topic = {
       id: context.id,
       botId,
@@ -102,7 +101,7 @@ async function fixture(t: TestContext) {
 
 test("verification API recognizes a nested snake/index.html before any check runs", async (t) => {
   const f = await fixture(t);
-  const bot = await f.product.create("Nested web project");
+  const bot = await f.product.bots.create("Nested web project");
   const task = await f.createTask(bot.id);
   await mkdir(join(task.location.path, "snake"));
   await writeFile(
@@ -117,7 +116,7 @@ test("verification API recognizes a nested snake/index.html before any check run
 
 test("verification API stays inapplicable for an empty or non-HTML task", async (t) => {
   const f = await fixture(t);
-  const bot = await f.product.create("Python project");
+  const bot = await f.product.bots.create("Python project");
   const task = await f.createTask(bot.id);
   assert.deepEqual(await f.verification(task), {
     applicable: false,
@@ -133,7 +132,7 @@ test("verification API stays inapplicable for an empty or non-HTML task", async 
 
 test("verification API returns only the latest receipt belonging to the requested task", async (t) => {
   const f = await fixture(t);
-  const bot = await f.product.create("Two projects");
+  const bot = await f.product.bots.create("Two projects");
   const first = await f.createTask(bot.id, "First project");
   const second = await f.createTask(bot.id, "Second project");
   const empty = await f.createTask(bot.id, "Unverified project");
@@ -160,8 +159,8 @@ test("verification API returns only the latest receipt belonging to the requeste
 
 test("deleting a Bot clears all of its task receipts and preserves other Bots' receipts", async (t) => {
   const f = await fixture(t);
-  const removedBot = await f.product.create("Remove me");
-  const retainedBot = await f.product.create("Keep me");
+  const removedBot = await f.product.bots.create("Remove me");
+  const retainedBot = await f.product.bots.create("Keep me");
   const first = await f.createTask(removedBot.id, "Removed task one");
   const second = await f.createTask(removedBot.id, "Removed task two");
   const retained = await f.createTask(retainedBot.id, "Retained task");

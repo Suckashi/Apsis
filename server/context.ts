@@ -2,7 +2,7 @@ import { selectMemories } from "./memory.ts";
 import type { Store } from "./store.ts";
 import type { AgentDefinition, RunPermissions } from "../shared/types.ts";
 import { scopedState } from "./agents.ts";
-import { rankMemories } from "./knowledge.ts";
+
 import type { StoreState } from "../shared/types.ts";
 
 export function skillIndex(state: StoreState) {

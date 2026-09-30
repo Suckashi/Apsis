@@ -45,8 +45,8 @@ await app.connections.setDefault({
   connectionId: connection.id,
   model: connection.model,
 });
-const bot = await app.product.create("聊天幫手");
-const other = await app.product.create("另一位幫手");
+const bot = await app.product.bots.create("聊天幫手");
+const other = await app.product.bots.create("另一位幫手");
 const location = app.product.workLocation(bot);
 await mkdir(location.path, { recursive: true });
 await writeFile(

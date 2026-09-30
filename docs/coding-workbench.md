@@ -19,9 +19,11 @@ POST /api/v2/bots/:id/messages 為唯一前端傳送入口，後端選擇一般�
 
 GET /api/v2/bots/:id/changes?context=<id>&path=<relative-path> 與 verification?context=<id> 查閱該 Bot 的修改與驗證。Git metadata 及 PR 保存在 WorkContext，Job 與 Run 僅為內部執行與證據紀錄。舊 /coding-tasks 路由已移除。
 
-## 升級
+## 資料格式
 
-不相容舊的獨立程式任務。啟動時、恢復排程前直接刪除舊任務及關聯的執行、派工、核准、成果與獨立對話紀錄，不備份、不封存、不轉換為新聊天。Bot、設定、一般聊天、排程與實體專案檔案保留。
+本版只接受 schema 4，不保留獨立程式任務的型別、執行器或遷移流程。
+預設啟動使用 `.apsis-v4/`，原本 `.apsis/` 不讀取也不修改。
+若以 `APSIS_DATA_DIR` 指定不支援的舊資料目錄，仍會停止啟動並保留原檔。
 
 ## 驗證
 

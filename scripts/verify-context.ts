@@ -32,11 +32,10 @@ await app.connections.setDefault({
   connectionId: connection.id,
   model: connection.model,
 });
-const bot = await app.product.create("長期對話測試");
-await app.tasks.store.mutate((state) => {
-  const session = state.sessions.find((s) => s.id === bot.sessionId)!;
+const bot = await app.product.bots.create("長期對話測試");
+app.store.conversations.transaction(() => {
   for (let i = 0; i < 80; i++)
-    session.messages.push({
+    app.store.conversations.append(bot.sessionId, {
       id: "history-" + i,
       role: i % 2 ? "assistant" : "user",
       content: i === 0 ? "舊任務唯一證據青鳥" : `歷史紀錄 ${i}`,
@@ -97,7 +96,7 @@ try {
   )!;
   assert.equal(memory.locked, true);
   assert.equal(memory.tier, "core");
-  await panel.getByText("歷史搜尋與任務", { exact: true }).click();
+  await panel.getByText("搜尋聊天與話題", { exact: true }).click();
   await panel.getByLabel("搜尋歷史").fill("青鳥");
   await panel.getByRole("button", { name: "搜尋", exact: true }).click();
   await expect(

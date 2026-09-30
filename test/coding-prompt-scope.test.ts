@@ -19,10 +19,20 @@ async function fixture() {
     },
   });
   clearInterval(app.product.timer);
-  const bot = await app.product.create("Builder");
-  const session = app.tasks.store.state.sessions.find(
-    (s) => s.id === bot.sessionId,
-  )!;
+  const connection = await app.connections.save({
+    name: "Fixture",
+    provider: "ollama",
+    model: "fixture",
+    url: "http://127.0.0.1:1",
+  });
+  await app.connections.setDefault({
+    connectionId: connection.id,
+    model: connection.model,
+  });
+  const bot = await app.product.bots.create("Builder");
+  const session = app.tasks.store.conversations
+    .cachedSessions()
+    .find((s) => s.id === bot.sessionId)!;
   const prompt = "只在本地實作和驗證，不要 push 或 PR";
   app.product.db.put<Job>("job", {
     id: randomUUID(),
@@ -39,7 +49,7 @@ async function fixture() {
       return agentContext(
         app.tasks.store,
         true,
-        session.agent,
+        extension.agent,
         prompt,
         undefined,
         extension.executionContext,
@@ -47,7 +57,6 @@ async function fixture() {
     },
     async close() {
       await app.product.close();
-      app.product.db.db.close();
       await rm(directory, { recursive: true, force: true });
     },
   };

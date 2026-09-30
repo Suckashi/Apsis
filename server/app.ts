@@ -1,3 +1,13 @@
+import {
+  parseRequest,
+  ollamaDiscoverySchema,
+  compatibleDiscoverySchema,
+  connectionSchema,
+  defaultConnectionSchema,
+  connectionTestSchema,
+  skillSchema,
+} from "./request-schema.ts";
+import { appDirectories, type DirectoryOptions } from "./app-directories.ts";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
@@ -56,26 +66,19 @@ function text(value: unknown, limit: number, label: string) {
   return value.trim();
 }
 
-export interface AppOptions {
+export interface AppOptions extends DirectoryOptions {
   globalSkillsDirectory?: string;
-  dataDir?: string;
-  workspaceDir?: string;
   worktreeRoot?: string;
   runner?: (options: RunOptions) => Promise<RunResult>;
 }
-export async function createApp({
-  dataDir = ".apsis",
-  workspaceDir = ".apsis/workspace",
-  worktreeRoot,
-  runner = runAgent,
-  globalSkillsDirectory,
-}: AppOptions = {}) {
+export async function createApp(options: AppOptions = {}) {
+  const { worktreeRoot, runner = runAgent, globalSkillsDirectory } = options;
+  const { dataDir, workspaceDir } = appDirectories(options);
   const store = await new Store(dataDir, globalSkillsDirectory).init();
   const workspace = await new Workspace(workspaceDir).init();
   const tasks = new TaskService(store, workspace, runner);
   await tasks.runs.init();
   const connections = await new Connections(dataDir).init();
-  tasks.connections = connections;
   const product = await new ProductService(tasks, connections).init();
   product.workspaces.worktreeRoot = worktreeRoot;
 
@@ -88,6 +91,7 @@ export async function createApp({
       `default-src 'self'; script-src 'self'; style-src 'self' 'nonce-${styleNonce}'; style-src-attr 'unsafe-inline'; img-src 'self'; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
     try {
+      if (product.execution.closed) fail("服務正在關閉。", 503);
       const port = (server.address() as AddressInfo | null)?.port;
       if (
         !["localhost:" + port, "127.0.0.1:" + port].includes(
@@ -127,7 +131,7 @@ export async function createApp({
       )
         return;
       if (path.startsWith("/api/v2/"))
-        return await product.handle(
+        return await product.routes.handle(
           req,
           res,
           new URL(req.url || "/", "http://localhost"),
@@ -180,7 +184,8 @@ export async function createApp({
         return json(res, {
           runtimes: ["deepagents"],
           version: "0.2.0",
-          workspace: workspaceDir,
+          dataDir: store.directory,
+          workspace: workspace.root,
           running: tasks.running.size,
         });
       if (path === "/api/storage/backup" && req.method === "GET") {
@@ -190,8 +195,8 @@ export async function createApp({
         );
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.write(
-          '{"version":3,"state":' +
-            JSON.stringify({ ...store.state, sessions: [] }) +
+          '{"version":4,"state":' +
+            JSON.stringify(store.state) +
             ',"conversations":',
         );
         for await (const chunk of store.conversations.exportChunks()) {
@@ -202,9 +207,14 @@ export async function createApp({
         return;
       }
       if (path === "/api/ollama/models" && req.method === "POST")
-        return json(res, await discoverOllama((await body(req)).url));
+        return json(
+          res,
+          await discoverOllama(
+            parseRequest(ollamaDiscoverySchema, await body(req)).url,
+          ),
+        );
       if (path === "/api/compatible/models" && req.method === "POST") {
-        const input = await body(req);
+        const input = parseRequest(compatibleDiscoverySchema, await body(req));
         return json(
           res,
           await discoverCompatibleModels(
@@ -216,13 +226,24 @@ export async function createApp({
       if (path === "/api/connections") {
         if (req.method === "GET") return json(res, connections.view());
         if (req.method === "POST")
-          return json(res, await connections.save(await body(req)), 201);
+          return json(
+            res,
+            await connections.save(
+              parseRequest(connectionSchema, await body(req)),
+            ),
+            201,
+          );
       }
       if (path === "/api/connections/default") {
         if (req.method === "GET")
           return json(res, connections.defaultSelection());
         if (req.method === "PUT")
-          return json(res, await connections.setDefault(await body(req)));
+          return json(
+            res,
+            await connections.setDefault(
+              parseRequest(defaultConnectionSchema, await body(req)),
+            ),
+          );
       }
       const connection = path.match(
         /^\/api\/connections\/([^/]+)(?:\/(test))?$/,
@@ -231,19 +252,20 @@ export async function createApp({
         const [, encodedId, action] = connection;
         const id = decodeURIComponent(encodedId);
         if (action === "test" && req.method === "POST") {
-          const input = await body(req);
-          if (
-            connections.view().find((c) => c.id === id)?.provider === "codex"
-          ) {
-            fail("Codex 已停止支援；請明確選擇其他模型連線。");
-          }
+          const input = parseRequest(connectionTestSchema, await body(req));
           return json(res, await testConnection(connections, id, input));
         }
         if (!action && req.method === "PUT")
-          return json(res, await connections.save(await body(req), id));
+          return json(
+            res,
+            await connections.save(
+              parseRequest(connectionSchema, await body(req)),
+              id,
+            ),
+          );
         if (!action && req.method === "DELETE") {
-          const used = product.db
-            .all<{ connectionId?: string }>("bot")
+          const used = product.db.bots
+            .list()
             .some((b) => b.connectionId === id);
           if (used) fail("此模型連線仍有 Bot 使用。", 409);
           await connections.archive(id);
@@ -257,7 +279,7 @@ export async function createApp({
             store.skillState().skills.filter((s) => !s.agentId),
           );
         if (req.method === "POST") {
-          const input = await body(req);
+          const input = parseRequest(skillSchema, await body(req));
           const item: Skill = {
             id: randomUUID(),
             name: text(input.name, 100, "名稱"),
@@ -302,11 +324,28 @@ export async function createApp({
       if (!error.status) console.error(error);
     }
   });
+  let closePromise: Promise<void> | undefined;
   server.on("close", () => {
-    void product.close();
-    tasks.stopAll();
+    if (!closePromise) void product.close().catch(console.error);
   });
+  const close = (): Promise<void> => {
+    if (!closePromise) {
+      product.stop();
+      closePromise = (async () => {
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => {
+            if (error && asError(error).code !== "ERR_SERVER_NOT_RUNNING")
+              reject(error);
+            else resolve();
+          }),
+        );
+        await product.close();
+      })();
+    }
+    return closePromise;
+  };
   return {
+    close,
     server,
     store,
     workspace,

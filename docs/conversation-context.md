@@ -16,19 +16,20 @@ Apsis 保留 Deep Agents 1.14.0 的執行迴圈；對話生命週期、持久化
 | 資料                                                                            | 位置                                             |
 | ------------------------------------------------------------------------------- | ------------------------------------------------ |
 | Session metadata、工作 contexts、可見訊息、模型／工具訊息、checkpoint、壓縮紀錄 | `conversations.sqlite`，WAL、外鍵、版本化 schema |
-| 核心與參考記憶、Bot agent 定義、技能、專案                                      | `state.json`，schemaVersion 3；不再包含對話訊息  |
+| 核心與參考記憶、私有技能、專案                                                  | `state.json`，schemaVersion 4；不再包含對話訊息  |
 | 私有 scratch、大型工具輸出、分 run 的歷史卸載                                   | `context-files/<session hash>/<context hash>/`   |
 | 外部操作證據、執行狀態                                                          | 原有 `runs/` 與 `product.sqlite`                 |
 
-SQLite 訊息有穩定 ID 與排序 sequence。一般 Store 僅快取每個 session 最新一頁；執行讀取指定 context 的 checkpoint，不從完整歷史重建輸入。FTS5 使用 trigram；兩字查詢使用限制在授權 session 範圍的子字串查詢。搜尋每頁最多 20 筆，前後文最多 11 筆。
+SQLite 訊息有穩定 ID 與排序 sequence。ConversationStore 的衍生檢視只讀取每個 session 最新一頁；執行讀取指定 context 的 checkpoint，不從完整歷史重建輸入。FTS5 使用 trigram；兩字查詢使用限制在授權 session 範圍的子字串查詢。搜尋每頁最多 20 筆，前後文最多 11 筆。
 
 Scratch 與真實 workspace 分開。Deep Agents 的虛擬檔案工具只操作 scratch；真實檔案走 `workspace_*` 與既有權限流程。Scratch adapter 拒絕 traversal 與符號連結。`read_scratch_part` 可分段讀取長行或大型 JSON，避免再次把完整結果塞入 context。
 
-## 遷移與備份
+## 格式與備份
 
-首次啟動先備份 v2 state 至 `state-before-conversations-<hash>.json`，再匯入 session、訊息、engine state、虛擬檔案。每個舊 session 有初始 context；原有 Bot/session/message/run ID 保留。舊記憶預設為 reference、revision 1。
-
-匯入標記只在檢查訊息筆數、內容與 scratch 成功後寫入；中斷可重試，既有不同內容的 scratch 不覆蓋。失敗保留原始資料並停止啟動。已使用 schema 3 卻找不到對話資料庫時也停止啟動。舊資料缺少的時間與工具證據不補造。
+本版不匯入舊 session、agent 或訊息。`state.json` 只接受 schema 4，不含
+對話或重複模型設定；Session 用 `botId` 關聯 Bot。對話寫入直接使用 SQLite
+交易，不經過知識檔的 mutate queue。schema 4 的對話資料庫或知識檔遺失時
+停止啟動，不建立空白替代資料。較舊格式須改用全新的資料目錄。
 
 `GET /api/storage/backup` 輸出版本化串流 JSON，包含 metadata、記憶、SQLite 歷史／checkpoint／摘要與 scratch 內容（base64）。資料庫部分使用讀取快照；運行中的檔案可能繼續改變，因此這是邏輯匯出，不是完整離線還原映像。完整備份仍須停止程式後複製整個資料目錄，包括 `product.sqlite`、`runs/`、連線設定與 workspace。
 
@@ -72,7 +73,7 @@ Scratch 與真實 workspace 分開。Deep Agents 的虛擬檔案工具只操作 
 
 ## 驗證
 
-`npm test` 包含可重現 HTTP 模型替身，實際呼叫 Deep Agents middleware。新增測試涵蓋三次壓縮、重啟、steering、todo 保留、摘要串流隔離、overflow 一次重試、摘要失敗、超大輸入、工具卸載與取消、8K/32K/128K 預算、未知模型、縮小模型、10,000 則歷史、遷移重試、中文／英文搜尋、scope、記憶修訂／容量及工作 context 隔離。
+`npm test` 包含可重現 HTTP 模型替身，實際呼叫 Deep Agents middleware。新增測試涵蓋三次壓縮、重啟、steering、todo 保留、摘要串流隔離、overflow 一次重試、摘要失敗、超大輸入、工具卸載與取消、8K/32K/128K 預算、未知模型、縮小模型、10,000 則歷史、目前格式拒絕與資料保存、中文／英文搜尋、scope、記憶修訂／容量及工作 context 隔離。
 
 瀏覽器流程：`npm run test:bots:browser`、`npm run test:settings:browser`、`npm run test:context:browser`。最後一項專門驗證最新 50 則、向上分頁、新話題、核心記憶與鎖定、中文搜尋、跨 context 引用及行動版。
 

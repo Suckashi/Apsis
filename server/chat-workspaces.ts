@@ -1,21 +1,33 @@
-import type { ProductService } from "./product.ts";
-import type { Bot, Job } from "../shared/product.ts";
+import type { ProductDB } from "./product-db.ts";
+import type { TaskService } from "./tasks.ts";
+import type { BotService } from "./bot-service.ts";
+import type { JobService } from "./job-service.ts";
+import type { ExecutionState } from "./execution-state.ts";
+interface Dependencies {
+  db: ProductDB;
+  tasks: TaskService;
+  execution: ExecutionState;
+  bot: BotService["bot"];
+  submit: JobService["submit"];
+  notify: (botId?: string) => void;
+}
+
 import { gitOverview } from "./git-workspaces.ts";
 import { identifyPullRequest, readPullRequest } from "./pull-requests.ts";
 
 /** Git and PR evidence belongs to a conversation context, without a task lifecycle. */
 export class ChatWorkspaces {
-  product: ProductService;
+  private readonly deps: Dependencies;
   worktreeRoot?: string;
   private checking = new Set<string>();
-  constructor(product: ProductService) {
-    this.product = product;
+  constructor(deps: Dependencies) {
+    this.deps = deps;
   }
   readRemote(root: string, url: string) {
     return readPullRequest(root, url);
   }
   changes(botId: string, contextId: string, path?: string) {
-    const p = this.product,
+    const p = this.deps,
       bot = p.bot(botId);
     const context = p.tasks.store.conversations.context(
       bot.sessionId,
@@ -30,7 +42,7 @@ export class ChatWorkspaces {
     );
   }
   async track(botId: string, contextId: string, url: string) {
-    const p = this.product,
+    const p = this.deps,
       bot = p.bot(botId),
       history = p.tasks.store.conversations;
     const ref = identifyPullRequest(url);
@@ -50,20 +62,20 @@ export class ChatWorkspaces {
     return pullRequest;
   }
   async checkPullRequests() {
-    const p = this.product,
+    const p = this.deps,
       history = p.tasks.store.conversations;
-    for (const bot of p.db.all<Bot>("bot").filter((b) => !b.deletedAt)) {
+    for (const bot of p.db.bots.list().filter((b) => !b.deletedAt)) {
       const context = history.context(bot.sessionId),
         pr = context.pullRequest;
       if (
-        p.closed ||
+        p.execution.closed ||
         !pr ||
         pr.followUps >= 3 ||
         /^(merged|completed|closed|abandoned)$/i.test(pr.status) ||
         this.checking.has(context.id) ||
         Date.now() - Date.parse(pr.checkedAt) < 60000 ||
-        p.db
-          .all<Job>("job")
+        p.db.jobs
+          .list()
           .some(
             (j) =>
               j.botId === bot.id && ["running", "queued"].includes(j.status),
@@ -76,7 +88,10 @@ export class ChatWorkspaces {
           p.tasks.locations.ensure(bot.sessionId, context.id).path,
           pr.url,
         );
-        if (p.closed || history.activeId(bot.sessionId) !== context.id)
+        if (
+          p.execution.closed ||
+          history.activeId(bot.sessionId) !== context.id
+        )
           continue;
         pr.checkedAt = new Date().toISOString();
         pr.status = snapshot.status;

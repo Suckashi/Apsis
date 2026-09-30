@@ -333,9 +333,8 @@ export const english: Record<string, string> = {
     "Mode saved; applies from the next tool operation.",
   "設定已變更，已重新讀取，請再次選擇模式。":
     "Settings changed and have been reloaded. Select the mode again.",
-  "記住的核准只適用於原任務及其派工。舊版永久核准保留供查閱，不再生效。":
-    "Remembered approvals apply only to the original task and its delegated work. Legacy permanent approvals are retained for reference and no longer apply.",
-  "舊版紀錄（不生效）": "Legacy record (inactive)",
+  "記住的核准只適用於原任務及其派工。":
+    "Remembered approvals apply only to the original task and its delegated work.",
   限原任務及其派工: "Original task and its delegated work only",
   工具核准模式: "Tool approval mode",
   一般核准: "Manual",
@@ -442,12 +441,6 @@ export const english: Record<string, string> = {
   "{0} 個模型": "{0} models",
   "請選擇模型連線。": "Select a model connection.",
   "找不到可用的模型連線。": "No available model connection found.",
-  "Codex 接入已移除，請重新選擇模型。":
-    "Codex is no longer supported. Select a replacement model.",
-  "Codex 接入已移除，請先在 Bot 設定重新選擇模型。":
-    "Codex is no longer supported. Select a replacement model in the Bot profile.",
-  "Codex 接入已移除，請選擇其他供應商。":
-    "Codex is no longer supported. Select another provider.",
   "此模型不在所選連線的模型清單中。":
     "This model is not in the selected connection’s model list.",
   "網址已變更，請重新輸入 API key，或先儲存新網址後再取得模型。":
@@ -475,9 +468,7 @@ export const english: Record<string, string> = {
   "內容為空或超過長度限制。": "Content is empty or exceeds the length limit.",
   "找不到 Bot。": "Bot not found.",
   "Bot 正在刪除中。": "Bot deletion is in progress.",
-  "技能或連接器清單格式錯誤。": "Invalid skill or connector list.",
-  "技能或連接器已不存在，請重新選擇。":
-    "A skill or connector is no longer available. Select available items again.",
+  "連接器清單格式錯誤。": "Invalid connector list.",
   "未知權限模式。": "Unknown permission mode.",
   "描述過長。": "Description is too long.",
   "請選擇有效的 Bot 圖示。": "Select a valid Bot avatar.",

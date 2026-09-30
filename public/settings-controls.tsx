@@ -3,7 +3,7 @@ import {
   ApprovalModePicker,
 } from "./approval-mode-picker.tsx";
 import { uiText } from "./settings-dictionary.ts";
-import React, { useEffect, useId, useState } from "react";
+import { useLayoutEffect, useEffect, useId, useState } from "react";
 import {
   DEFAULT_SETTINGS,
   SETTINGS_BOUNDS,
@@ -24,7 +24,7 @@ export type SettingsRequest = <T>(
 
 function RememberedApprovals({ api }: { api: SettingsRequest }) {
   const [rules, setRules] =
-    useState<{ id: string; tool: string; args: unknown; legacy?: boolean }[]>();
+    useState<{ id: string; tool: string; args: unknown }[]>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const load = async () => {
@@ -42,9 +42,7 @@ function RememberedApprovals({ api }: { api: SettingsRequest }) {
     <section className="remembered-approvals">
       <h4>{uiText("已記住的核准")}</h4>
       <p className="field-help">
-        {uiText(
-          "記住的核准只適用於原任務及其派工。舊版永久核准保留供查閱，不再生效。",
-        )}
+        {uiText("記住的核准只適用於原任務及其派工。")}
       </p>
       <button
         type="button"
@@ -65,9 +63,7 @@ function RememberedApprovals({ api }: { api: SettingsRequest }) {
       {rules?.map((rule) => (
         <div className="rule" key={rule.id}>
           <strong>{rule.tool}</strong>
-          <small>
-            {uiText(rule.legacy ? "舊版紀錄（不生效）" : "限原任務及其派工")}
-          </small>
+          <small>{uiText("限原任務及其派工")}</small>
           <pre>{JSON.stringify(rule.args, null, 2)}</pre>
           <button
             type="button"
@@ -275,7 +271,7 @@ export function ExecutionSettings({
     };
   }, [api, reload]);
   const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(saved);
-  useEffect(() => {
+  useLayoutEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);

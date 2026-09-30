@@ -44,14 +44,14 @@ async function fixture(
     const data = await response.json();
     return { response, data };
   };
-  const connection = await app.tasks.connections!.save({
+  const connection = await app.connections.save({
     name: "Fixture",
     provider: "openai-compatible",
     model: "fixture-model",
     modelSettings: { "fixture-model": { contextWindowTokens: 128000 } },
     url: "http://127.0.0.1:1/v1",
   });
-  await app.tasks.connections!.setDefault({
+  await app.connections.setDefault({
     connectionId: connection.id,
     model: connection.model,
   });
@@ -123,8 +123,8 @@ test("project knowledge API isolates edits and merges and rejects stale revision
 test("task summaries cover old runs while scoped history loads only on request", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const owner = await f.product.create("owner"),
-    other = await f.product.create("other");
+  const owner = await f.product.bots.create("owner"),
+    other = await f.product.bots.create("other");
   const records: TaskRun[] = [];
   for (let i = 0; i < 32; i++) {
     const record: TaskRun = {
@@ -206,7 +206,7 @@ test("durable tool boundaries notify SSE subscribers before the task finishes", 
     release();
     await f.close();
   });
-  const owner = await f.product.create("owner");
+  const owner = await f.product.bots.create("owner");
   const controller = new AbortController();
   const response = await fetch(`${f.base}/api/v2/events`, {
     signal: controller.signal,
@@ -214,19 +214,25 @@ test("durable tool boundaries notify SSE subscribers before the task finishes", 
   const reader = response.body!.getReader();
   await reader.read();
   const before = Number(f.product.db.events(0).at(-1)!.id);
-  await f.product.submit(owner.id, { requestId: randomUUID(), prompt: "read" });
+  await f.product.jobs.submit(owner.id, {
+    requestId: randomUUID(),
+    prompt: "read",
+  });
   await until(
     () =>
-      f.product.detail(owner.id).currentProgress?.label ===
+      f.product.queries.detail(owner.id).currentProgress?.label ===
       "正在讀取文件 report.pdf",
   );
-  assert.equal(f.product.detail(owner.id).runSummaries[0].status, "running");
+  assert.equal(
+    f.product.queries.detail(owner.id).runSummaries[0].status,
+    "running",
+  );
   assert.ok(f.product.db.events(before).length > 0);
   const event = await reader.read();
   assert.match(new TextDecoder().decode(event.value), /data:/);
   controller.abort();
   release();
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   const reconnect = new AbortController();
   const resumed = await fetch(`${f.base}/api/v2/events`, {
     headers: { "Last-Event-ID": String(before) },
@@ -237,7 +243,10 @@ test("durable tool boundaries notify SSE subscribers before the task finishes", 
     new TextDecoder().decode((await resumedReader.read()).value),
     /data:/,
   );
-  assert.equal(f.product.detail(owner.id).runSummaries[0].status, "completed");
+  assert.equal(
+    f.product.queries.detail(owner.id).runSummaries[0].status,
+    "completed",
+  );
   reconnect.abort();
 });
 
@@ -250,8 +259,8 @@ test("Bot customization validates before creation and persists edits", async (t)
     avatar: "invalid",
   });
   assert.equal(invalid.response.status, 400);
-  assert.equal(f.product.snapshot().bots.length, 0);
-  assert.equal(f.store.state.sessions.length, 0);
+  assert.equal(f.product.queries.snapshot().bots.length, 0);
+  assert.equal(f.store.conversations.cachedSessions().length, 0);
   const created = await f.request("/api/v2/bots", "POST", {
     name: "研究員",
     avatar: "cloud",
@@ -259,8 +268,8 @@ test("Bot customization validates before creation and persists edits", async (t)
   });
   assert.equal(created.response.status, 201);
   const id = created.data.id;
-  assert.equal(f.product.bot(id).avatar, "cloud");
-  assert.equal(f.product.bot(id).description, "每次附上來源。");
+  assert.equal(f.product.bots.bot(id).avatar, "cloud");
+  assert.equal(f.product.bots.bot(id).description, "每次附上來源。");
   await f.request(`/api/v2/bots/${id}`, "PATCH", {
     avatar: "bloom",
     name: "寫作助理",
@@ -270,14 +279,14 @@ test("Bot customization validates before creation and persists edits", async (t)
     name: "不應保存",
   });
   assert.equal(invalidEdit.response.status, 400);
-  assert.equal(f.product.bot(id).name, "寫作助理");
-  assert.equal(f.product.bot(id).avatar, "bloom");
+  assert.equal(f.product.bots.bot(id).name, "寫作助理");
+  assert.equal(f.product.bots.bot(id).avatar, "bloom");
 });
 
 test("avatar rewards, concurrent draws and ownership are enforced through the product API", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.create("Collector");
+  const bot = await f.product.bots.create("Collector");
   for (const [path, method, body] of [
     ["/api/v2/bots", "POST", { name: "Locked", avatar: "captain" }],
     [`/api/v2/bots/${bot.id}`, "PATCH", { avatar: "captain" }],
@@ -285,11 +294,12 @@ test("avatar rewards, concurrent draws and ownership are enforced through the pr
   ] as const) {
     assert.equal((await f.request(path, method, body)).response.status, 403);
   }
-  const template = f.product.template({ name: "Basic" });
+  const template = f.product.bots.template({ name: "Basic" });
+  const { id: _templateId, ...templateInput } = template;
   assert.equal(
     (
       await f.request(`/api/v2/templates/${template.id}`, "PUT", {
-        ...template,
+        ...templateInput,
         avatar: "captain",
       })
     ).response.status,
@@ -303,11 +313,11 @@ test("avatar rewards, concurrent draws and ownership are enforced through the pr
     403,
   );
   for (let i = 0; i < 3; i++) {
-    const job = await f.product.submit(bot.id, {
+    const job = await f.product.jobs.submit(bot.id, {
       prompt: `task ${i}`,
       requestId: randomUUID(),
     });
-    await until(() => !f.product.active.size);
+    await until(() => !f.product.execution.active.size);
     assert.equal(f.product.db.get<Job>("job", job.id)?.status, "completed");
   }
   assert.equal(
@@ -344,19 +354,22 @@ test("avatar rewards, concurrent draws and ownership are enforced through the pr
     ).response.status,
     200,
   );
-  const saved = f.product.template({ name: "Collected", avatar: won.avatarId });
-  const copy = await f.product.create(undefined, { templateId: saved.id });
+  const saved = f.product.bots.template({
+    name: "Collected",
+    avatar: won.avatarId,
+  });
+  const copy = await f.product.bots.create(undefined, { templateId: saved.id });
   assert.equal(copy.avatar, won.avatarId);
   const before = f.product.avatarCollection.view();
-  await f.product.remove(bot.id);
+  await f.product.bots.remove(bot.id);
   assert.deepEqual(f.product.avatarCollection.view(), before);
 });
 
 test("interrupted task notice can be dismissed without deleting the task", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.create("測試 Bot");
-  const other = await f.product.create("另一個 Bot");
+  const bot = await f.product.bots.create("測試 Bot");
+  const other = await f.product.bots.create("另一個 Bot");
   const job: Job = {
     id: "interrupted-notice",
     botId: bot.id,
@@ -383,7 +396,8 @@ test("interrupted task notice can be dismissed without deleting the task", async
   assert.equal(saved.status, "interrupted");
   assert.ok(saved.dismissedAt);
   assert.equal(
-    f.product.detail(bot.id).jobs.find((j) => j.id === job.id)?.dismissedAt,
+    f.product.queries.detail(bot.id).jobs.find((j) => j.id === job.id)
+      ?.dismissedAt,
     saved.dismissedAt,
   );
 });
@@ -404,45 +418,41 @@ test("deleting Bot cancels approval and queue, removes owned data and leaves oth
     },
     f.product.settings.read().revision,
   );
-  const bot = await f.product.create("刪除測試");
-  const other = await f.product.create("保留");
-  await f.product.routine(bot.id, {
+  const bot = await f.product.bots.create("刪除測試");
+  const other = await f.product.bots.create("保留");
+  await f.product.routines.routine(bot.id, {
     name: "排程",
     prompt: "工作",
     cron: "0 9 * * *",
   });
-  for (const kind of ["allow", "artifact", "draft", "preferences"])
+  for (const kind of ["session-allow", "artifact", "draft", "preferences"])
     f.product.db.put(kind, { id: `delete-${kind}`, botId: bot.id });
-  await f.product.submit(bot.id, {
+  await f.product.jobs.submit(bot.id, {
     requestId: "delete-running",
     prompt: "wait",
   });
-  await until(() => f.product.pending.size === 1);
-  await f.product.submit(bot.id, {
+  await until(() => f.product.execution.pending.size === 1);
+  await f.product.jobs.submit(bot.id, {
     requestId: "delete-queued",
     prompt: "never",
   });
   const removed = await f.request(`/api/v2/bots/${bot.id}`, "DELETE");
   assert.equal(removed.response.status, 200);
   assert.equal(effects, 0);
-  assert.equal(f.product.pending.size, 0);
-  assert.equal(f.product.active.has(bot.id), false);
+  assert.equal(f.product.execution.pending.size, 0);
+  assert.equal(f.product.execution.active.has(bot.id), false);
   assert.deepEqual(
-    f.product.snapshot().bots.map((b) => b.id),
+    f.product.queries.snapshot().bots.map((b) => b.id),
     [other.id],
   );
   assert.equal(
-    f.store.state.sessions.some((s) => s.id === bot.sessionId),
-    false,
-  );
-  assert.equal(
-    f.store.state.agents?.some((a) => a.id === bot.id),
+    f.store.conversations.cachedSessions().some((s) => s.id === bot.sessionId),
     false,
   );
   for (const kind of [
     "job",
     "approval",
-    "allow",
+    "session-allow",
     "artifact",
     "draft",
     "routine",
@@ -462,14 +472,14 @@ test("deleting Bot cancels approval and queue, removes owned data and leaves oth
     (await f.request(`/api/v2/bots/${bot.id}`, "DELETE")).response.status,
     404,
   );
-  await f.product.tick();
+  await f.product.routines.tick();
   assert.equal(effects, 0);
 });
 
 test("Bot deletion waits for outgoing draft to settle", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.create();
+  const bot = await f.product.bots.create();
   f.product.db.put("draft", {
     id: "outgoing",
     botId: bot.id,
@@ -479,7 +489,7 @@ test("Bot deletion waits for outgoing draft to settle", async (t) => {
     (await f.request(`/api/v2/bots/${bot.id}`, "DELETE")).response.status,
     409,
   );
-  assert.equal(f.product.bot(bot.id).id, bot.id);
+  assert.equal(f.product.bots.bot(bot.id).id, bot.id);
 });
 
 test("secretary delegates through real tools, waits for approval and receives only the assigned result", async (t) => {
@@ -516,41 +526,37 @@ test("secretary delegates through real tools, waits for approval and receives on
     },
     f.product.settings.read().revision,
   );
-  const secretary = await f.product.create("Secretary");
-  const worker = await f.product.create("Researcher");
+  const secretary = await f.product.bots.create("Secretary");
+  const worker = await f.product.bots.create("Researcher");
   workerId = worker.id;
-  const hidden = await f.product.create("hidden-worker");
-  await f.product.update(hidden.id, { hidden: true });
-  await f.store.mutate((state) =>
-    state.sessions
-      .find((s) => s.id === worker.sessionId)!
-      .messages.push({
-        id: "private",
-        role: "user",
-        content: "private-note",
-        status: "complete",
-      }),
-  );
-  await f.product.submit(secretary.id, {
+  const hidden = await f.product.bots.create("hidden-worker");
+  await f.product.bots.update(hidden.id, { hidden: true });
+  f.store.conversations.append(worker.sessionId, {
+    id: "private",
+    role: "user",
+    content: "private-note",
+    status: "complete",
+  });
+  await f.product.jobs.submit(secretary.id, {
     prompt: "coordinate",
     requestId: "secretary-job",
   });
-  await until(() => f.product.pending.size === 1);
+  await until(() => f.product.execution.pending.size === 1);
   assert.equal(
-    f.product.detail(secretary.id).delegations[0].waitingApproval,
+    f.product.queries.detail(secretary.id).delegations[0].waitingApproval,
     true,
   );
   const approval = f.product.db
     .all<Approval>("approval")
     .find((a) => a.status === "pending")!;
-  f.product.decide(approval.id, { approved: true });
-  await until(() => !f.product.active.size);
+  f.product.approvals.decide(approval.id, { approved: true });
+  await until(() => !f.product.execution.active.size);
   assert.equal(
     f.product.db.get<Job>("job", "secretary-job")!.status,
     "completed",
   );
   assert.equal(workerCalls, 1);
-  const child = f.product.detail(secretary.id).delegations[0];
+  const child = f.product.queries.detail(secretary.id).delegations[0];
   assert.equal(child.status, "completed");
   assert.equal(child.result, "verified-research-result");
   assert.equal(child.parentJobId, "secretary-job");
@@ -583,19 +589,19 @@ test("stopping secretary cancels its delegated work and releases approval", asyn
     },
     f.product.settings.read().revision,
   );
-  const secretary = await f.product.create("Secretary");
-  workerId = (await f.product.create("Worker")).id;
-  await f.product.submit(secretary.id, {
+  const secretary = await f.product.bots.create("Secretary");
+  workerId = (await f.product.bots.create("Worker")).id;
+  await f.product.jobs.submit(secretary.id, {
     prompt: "coordinate",
     requestId: "cancel-parent",
   });
-  await until(() => f.product.pending.size === 1);
+  await until(() => f.product.execution.pending.size === 1);
   await f.request(`/api/v2/bots/${secretary.id}/stop`, "POST", {});
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(effects, 0);
-  assert.equal(f.product.pending.size, 0);
+  assert.equal(f.product.execution.pending.size, 0);
   assert.equal(
-    f.product.detail(secretary.id).delegations[0].status,
+    f.product.queries.detail(secretary.id).delegations[0].status,
     "cancelled",
   );
 });
@@ -632,26 +638,28 @@ test("cancelling queued delegation does not stop the receiver's unrelated task",
     release();
     await f.close();
   });
-  const secretary = await f.product.create("Secretary");
-  workerId = (await f.product.create("Worker")).id;
-  await f.product.submit(workerId, {
+  const secretary = await f.product.bots.create("Secretary");
+  workerId = (await f.product.bots.create("Worker")).id;
+  await f.product.jobs.submit(workerId, {
     prompt: "unrelated",
     requestId: "unrelated-job",
   });
-  await f.product.submit(secretary.id, {
+  await f.product.jobs.submit(secretary.id, {
     prompt: "coordinate",
     requestId: "queued-parent",
   });
-  await until(() => f.product.detail(secretary.id).delegations.length === 1);
+  await until(
+    () => f.product.queries.detail(secretary.id).delegations.length === 1,
+  );
   await f.request(`/api/v2/bots/${secretary.id}/stop`, "POST", {});
-  await until(() => !f.product.active.has(secretary.id));
+  await until(() => !f.product.execution.active.has(secretary.id));
   assert.equal(
-    f.product.detail(secretary.id).delegations[0].status,
+    f.product.queries.detail(secretary.id).delegations[0].status,
     "cancelled",
   );
   assert.equal(unrelatedAborted, false);
   release();
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(
     f.product.db.get<Job>("job", "unrelated-job")!.status,
     "completed",
@@ -677,11 +685,11 @@ test("cross-conversation delegation cycles fail without deadlocking", async (t) 
     return { text: "done" };
   });
   t.after(f.close);
-  aId = (await f.product.create("A")).id;
-  bId = (await f.product.create("B")).id;
-  await f.product.submit(bId, { prompt: "B-root", requestId: "root-b" });
-  await f.product.submit(aId, { prompt: "A-root", requestId: "root-a" });
-  await until(() => !f.product.active.size);
+  aId = (await f.product.bots.create("A")).id;
+  bId = (await f.product.bots.create("B")).id;
+  await f.product.jobs.submit(bId, { prompt: "B-root", requestId: "root-b" });
+  await f.product.jobs.submit(aId, { prompt: "A-root", requestId: "root-a" });
+  await until(() => !f.product.execution.active.size);
   assert.equal(f.product.db.get<Job>("job", "root-a")!.status, "completed");
   assert.equal(f.product.db.get<Job>("job", "root-b")!.status, "completed");
 });
@@ -695,38 +703,41 @@ test("persistent Bot uses one conversation, queues and deduplicates requests, in
     return { text: o.prompt };
   });
   t.after(f.close);
-  const bot = await f.product.create("研究助理");
+  const bot = await f.product.bots.create("研究助理");
   const first = { prompt: "研究趨勢", requestId: "req-1" };
-  await f.product.submit(bot.id, first);
-  await f.product.submit(bot.id, first);
-  await f.product.submit(bot.id, { prompt: "接續分析", requestId: "req-2" });
+  await f.product.jobs.submit(bot.id, first);
+  await f.product.jobs.submit(bot.id, first);
+  await f.product.jobs.submit(bot.id, {
+    prompt: "接續分析",
+    requestId: "req-2",
+  });
   await until(
     () =>
       f.product.db.all<Job>("job").filter((j) => j.status === "completed")
         .length === 2,
   );
   assert.equal(calls.length, 2);
-  assert.equal(f.store.state.sessions.length, 1);
+  assert.equal(f.store.conversations.cachedSessions().length, 1);
   assert.equal(f.tasks.view(bot.sessionId).messages.length, 4);
   assert.equal(calls[1].session.messages.length, 2);
   const replyTo = f.tasks.view(bot.sessionId).messages[1].id;
-  const next = await f.tasks.connections!.save({
+  const next = await f.connections.save({
     name: "Second",
     provider: "openai-compatible",
     model: "next-model",
     modelSettings: { "next-model": { contextWindowTokens: 128000 } },
     url: "http://127.0.0.1:2/v1",
   });
-  await f.tasks.connections!.setDefault({
+  await f.connections.setDefault({
     connectionId: next.id,
     model: next.model,
   });
-  await f.product.submit(bot.id, {
+  await f.product.jobs.submit(bot.id, {
     prompt: "針對這一點補充",
     requestId: "req-3",
     replyTo,
   });
-  await until(() => calls.length === 3 && !f.product.active.size);
+  await until(() => calls.length === 3 && !f.product.execution.active.size);
   assert.equal(calls[2].agent?.model, "next-model");
   assert.match(calls[2].executionContext!, /replying to this earlier message/);
   assert.equal(
@@ -734,7 +745,7 @@ test("persistent Bot uses one conversation, queues and deduplicates requests, in
     "針對這一點補充",
   );
   await assert.rejects(
-    f.product.submit(bot.id, { prompt: "different", requestId: "req-1" }),
+    f.product.jobs.submit(bot.id, { prompt: "different", requestId: "req-1" }),
     /已使用/,
   );
   const response = await fetch(f.base + `/api/v2/bots/${bot.id}`, {
@@ -743,8 +754,8 @@ test("persistent Bot uses one conversation, queues and deduplicates requests, in
     body: JSON.stringify({ name: "bad" }),
   });
   assert.equal(response.status, 403);
-  await f.product.update(bot.id, { hidden: true, pinned: true });
-  assert.equal(f.product.bot(bot.id).hidden, true);
+  await f.product.bots.update(bot.id, { hidden: true, pinned: true });
+  assert.equal(f.product.bots.bot(bot.id).hidden, true);
 });
 
 test("approval gates actual tool execution, supports exact allow rules, denial, cancellation and steering", async (t) => {
@@ -767,45 +778,46 @@ test("approval gates actual tool execution, supports exact allow rules, denial, 
     },
     f.product.settings.read().revision,
   );
-  const bot = await f.product.create();
-  await f.product.submit(bot.id, {
+  const bot = await f.product.bots.create();
+  await f.product.jobs.submit(bot.id, {
     prompt: "same-command",
     requestId: "approval-1",
   });
-  await until(() => f.product.pending.size === 1);
+  await until(() => f.product.execution.pending.size === 1);
   assert.equal(effects, 0);
   const first = f.product.db.all<Approval>("approval").at(-1)!;
-  assert.equal(f.product.snapshot().bots[0].status, "waiting");
+  assert.equal(f.product.queries.snapshot().bots[0].status, "waiting");
   await f.request(`/api/v2/bots/${bot.id}/steer`, "POST", {
     prompt: "補充限制",
+    requestId: "approval-supplement",
   });
   assert.equal(steer, "補充限制");
-  f.product.decide(first.id, { approved: true, remember: true });
-  await until(() => !f.product.active.size);
+  f.product.approvals.decide(first.id, { approved: true, remember: true });
+  await until(() => !f.product.execution.active.size);
   assert.equal(effects, 1);
-  await f.product.submit(bot.id, {
+  await f.product.jobs.submit(bot.id, {
     prompt: "same-command",
     requestId: "approval-2",
   });
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(effects, 2);
-  assert.equal(f.product.pending.size, 0);
-  await f.product.submit(bot.id, {
+  assert.equal(f.product.execution.pending.size, 0);
+  await f.product.jobs.submit(bot.id, {
     prompt: "different-command",
     requestId: "approval-3",
   });
-  await until(() => f.product.pending.size === 1);
+  await until(() => f.product.execution.pending.size === 1);
   const denied = f.product.db.all<Approval>("approval").at(-1)!;
-  f.product.decide(denied.id, { approved: false });
-  await until(() => !f.product.active.size);
+  f.product.approvals.decide(denied.id, { approved: false });
+  await until(() => !f.product.execution.active.size);
   assert.equal(effects, 2);
-  await f.product.submit(bot.id, {
+  await f.product.jobs.submit(bot.id, {
     prompt: "cancel-command",
     requestId: "approval-4",
   });
-  await until(() => f.product.pending.size === 1);
+  await until(() => f.product.execution.pending.size === 1);
   f.tasks.stop(bot.sessionId);
-  await until(() => !f.product.active.size);
+  await until(() => !f.product.execution.active.size);
   assert.equal(
     f.product.db.all<Approval>("approval").at(-1)?.status,
     "expired",
@@ -816,7 +828,7 @@ test("approval gates actual tool execution, supports exact allow rules, denial, 
 test("attachments, published snapshots and generated documents round-trip through protected HTTP endpoints", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.create();
+  const bot = await f.product.bots.create();
   const workspace = f.tasks.locations.workspace(f.product.workLocation(bot));
   const upload = await fetch(f.base + `/api/v2/bots/${bot.id}/attachments`, {
     method: "POST",
@@ -829,32 +841,41 @@ test("attachments, published snapshots and generated documents round-trip throug
   assert.equal(upload.status, 201);
   const attachment = await upload.json();
   assert.equal(
-    await f.product.readDocument(attachment.path, workspace),
+    await f.product.artifacts.readDocument(attachment.path, workspace),
     "example text",
   );
   await workspace.write("report.md", "original");
-  const artifact = await f.product.publish(bot, "run", "report.md", "報告.md");
+  const artifact = await f.product.artifacts.publish(
+    bot,
+    "run",
+    "report.md",
+    "報告.md",
+  );
   await workspace.write("report.md", "changed");
   const downloaded = await fetch(f.base + `/api/v2/artifacts/${artifact.id}`);
   assert.equal(await downloaded.text(), "original");
   assert.match(downloaded.headers.get("content-disposition")!, /attachment/);
-  await assert.rejects(f.product.publish(bot, "run", "../outside.txt", "bad"));
-  const doc = await f.product.createDocument(bot, "run", {
+  await assert.rejects(
+    f.product.artifacts.publish(bot, "run", "../outside.txt", "bad"),
+  );
+  const doc = await f.product.artifacts.createDocument(bot, "run", {
     format: "docx",
     name: "報告",
     content: "繁體中文文件\n第二行",
   });
   assert.match(
-    String(await f.product.readDocument(doc.path, workspace)),
+    String(await f.product.artifacts.readDocument(doc.path, workspace)),
     /繁體中文文件/,
   );
-  const sheet = await f.product.createDocument(bot, "run", {
+  const sheet = await f.product.artifacts.createDocument(bot, "run", {
     format: "xlsx",
     name: "數據",
     content: '[["項目","值"],["總計",42]]',
   });
   assert.match(
-    JSON.stringify(await f.product.readDocument(sheet.path, workspace)),
+    JSON.stringify(
+      await f.product.artifacts.readDocument(sheet.path, workspace),
+    ),
     /總計/,
   );
   assert.ok((await readFile(await workspace.resolve(doc.path))).length > 1000);
@@ -863,9 +884,9 @@ test("attachments, published snapshots and generated documents round-trip throug
 test("routine ticks are idempotent, hidden Bots keep schedules, restart expires work without replay", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.create();
-  await f.product.update(bot.id, { hidden: true });
-  const routine = await f.product.routine(bot.id, {
+  const bot = await f.product.bots.create();
+  await f.product.bots.update(bot.id, { hidden: true });
+  const routine = await f.product.routines.routine(bot.id, {
     name: "日報",
     prompt: "整理日報",
     cron: "0 9 * * *",
@@ -873,10 +894,10 @@ test("routine ticks are idempotent, hidden Bots keep schedules, restart expires 
   });
   routine.nextAt = "2020-01-01T00:00:00.000Z";
   f.product.db.put("routine", routine);
-  await Promise.all([f.product.tick(), f.product.tick()]);
-  await until(() => !f.product.active.size);
+  await Promise.all([f.product.routines.tick(), f.product.routines.tick()]);
+  await until(() => !f.product.execution.active.size);
   assert.equal(f.product.db.all<Job>("job").length, 1);
-  assert.equal(f.product.detail(bot.id).routines[0].history.length, 1);
+  assert.equal(f.product.queries.detail(bot.id).routines[0].history.length, 1);
   f.product.db.put("job", {
     id: "restart",
     botId: bot.id,
@@ -906,7 +927,7 @@ test("routine ticks are idempotent, hidden Bots keep schedules, restart expires 
     reopened.product!.db.get<Approval>("approval", "pending-restart")?.status,
     "expired",
   );
-  assert.equal(reopened.product!.bot(bot.id).sessionId, bot.sessionId);
+  assert.equal(reopened.product!.bots.bot(bot.id).sessionId, bot.sessionId);
   assert.equal(reopened.tasks.running.size, 0);
 });
 
@@ -960,16 +981,18 @@ test("MCP drafts edit arguments, call the connector once, hide credentials and n
   t.after(() => upstream.close());
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.create();
+  const bot = await f.product.bots.create();
   const added = await f.request("/api/v2/connectors", "POST", {
     name: "Notes",
     url: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/mcp`,
     token: "connector-secret",
   });
   assert.equal(added.response.status, 200);
-  await f.product.update(bot.id, { connectorIds: [added.data.id] });
-  assert.ok(!JSON.stringify(f.product.snapshot()).includes("connector-secret"));
-  const tool = f.product
+  await f.product.bots.update(bot.id, { connectorIds: [added.data.id] });
+  assert.ok(
+    !JSON.stringify(f.product.queries.snapshot()).includes("connector-secret"),
+  );
+  const tool = f.product.toolRegistry
     .tools(bot, "run")
     .find((x) => x.name === "create_draft")!;
   await tool.execute("draft", {
@@ -1012,13 +1035,13 @@ test("Deep Agents product tools pass through the common gate and preserve operat
     return { text: "筆記已完成" };
   });
   t.after(f.close);
-  const bot = await f.product.create();
-  await f.product.submit(bot.id, {
+  const bot = await f.product.bots.create();
+  await f.product.jobs.submit(bot.id, {
     prompt: "製作筆記",
     requestId: "tool-flow",
   });
-  await until(() => !f.product.active.size);
-  const detail = f.product.detail(bot.id);
+  await until(() => !f.product.execution.active.size);
+  const detail = f.product.queries.detail(bot.id);
   assert.equal(detail.artifacts.length, 1);
   assert.equal(detail.runs[0].operations.length, 2);
   assert.equal(detail.runs[0].operations[0].status, "succeeded");

@@ -10,6 +10,7 @@ import { createApp } from "../server/app.ts";
 import type { RunOptions } from "../server/runtime.ts";
 import { createTools } from "../server/tools.ts";
 import type { Approval, Job } from "../shared/product.ts";
+import { ProductDB } from "../server/product-db.ts";
 import { RunSlots } from "../server/run-slots.ts";
 
 async function until(check: () => boolean) {
@@ -52,7 +53,9 @@ async function fixture(
   await once(app.server, "listening");
   t.after(async () => {
     await app.product.close();
-    await until(() => !app.product.active.size && !app.tasks.running.size);
+    await until(
+      () => !app.product.execution.active.size && !app.tasks.running.size,
+    );
     app.server.closeAllConnections();
     await new Promise<void>((resolve) => app.server.close(() => resolve()));
   });
@@ -87,10 +90,10 @@ async function fixture(
     },
     app.product.settings.read().revision,
   );
-  const parent = await app.product.create("Parent");
+  const parent = await app.product.bots.create("Parent");
   const workers = await Promise.all(
     ["First", "Second", "Third", "Fourth"].map((name) =>
-      app.product.create(name),
+      app.product.bots.create(name),
     ),
   );
   return {
@@ -100,8 +103,11 @@ async function fixture(
     request,
     jobs: () => app.product.db.all<Job>("job"),
     start: () =>
-      app.product.submit(parent.id, { requestId: "root", prompt: "parent" }),
-    settled: () => until(() => !app.product.active.size),
+      app.product.jobs.submit(parent.id, {
+        requestId: "root",
+        prompt: "parent",
+      }),
+    settled: () => until(() => !app.product.execution.active.size),
   };
 }
 
@@ -201,14 +207,19 @@ for (const limit of [1, 2]) {
       { maxConcurrent: 4 },
       f.product.settings.read().revision,
     );
+    // Separate Bots prepare concurrently; release jobs in their actual arrival order.
+    // RunSlots tests cover FIFO order once jobs have reached the slot queue.
     for (let i = 0; i < 4; i++) {
-      await until(() => started.includes(i));
+      await until(() => started.length > i);
       assert.ok(active <= limit);
-      gates[i].release();
+      gates[started[i]].release();
     }
     await f.settled();
     assert.equal(peak, limit);
-    assert.deepEqual(started, [0, 1, 2, 3]);
+    assert.deepEqual(
+      started.toSorted((a, b) => a - b),
+      [0, 1, 2, 3],
+    );
     assert.ok(f.jobs().every((job) => job.status === "completed"));
   });
 }
@@ -268,7 +279,7 @@ test("stopping parent cancels running children and children waiting for slots", 
   await f.settled();
   assert.deepEqual(started, ["0"]);
   assert.ok(f.jobs().every((job) => job.status === "cancelled"));
-  assert.equal(f.product.jobControllers.size, 0);
+  assert.equal(f.product.execution.jobControllers.size, 0);
 });
 
 test("approval yields its slot to a sibling and reacquires before approved work", async (t) => {
@@ -292,11 +303,11 @@ test("approval yields its slot to a sibling and reacquires before approved work"
     return { text: "done" };
   });
   await f.start();
-  await until(() => siblingStarted && f.product.pending.size === 1);
+  await until(() => siblingStarted && f.product.execution.pending.size === 1);
   const approval = f.product.db
     .all<Approval>("approval")
     .find((a) => a.status === "pending")!;
-  f.product.decide(approval.id, { approved: true });
+  f.product.approvals.decide(approval.id, { approved: true });
   // Let the approval continuation run while the sibling still owns the slot.
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(approvedWork, false);
@@ -332,14 +343,21 @@ test("close cancels approval waits, executing children, and slot waiters", async
   await f.start();
   await until(
     () =>
-      siblingStarted && f.product.pending.size === 1 && f.jobs().length === 4,
+      siblingStarted &&
+      f.product.execution.pending.size === 1 &&
+      f.jobs().length === 4,
   );
   await f.product.close();
   await f.settled();
   assert.equal(forbiddenEffect, false);
-  assert.equal(f.product.pending.size, 0);
-  assert.equal(f.product.jobControllers.size, 0);
-  assert.ok(f.jobs().every((job) => job.status === "cancelled"));
+  assert.equal(f.product.execution.pending.size, 0);
+  assert.equal(f.product.execution.jobControllers.size, 0);
+  const reopened = await new ProductDB().init(f.store.directory);
+  try {
+    assert.ok(reopened.jobs.list().every((job) => job.status === "cancelled"));
+  } finally {
+    reopened.db.close();
+  }
 });
 
 test("approved parent work waits for the child's slot despite an early concurrent resume", async (t) => {
@@ -355,7 +373,7 @@ test("approved parent work waits for the child's slot despite an early concurren
         approvedEffect(options, () => {
           peak = Math.max(peak, ++active);
           approvalContinued = true;
-          assert.equal(f.product.slots.isSuspended("root"), false);
+          assert.equal(f.product.execution.slots.isSuspended("root"), false);
           active--;
         }),
       ]);
@@ -371,14 +389,14 @@ test("approved parent work waits for the child's slot despite an early concurren
     return { text: "done" };
   });
   await f.start();
-  await until(() => childStarted && f.product.pending.size === 1);
+  await until(() => childStarted && f.product.execution.pending.size === 1);
   const approval = f.product.db
     .all<Approval>("approval")
     .find((a) => a.status === "pending")!;
-  f.product.decide(approval.id, { approved: true });
+  f.product.approvals.decide(approval.id, { approved: true });
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(approvalContinued, false);
-  assert.equal(f.product.slots.isSuspended("root"), true);
+  assert.equal(f.product.execution.slots.isSuspended("root"), true);
   assert.equal(
     f.jobs().find((job) => job.parentJobId === "root")?.status,
     "running",
@@ -418,7 +436,7 @@ test("internal approval yields only its branch pin and reacquires before tool ef
             { command: "internal" },
             options.signal,
           );
-          assert.equal(f.product.slots.isSuspended("root"), false);
+          assert.equal(f.product.execution.slots.isSuspended("root"), false);
           peak = Math.max(peak, ++active);
           effect = true;
           active--;
@@ -438,21 +456,24 @@ test("internal approval yields only its branch pin and reacquires before tool ef
   });
   await f.start();
   await until(
-    () => toolStarted && f.product.pending.size === 1 && f.jobs().length === 2,
+    () =>
+      toolStarted &&
+      f.product.execution.pending.size === 1 &&
+      f.jobs().length === 2,
   );
   assert.equal(
     childStarted,
     false,
     "other executable branch still pins parent",
   );
-  assert.equal(f.product.slots.isSuspended("root"), false);
+  assert.equal(f.product.execution.slots.isSuspended("root"), false);
   activeTool.release();
   await until(() => childStarted);
-  assert.equal(f.product.slots.isSuspended("root"), true);
+  assert.equal(f.product.execution.slots.isSuspended("root"), true);
   const approval = f.product.db
     .all<Approval>("approval")
     .find((a) => a.status === "pending")!;
-  f.product.decide(approval.id, { approved: true });
+  f.product.approvals.decide(approval.id, { approved: true });
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(effect, false);
   child.release();

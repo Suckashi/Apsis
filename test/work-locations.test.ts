@@ -7,7 +7,6 @@ import {
   mkdir,
   stat,
   symlink,
-  rename,
   realpath,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -65,7 +64,7 @@ async function fixture(
     return { response, data: await response.json() };
   };
   const finish = async () => {
-    await until(() => !app.product.active.size);
+    await until(() => !app.product.execution.active.size);
   };
   return { ...app, dir, base, request, finish };
 }
@@ -77,7 +76,7 @@ async function call(o: RunOptions, name: string, args: unknown) {
 
 test("HTML preview scopes opaque-origin asset access and keeps application APIs private", async (t) => {
   const f = await fixture(t);
-  const bot = await f.product.create();
+  const bot = await f.product.bots.create();
   const location = f.product.workLocation(bot);
   await f.product.files.save(
     location.id,
@@ -162,7 +161,7 @@ test("HTML preview scopes opaque-origin asset access and keeps application APIs 
     ).status,
     403,
   );
-  const other = f.product.workLocation(await f.product.create());
+  const other = f.product.workLocation(await f.product.bots.create());
   assert.equal(
     (
       await fetch(f.base + data.previewUrl.replace(location.id, other.id), {
@@ -188,12 +187,12 @@ test("plain chat stays lazy; new tasks isolate files, history and memory while r
     }
     return { text: "answer " + o.prompt };
   });
-  const bot = await f.product.create();
+  const bot = await f.product.bots.create();
   const first = f.product.workLocation(bot);
-  await f.product.submit(bot.id, { prompt: "chat", requestId: "chat" });
+  await f.product.jobs.submit(bot.id, { prompt: "chat", requestId: "chat" });
   await f.finish();
   await assert.rejects(stat(first.path), { code: "ENOENT" });
-  await f.product.submit(bot.id, {
+  await f.product.jobs.submit(bot.id, {
     prompt: "alpha-secret",
     requestId: "alpha",
   });
@@ -203,10 +202,13 @@ test("plain chat stays lazy; new tasks isolate files, history and memory while r
     "alpha-secret",
   );
   const oldContext = f.tasks.store.conversations.activeId(bot.sessionId);
-  f.product.newContext(bot.id);
+  f.product.messages.newContext(bot.id);
   const second = f.product.workLocation(bot);
   assert.notEqual(first.path, second.path);
-  await f.product.submit(bot.id, { prompt: "beta-secret", requestId: "beta" });
+  await f.product.jobs.submit(bot.id, {
+    prompt: "beta-secret",
+    requestId: "beta",
+  });
   await f.finish();
   assert.equal(
     await readFile(join(first.path, "same.txt"), "utf8"),
@@ -216,10 +218,10 @@ test("plain chat stays lazy; new tasks isolate files, history and memory while r
     await readFile(join(second.path, "same.txt"), "utf8"),
     "beta-secret",
   );
-  assert.equal(f.product.detail(bot.id).session.messages.length, 6);
+  assert.equal(f.product.queries.detail(bot.id).session.messages.length, 6);
   assert.deepEqual(
     scopedState(
-      f.store.state,
+      f.store.skillState(),
       seen.at(-1)!.agent,
       second.memoryKey,
     ).memories.map((m) => m.content),
@@ -255,22 +257,25 @@ test("delegation and routines inherit the work location and never the recipient'
     else await call(o, "write_file", { path: "result.txt", content: o.prompt });
     return { text: "done" };
   });
-  const owner = await f.product.create("owner"),
-    worker = await f.product.create("worker");
+  const owner = await f.product.bots.create("owner"),
+    worker = await f.product.bots.create("worker");
   workerId = worker.id;
   const own = f.product.workLocation(owner),
     other = f.product.workLocation(worker);
-  await f.product.submit(owner.id, { prompt: "delegate", requestId: "root" });
+  await f.product.jobs.submit(owner.id, {
+    prompt: "delegate",
+    requestId: "root",
+  });
   await f.finish();
   assert.equal(await readFile(join(own.path, "result.txt"), "utf8"), "child");
   await assert.rejects(stat(other.path), { code: "ENOENT" });
   assert.equal(f.product.workLocation(worker).id, other.id);
-  const routine = await f.product.routine(owner.id, {
+  const routine = await f.product.routines.routine(owner.id, {
     name: "routine",
     prompt: "scheduled",
     cron: "0 9 * * *",
   });
-  f.product.newContext(owner.id);
+  f.product.messages.newContext(owner.id);
   const current = f.product.workLocation(owner);
   const result = await f.request(`/routines/${routine.id}/test`, "POST", {});
   assert.equal(result.response.status, 200);
@@ -286,7 +291,7 @@ test("delegation and routines inherit the work location and never the recipient'
 
 test("file CRUD preserves drafts on conflict, paginates, handles dotfiles and restores without overwrite", async (t) => {
   const f = await fixture(t),
-    bot = await f.product.create(),
+    bot = await f.product.bots.create(),
     location = f.product.workLocation(bot);
   const base = `/work-locations/${location.id}`;
   let r = await f.request(base + "/content", "PUT", {
@@ -395,9 +400,9 @@ test("busy folders block manual writes, published snapshots survive source edits
     await new Promise<void>((r) => (release = r));
     return { text: "done" };
   });
-  const bot = await f.product.create(),
+  const bot = await f.product.bots.create(),
     location = f.product.workLocation(bot);
-  await f.product.submit(bot.id, { prompt: "hold", requestId: "hold" });
+  await f.product.jobs.submit(bot.id, { prompt: "hold", requestId: "hold" });
   await until(() => !!release);
   const base = `/work-locations/${location.id}`;
   const file = (await f.request(base + "/content?path=result.md")).data;
@@ -423,8 +428,8 @@ test("busy folders block manual writes, published snapshots survive source edits
     ).response.status,
     200,
   );
-  const artifact = f.product.detail(bot.id).artifacts[0];
-  f.product.newContext(bot.id);
+  const artifact = f.product.queries.detail(bot.id).artifacts[0];
+  f.product.messages.newContext(bot.id);
   const downloaded = await fetch(f.base + `/api/v2/artifacts/${artifact.id}`);
   assert.equal(await downloaded.text(), "original");
 });
@@ -434,8 +439,8 @@ test("project binding freezes on submit and only explicit owner actions promote 
     await call(o, "remember", { content: "project fact" });
     return { text: "done" };
   });
-  const bot = await f.product.create(),
-    context = f.product.detail(bot.id).session.context!;
+  const bot = await f.product.bots.create(),
+    context = f.product.queries.detail(bot.id).session.context!;
   const project = (
     await f.request("/projects", "POST", {
       name: "Research",
@@ -451,7 +456,10 @@ test("project binding freezes on submit and only explicit owner actions promote 
     ).response.status,
     200,
   );
-  await f.product.submit(bot.id, { prompt: "remember", requestId: "remember" });
+  await f.product.jobs.submit(bot.id, {
+    prompt: "remember",
+    requestId: "remember",
+  });
   await f.finish();
   assert.equal(
     (
@@ -462,21 +470,23 @@ test("project binding freezes on submit and only explicit owner actions promote 
     ).response.status,
     409,
   );
-  const memory = f.product.detail(bot.id).memories[0];
+  const memory = f.product.queries.detail(bot.id).memories[0];
   assert.equal(memory.scopeKey, `project:${project.id}`);
   const promoted = await f.request(`/bots/${bot.id}/memories`, "POST", {
-    ...memory,
+    id: memory.id,
+    revision: memory.revision,
+    content: memory.content,
     scopeKey: "global",
   });
   assert.equal(promoted.response.status, 200);
-  f.product.newContext(bot.id);
-  assert.equal(f.product.detail(bot.id).memories[0].id, memory.id);
+  f.product.messages.newContext(bot.id);
+  assert.equal(f.product.queries.detail(bot.id).memories[0].id, memory.id);
 });
 
 test("linked folders are optional projects; system roots stay protected through ancestor registrations", async (t) => {
   const f = await fixture(t),
-    bot = await f.product.create();
-  const context = f.product.detail(bot.id).session.context!;
+    bot = await f.product.bots.create();
+  const context = f.product.queries.detail(bot.id).session.context!;
   const root = join(f.dir, "repository");
   assert.equal(f.store.directory, await realpath(join(f.dir, "data")));
   await mkdir(join(root, ".git"), { recursive: true });
@@ -540,26 +550,29 @@ test("project memories are shared within a project; bot preferences and other pr
     await call(o, "remember", { content: "Shared project fact" });
     return { text: "done" };
   });
-  const a = await f.product.create("a"),
-    b = await f.product.create("b");
+  const a = await f.product.bots.create("a"),
+    b = await f.product.bots.create("b");
   const p = await f.tasks.projects.add({ name: "Shared" });
   for (const bot of [a, b]) {
-    const context = f.product.detail(bot.id).session.context!;
+    const context = f.product.queries.detail(bot.id).session.context!;
     await f.request(`/bots/${bot.id}/work-location`, "PUT", {
       contextId: context.id,
       projectId: p.id,
     });
   }
-  await f.product.submit(a.id, {
+  await f.product.jobs.submit(a.id, {
     prompt: "store fact",
     requestId: "project-fact",
   });
   await f.finish();
   assert.equal(
-    f.product.detail(b.id).memories[0].content,
+    f.product.queries.detail(b.id).memories[0].content,
     "Shared project fact",
   );
-  await f.product.submit(b.id, { prompt: "same fact", requestId: "same-fact" });
+  await f.product.jobs.submit(b.id, {
+    prompt: "same fact",
+    requestId: "same-fact",
+  });
   await f.finish();
   assert.equal(
     f.store.state.memories.filter((m) => m.scopeKey === `project:${p.id}`)
@@ -570,9 +583,9 @@ test("project memories are shared within a project; bot preferences and other pr
     content: "Only A preference",
     scopeKey: "global",
   });
-  assert.equal(f.product.detail(b.id).memories.length, 1);
-  f.product.newContext(b.id);
-  assert.equal(f.product.detail(b.id).memories.length, 0);
+  assert.equal(f.product.queries.detail(b.id).memories.length, 1);
+  f.product.messages.newContext(b.id);
+  assert.equal(f.product.queries.detail(b.id).memories.length, 0);
 });
 
 test("delegated deliveries appear in the original bot and old snapshots can be explicitly brought into a new task", async (t) => {
@@ -589,25 +602,25 @@ test("delegated deliveries appear in the original bot and old snapshots can be e
     }
     return { text: "done" };
   });
-  const owner = await f.product.create(),
-    worker = await f.product.create();
+  const owner = await f.product.bots.create(),
+    worker = await f.product.bots.create();
   workerId = worker.id;
-  await f.product.submit(owner.id, {
+  await f.product.jobs.submit(owner.id, {
     prompt: "delegate",
     requestId: "delegated-delivery",
   });
   await f.finish();
-  const artifact = f.product.detail(owner.id).artifacts[0];
+  const artifact = f.product.queries.detail(owner.id).artifacts[0];
   assert.equal(artifact.deliveredFrom, worker.id);
   assert.equal(
     artifact.snapshotPath,
-    f.product.detail(worker.id).artifacts[0].snapshotPath,
+    f.product.queries.detail(worker.id).artifacts[0].snapshotPath,
   );
   await writeFile(
     join(artifact.location!.path, artifact.path),
     "Changed source",
   );
-  const context = f.product.newContext(owner.id);
+  const context = f.product.messages.newContext(owner.id);
   const result = await f.request(
     `/bots/${owner.id}/artifact-reference`,
     "POST",
@@ -621,7 +634,7 @@ test("delegated deliveries appear in the original bot and old snapshots can be e
   assert.equal(
     (
       await f.request(`/bots/${worker.id}/artifact-reference`, "POST", {
-        contextId: f.product.detail(worker.id).session.context!.id,
+        contextId: f.product.queries.detail(worker.id).session.context!.id,
         artifactId: artifact.id,
       })
     ).response.status,
@@ -629,177 +642,10 @@ test("delegated deliveries appear in the original bot and old snapshots can be e
   );
 });
 
-test("versioned legacy migration is repeatable and restart, retry and resumed submissions preserve locations", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "apsis-location-migration-"));
-  const options = {
-    dataDir: join(dir, "data"),
-    workspaceDir: join(dir, "work"),
-    runner: async (o: RunOptions) => {
-      await call(o, "write_file", { path: "retry.txt", content: o.prompt });
-      return { text: "done" };
-    },
-  };
-  let app = await createApp(options);
-  t.after(async () => {
-    await app.product.close();
-  });
-  const c = await app.connections.save({
-    name: "fixture",
-    provider: "openai-compatible",
-    model: "fixture",
-    url: "http://127.0.0.1:1/v1",
-    modelSettings: { fixture: { contextWindowTokens: 128000 } },
-  });
-  await app.connections.setDefault({ connectionId: c.id, model: c.model });
-  const bot = await app.product.create("Legacy");
-  const history = app.store.conversations,
-    context = history.context(bot.sessionId);
-  history.updateContext(bot.sessionId, context.id, {
-    location: undefined,
-    locationLockedAt: undefined,
-  });
-  history.append(
-    bot.sessionId,
-    {
-      id: randomUUID(),
-      role: "user",
-      content: "Old transcript",
-      status: "complete",
-      createdAt: new Date().toISOString(),
-    },
-    context.id,
-  );
-  await app.store.mutate((state) => {
-    state.memories.push({
-      id: "legacy-memory",
-      agentId: bot.id,
-      content: "Old fact",
-      createdAt: new Date().toISOString(),
-    });
-  });
-  await writeFile(join(options.workspaceDir, "old.txt"), "Old attachment");
-  app.product.db.put("artifact", {
-    id: "old-artifact",
-    botId: bot.id,
-    name: "old.txt",
-    path: "old.txt",
-    mime: "text/plain",
-    kind: "attachment",
-    createdAt: new Date().toISOString(),
-  });
-  app.product.db.put("job", {
-    id: "old-job",
-    botId: bot.id,
-    workContextId: context.id,
-    prompt: "retry old work",
-    status: "interrupted",
-    createdAt: new Date().toISOString(),
-  });
-  app.product.db.put("routine", {
-    id: "old-routine",
-    botId: bot.id,
-    name: "old",
-    prompt: "old schedule",
-    cron: "0 9 * * *",
-    timezone: "UTC",
-    enabled: false,
-    nextAt: "2099-01-01T00:00:00Z",
-    history: [],
-  });
-  app.product.db.remove("migration", "task-locations-v1");
-  await rename(
-    join(options.dataDir, "backups", "task-locations-v1"),
-    join(options.dataDir, "backups", "empty-install"),
-  );
-  await app.product.close();
-  app = await createApp(options);
-  const legacy = app.product.workLocation(bot);
-  const legacyArtifact = app.product.db.get<{ snapshotPath: string }>(
-    "artifact",
-    "old-artifact",
-  )!;
-  assert.equal(
-    await readFile(
-      join(options.dataDir, "artifacts", legacyArtifact.snapshotPath),
-      "utf8",
-    ),
-    "Old attachment",
-  );
-  await writeFile(
-    join(options.workspaceDir, "old.txt"),
-    "Changed legacy source",
-  );
-  assert.equal(
-    await readFile(
-      join(options.dataDir, "artifacts", legacyArtifact.snapshotPath),
-      "utf8",
-    ),
-    "Old attachment",
-  );
-  assert.equal(legacy.kind, "legacy");
-  const canonicalWorkspace = await realpath(options.workspaceDir);
-  assert.equal(legacy.path, canonicalWorkspace);
-  assert.equal(app.product.detail(bot.id).memories[0].scopeKey, "legacy");
-  assert.equal(
-    app.product.detail(bot.id).session.messages[0].content,
-    "Old transcript",
-  );
-  assert.equal(
-    app.product.db.get<Job>("job", "old-job")!.location!.path,
-    canonicalWorkspace,
-  );
-  assert.equal(
-    app.product.db.get<{ location: { path: string } }>(
-      "routine",
-      "old-routine",
-    )!.location.path,
-    canonicalWorkspace,
-  );
-  const backup = join(
-    options.dataDir,
-    "backups",
-    "task-locations-v1",
-    "state.json",
-  );
-  const backupData = await readFile(backup, "utf8");
-  assert.equal(JSON.parse(backupData).memories[0].scopeKey, undefined);
-  app.product.newContext(bot.id);
-  const current = app.product.workLocation(bot);
-  assert.equal(app.product.detail(bot.id).memories.length, 0);
-  await app.product.submit(bot.id, {
-    prompt: "retry old work",
-    requestId: "retry-old",
-    retryOf: "old-job",
-  });
-  await until(() => !app.product.active.size);
-  assert.equal(
-    await readFile(join(options.workspaceDir, "retry.txt"), "utf8"),
-    "retry old work",
-  );
-  await assert.rejects(stat(current.path), { code: "ENOENT" });
-  await app.product.close();
-  app = await createApp(options);
-  assert.equal(app.product.workLocation(bot).id, current.id);
-  assert.equal(await readFile(backup, "utf8"), backupData);
-  await app.product.submit(bot.id, {
-    prompt: "Resumed task",
-    requestId: "resumed-task",
-  });
-  await until(() => !app.product.active.size);
-  assert.equal(
-    await readFile(join(current.path, "retry.txt"), "utf8"),
-    "Resumed task",
-  );
-  assert.equal(
-    await readFile(join(options.workspaceDir, "old.txt"), "utf8"),
-    "Changed legacy source",
-  );
-});
-
 test("attachments follow a pre-submit location change and sending fixes the location", async (t) => {
   const f = await fixture(t),
-    bot = await f.product.create();
-  const context = f.product.detail(bot.id).session.context!;
+    bot = await f.product.bots.create();
+  const context = f.product.queries.detail(bot.id).session.context!;
   const upload = await fetch(
     `${f.base}/api/v2/bots/${bot.id}/attachments?contextId=${context.id}`,
     {
@@ -811,7 +657,7 @@ test("attachments follow a pre-submit location change and sending fixes the loca
   assert.equal(upload.status, 201);
   const artifact = await upload.json();
   assert.equal(
-    f.product.detail(bot.id).session.context!.locationLockedAt,
+    f.product.queries.detail(bot.id).session.context!.locationLockedAt,
     undefined,
   );
   const project = await f.tasks.projects.add({ name: "Later selected" });
@@ -825,10 +671,10 @@ test("attachments follow a pre-submit location change and sending fixes the loca
     "Source contents",
   );
   assert.equal(
-    f.product.detail(bot.id).artifacts[0].location!.projectId,
+    f.product.queries.detail(bot.id).artifacts[0].location!.projectId,
     project.id,
   );
-  await f.product.submit(bot.id, {
+  await f.product.jobs.submit(bot.id, {
     prompt: "read source",
     requestId: "attachment-submit",
     workContextId: context.id,
