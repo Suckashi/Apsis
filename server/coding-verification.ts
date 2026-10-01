@@ -39,9 +39,15 @@ async function assertRendered(
   for (;;) {
     signal.throwIfAborted();
     const actual =
-      step.action === "expect_text"
-        ? (await element.innerText()).trim()
-        : await element.inputValue();
+      step.action === "expect_style"
+        ? await element.evaluate(
+            (node, property) =>
+              getComputedStyle(node).getPropertyValue(property).trim(),
+            step.property,
+          )
+        : step.action === "expect_text"
+          ? (await element.innerText()).trim()
+          : await element.inputValue();
     const matches =
       step.action === "expect_text"
         ? actual.includes(step.value!)
@@ -59,7 +65,7 @@ export function parseWebSteps(input: unknown): WebCheckStep[] {
   const steps = typeof input === "string" ? JSON.parse(input) : input;
   if (!Array.isArray(steps) || !steps.length || steps.length > 40)
     throw new Error(
-      "請提供 1–40 個網頁操作，並至少包含一個 expect_text、expect_value 或 expect_visible 檢查。",
+      "請提供 1–40 個網頁操作，並至少包含一個 expect_text、expect_value、expect_style 或 expect_visible 檢查。",
     );
   for (const s of steps) {
     if (
@@ -68,20 +74,35 @@ export function parseWebSteps(input: unknown): WebCheckStep[] {
         "fill",
         "click",
         "press",
+        "reload",
         "expect_text",
         "expect_value",
         "expect_visible",
+        "expect_style",
       ].includes(s.action) ||
-      typeof s.selector !== "string" ||
-      !s.selector.trim() ||
-      s.selector.length > 500 ||
+      (s.action === "reload"
+        ? s.selector !== undefined || s.value !== undefined
+        : typeof s.selector !== "string" ||
+          !s.selector.trim() ||
+          s.selector.length > 500) ||
       (s.value !== undefined &&
         (typeof s.value !== "string" || s.value.length > 2000)) ||
-      (["fill", "press", "expect_text", "expect_value"].includes(s.action) &&
-        typeof s.value !== "string")
+      ([
+        "fill",
+        "press",
+        "expect_text",
+        "expect_value",
+        "expect_style",
+      ].includes(s.action) &&
+        typeof s.value !== "string") ||
+      (s.action === "expect_style"
+        ? typeof s.property !== "string" ||
+          !/^(?:--)?[a-zA-Z][a-zA-Z0-9-]{0,79}$/.test(s.property) ||
+          !s.value.trim()
+        : s.property !== undefined)
     )
       throw new Error(
-        "網頁操作需包含 action、CSS selector，以及需要時的 value。",
+        "網頁操作需包含 action、唯一 CSS selector，以及需要時的 value；reload 不使用 selector 或 value。",
       );
     if (s.action === "expect_text" && !s.value.trim())
       throw new Error("文字檢查不可使用空白預期值。");
@@ -268,13 +289,22 @@ export async function verifyWeb(
     for (const step of receipt.steps) {
       controller.signal.throwIfAborted();
       try {
+        if (step.action === "reload") {
+          await page.reload({ waitUntil: "networkidle", timeout: 10000 });
+          step.status = "passed";
+          continue;
+        }
         const element = page.locator(step.selector);
         if (step.action === "fill") await element.fill(step.value!);
         else if (step.action === "click") await element.click();
         else if (step.action === "press") await element.press(step.value!);
         else {
           await element.waitFor({ state: "visible" });
-          if (step.action === "expect_text" || step.action === "expect_value")
+          if (
+            step.action === "expect_text" ||
+            step.action === "expect_value" ||
+            step.action === "expect_style"
+          )
             await assertRendered(
               element,
               step,

@@ -8,12 +8,39 @@
     />
     <title>Apsis — Your bots</title>
     <link rel="icon" href="/favicon.svg" />
+    <script src="/boot.js"></script>
+    <link rel="stylesheet" href="/boot.css" />
     <link rel="stylesheet" href="/bot.css" />
     <link rel="stylesheet" href="/providers.css" />
     <link rel="stylesheet" href="/files.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main id="apsis-boot" class="boot-screen">
+        <img src="/favicon.svg" width="48" height="48" alt="" />
+        <h1>Apsis</h1>
+        <p role="status">
+          <span class="boot-zh">正在準備你的對話</span
+          ><span class="boot-en">Preparing your conversations</span>
+        </p>
+        <div id="boot-retry" hidden>
+          <p>
+            <span class="boot-zh">載入時間較長，請確認網路與服務。</span
+            ><span class="boot-en"
+              >Loading is taking longer. Check the network and service.</span
+            >
+          </p>
+          <a href="/"
+            ><span class="boot-zh">重新載入</span
+            ><span class="boot-en">Reload</span></a
+          >
+        </div>
+        <noscript
+          >請啟用 JavaScript 以使用 Apsis。 Enable JavaScript to use
+          Apsis.</noscript
+        >
+      </main>
+    </div>
     <script type="module" src="/bot.js"></script>
   </body>
 </html>

@@ -65,7 +65,6 @@ export interface Job {
   location?: import("./types.ts").WorkLocation;
   fileReferences?: { locationId: string; path: string; revision: string }[];
   /** Set only when enqueuing work after the collection feature is initialized. */
-  avatarRewardsEligible?: boolean;
   retryOf?: string;
   workContextId?: string;
   contextKind?: "chat" | "routine" | "delegation";
@@ -93,6 +92,21 @@ export interface Job {
   result?: string;
 }
 export interface Artifact {
+  bundle?: {
+    entry: string;
+    files: { path: string; snapshotPath: string }[];
+    archivePath: string;
+    totalBytes: number;
+  };
+  document?: {
+    seriesId: string;
+    revision: number;
+    contentFormat: "plain" | "markdown" | "json-rows";
+    contentHash: string;
+    sourcePath?: string;
+    pageCount?: number;
+    layoutVerified: false;
+  };
   deliveredFrom?: string;
   location?: import("./types.ts").WorkLocation;
   workContextId?: string;

@@ -29,7 +29,9 @@ export function connection(options: RunOptions) {
         ? (env.OLLAMA_URL || defaultOllamaUrl).replace(/\/$/, "") + "/v1"
         : provider === "openai-compatible"
           ? env.COMPATIBLE_BASE_URL
-          : undefined,
+          : provider === "anthropic"
+            ? env.ANTHROPIC_BASE_URL
+            : env.OPENAI_BASE_URL,
   };
 }
 export function toolSchema(tool: AgentTool) {

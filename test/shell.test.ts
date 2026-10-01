@@ -7,6 +7,8 @@ import { bashPath, findBash } from "../server/shell.ts";
 import { codingTools } from "../server/coding-tools.ts";
 import { Workspace } from "../server/workspace.ts";
 import { Store } from "../server/store.ts";
+import { createTools } from "../server/tools.ts";
+import type { ToolOperation } from "../shared/types.ts";
 import { ToolExecutionError } from "../server/evidence.ts";
 
 async function shellFixture(t: TestContext) {
@@ -97,6 +99,55 @@ test("real Bash handles unicode paths, quoting, failure, and cancellation", asyn
     if (original === undefined) delete process.env.APSIS_SHELL_PATH;
     else process.env.APSIS_SHELL_PATH = original;
   }
+});
+
+test("recorded shell outcomes distinguish known nonzero completion from interruption without hiding partial effects", async (t) => {
+  const { options } = await shellFixture(t);
+  const operations = new Map<string, ToolOperation>();
+  const shell = createTools({
+    ...options,
+    recordOperation: async (operation) => {
+      operations.set(operation.id, structuredClone(operation));
+    },
+  }).find((tool) => tool.name === "shell")!;
+  await assert.rejects(
+    shell.execute("nonzero", {
+      command: "printf 'retained' > partial.txt; printf 'check failed'; exit 7",
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof ToolExecutionError);
+      assert.equal(error.outcome, "failed");
+      return true;
+    },
+  );
+  assert.equal(
+    await readFile(join(options.workspace.root, "partial.txt"), "utf8"),
+    "retained",
+    "failure does not imply rollback",
+  );
+  const [failed] = [...operations.values()];
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.evidence?.exitCode, 7);
+  assert.equal(failed.evidence?.output, "check failed");
+  await assert.rejects(
+    shell.execute("timeout", {
+      command: "printf 'started'; sleep 30 & wait",
+      timeout: 1,
+    }),
+    /逾時/,
+  );
+  const timedOut = [...operations.values()].at(-1)!;
+  assert.equal(timedOut.status, "unknown");
+  assert.equal(timedOut.evidence?.output, "started");
+  const controller = new AbortController();
+  const cancelled = shell.execute(
+    "cancel",
+    { command: "sleep 30 & wait" },
+    controller.signal,
+  );
+  setTimeout(() => controller.abort(), 150);
+  await assert.rejects(cancelled, /停止/);
+  assert.equal([...operations.values()].at(-1)!.status, "unknown");
 });
 
 test("real Bash executes complete commands beyond Windows argv limits", async (t) => {

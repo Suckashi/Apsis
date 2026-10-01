@@ -3,15 +3,38 @@ import { createApp } from "./app.ts";
 const port = Number(process.env.PORT || 3100);
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error("PORT 必須是 1–65535 的整數。");
-const { server, close } = await createApp();
+const { server, close } = await createApp({
+  browserBuild:
+    process.env.APSIS_BROWSER_BUILD === "development"
+      ? "development"
+      : "production",
+});
 const shutdown = () => {
-  void close().catch((error) => {
-    console.error(error);
-    process.exitCode = 1;
-  });
+  void close()
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    })
+    .finally(() => {
+      if (process.connected) process.disconnect();
+    });
 };
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
+// A managed parent can request graceful shutdown on Windows, where kill()
+// terminates the child without delivering a catchable POSIX signal.
+if (process.send) {
+  process.on("message", (message) => {
+    if (
+      message &&
+      typeof message === "object" &&
+      "type" in message &&
+      message.type === "apsis:shutdown"
+    )
+      shutdown();
+  });
+  process.once("disconnect", shutdown);
+}
 server.listen(port, "127.0.0.1", () =>
   console.log(
     "\n  Apsis  /  http://localhost:" +

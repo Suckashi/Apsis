@@ -25,20 +25,44 @@ export function useAutoGrowTextarea(
   ref: React.RefObject<HTMLTextAreaElement | null>,
   value: string,
   maxHeight = 180,
+  ready = true,
 ) {
-  useLayoutEffect(() => {
+  const grow = useCallback(() => {
     const input = ref.current;
     if (!input) return;
-    const grow = () => {
-      const max = Math.min(maxHeight, window.innerHeight * 0.25);
-      input.style.height = "auto";
-      input.style.height = `${Math.min(max, Math.max(44, input.scrollHeight))}px`;
-      input.style.overflowY = input.scrollHeight > max ? "auto" : "hidden";
-    };
+    const max = Math.min(maxHeight, window.innerHeight * 0.25);
+    // Desktop can shrink below the browser's default two-row textarea height.
+    // Preserve the existing mobile measurement and CSS minimum touch target.
+    const desktop = window.innerWidth > 768;
+    input.style.height = desktop ? "0px" : "auto";
+    input.style.height = `${Math.min(max, Math.max(44, input.scrollHeight))}px`;
+    const overflowing = desktop
+      ? input.scrollHeight > input.clientHeight
+      : input.scrollHeight > max;
+    input.style.overflowY = overflowing ? "auto" : "hidden";
+  }, [maxHeight, ref]);
+  useLayoutEffect(() => {
+    if (!ready) return;
     grow();
+  }, [value, grow, ready]);
+  useLayoutEffect(() => {
+    if (!ready) return;
+    const input = ref.current;
+    if (!input) return;
+    let width: number | undefined;
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.width;
+      if (next === undefined || next === width) return;
+      width = next;
+      if (window.innerWidth > 768) grow();
+    });
+    observer.observe(input);
     window.addEventListener("resize", grow);
-    return () => window.removeEventListener("resize", grow);
-  }, [value, maxHeight, ref]);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", grow);
+    };
+  }, [grow, ref, ready]);
 }
 
 /** A conversation follows new content only while the reader is at its end. */

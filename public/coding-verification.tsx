@@ -93,12 +93,20 @@ export function CodingVerification({
                     fill: "輸入",
                     click: "點擊",
                     press: "按鍵",
+                    reload: "重新整理",
                     expect_text: "文字包含",
                     expect_value: "輸入值等於",
                     expect_visible: "畫面可見",
+                    expect_style: "實際樣式等於",
                   }[step.action]
                 }{" "}
-                <code>{step.selector}</code>
+                {step.selector && <code>{step.selector}</code>}
+                {step.property && (
+                  <>
+                    {" "}
+                    · <code>{step.property}</code>
+                  </>
+                )}
                 {step.value !== undefined && `：${step.value}`}
                 {step.error && (
                   <pre

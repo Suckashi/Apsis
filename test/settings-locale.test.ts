@@ -46,24 +46,34 @@ test("fixed UI dictionary calls have English entries and matching placeholders",
       filepath: file,
       parser: "typescript",
     } as Parameters<typeof parsers.typescript.parse>[1]);
+    const dictionaryCalls = new Set(["uiText"]);
+    if (file === "markdown.ts") dictionaryCalls.add("t");
+    const calls: { name: string; text: string }[] = [];
     const visit = (value: unknown) => {
       const node = record(value);
       if (!node) return;
-      const callee = record(node.callee);
+      const module = record(node.source);
       if (
-        node.type === "CallExpression" &&
-        (callee?.name === "uiText" ||
-          (file === "markdown.ts" && callee?.name === "t"))
+        node.type === "ImportDeclaration" &&
+        typeof module?.value === "string" &&
+        module.value.endsWith("/settings-dictionary.ts") &&
+        Array.isArray(node.specifiers)
       ) {
+        for (const value of node.specifiers) {
+          const specifier = record(value);
+          const imported = record(specifier?.imported);
+          const local = record(specifier?.local);
+          if (imported?.name === "uiText" && typeof local?.name === "string")
+            dictionaryCalls.add(local.name);
+        }
+      }
+      const callee = record(node.callee);
+      if (node.type === "CallExpression" && typeof callee?.name === "string") {
         const first = Array.isArray(node.arguments)
           ? record(node.arguments[0])
           : undefined;
         if (first?.type === "Literal" && typeof first.value === "string") {
-          assert.ok(
-            Object.hasOwn(english, first.value),
-            `${file}: missing translation for ${first.value}`,
-          );
-          checked++;
+          calls.push({ name: callee.name, text: first.value });
         }
       }
       for (const [key, child] of Object.entries(node)) {
@@ -74,6 +84,14 @@ test("fixed UI dictionary calls have English entries and matching placeholders",
       }
     };
     visit(ast);
+    for (const call of calls) {
+      if (!dictionaryCalls.has(call.name)) continue;
+      assert.ok(
+        Object.hasOwn(english, call.text),
+        `${file}: missing translation for ${call.text}`,
+      );
+      checked++;
+    }
   }
   assert.ok(
     checked > 300,

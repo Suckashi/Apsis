@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "./chat-api.ts";
 import { useAutoGrowTextarea } from "./workspace-primitives.tsx";
 import { uiText } from "./settings-dictionary.ts";
@@ -17,7 +17,8 @@ type Dependencies = Pick<
   | "refresh"
   | "perform"
   | "setError"
-> & { onSent: () => void };
+  | "networkOffline"
+> & { onSent: () => void; contextChanging: boolean };
 
 /** Drafts, attachments and idempotent message delivery belong to the composer. */
 export function useChatComposer({
@@ -29,13 +30,17 @@ export function useChatComposer({
   perform,
   setError,
   onSent,
+  contextChanging,
+  networkOffline,
 }: Dependencies) {
   const locale = useSettingsLocale();
   const feedbackText = (text: string) => taskText(locale, text);
   const [text, setText] = useState("");
   const [fileReferences, setFileReferences] = useState<
-    { locationId: string; path: string; revision: string }[]
+    { locationId: string; path: string; revision: string; label?: string }[]
   >([]);
+  const referenceContext = useRef(detail?.session.context?.id);
+  referenceContext.current = detail?.session.context?.id;
   const [caret, setCaret] = useState(0);
   const [dismissedSuggestion, setDismissedSuggestion] = useState(false);
   const draftSelection = useRef({ start: 0, end: 0 });
@@ -53,7 +58,18 @@ export function useChatComposer({
     content: string;
   }>();
   const input = useRef<HTMLTextAreaElement>(null);
-  useAutoGrowTextarea(input, detail ? text : "\0");
+  const insertedSelection = useRef<
+    { text: string; position: number } | undefined
+  >(undefined);
+  useLayoutEffect(() => {
+    const selection = insertedSelection.current;
+    if (!selection) return;
+    insertedSelection.current = undefined;
+    if (text !== selection.text) return;
+    input.current?.focus();
+    input.current?.setSelectionRange(selection.position, selection.position);
+  }, [text]);
+  useAutoGrowTextarea(input, text, 180, !!detail);
   const upload = useRef<HTMLInputElement>(null);
   const pendingRequest = useRef<
     { scope?: string; prompt: string; botId: string; id: string } | undefined
@@ -68,6 +84,8 @@ export function useChatComposer({
       !selected ||
       !detail ||
       detail.contextSetupError ||
+      contextChanging ||
+      networkOffline ||
       busy ||
       (!text.trim() && !attachments.length)
     )
@@ -108,7 +126,9 @@ export function useChatComposer({
         requestId: pendingRequest.current.id,
         replyTo,
         retryOf,
-        fileReferences,
+        fileReferences: fileReferences.map(
+          ({ locationId, path, revision }) => ({ locationId, path, revision }),
+        ),
         artifactIds: attachments.map((a) => a.id),
         workContextId: detail.session.context?.id,
       } satisfies SendMessageRequest);
@@ -122,7 +142,7 @@ export function useChatComposer({
         setRetryOf(undefined);
         onSent();
       }
-      await refresh();
+      await refresh().catch(() => {});
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -131,24 +151,49 @@ export function useChatComposer({
       input.current?.focus();
     }
   };
-  const referenceArtifact = (artifact: Artifact) =>
-    void perform(async () => {
+  const referenceArtifact = async (artifact: Artifact) => {
+    if (!selected || !detail?.session.context || busy || contextChanging)
+      return false;
+    const botId = selected,
+      contextId = detail.session.context.id;
+    let added = false;
+    await perform(async () => {
       const ref = await api<{
         locationId: string;
         path: string;
         revision: string;
-      }>(`/bots/${selected}/artifact-reference`, "POST", {
-        contextId: detail?.session.context?.id,
+      }>(`/bots/${botId}/artifact-reference`, "POST", {
+        contextId,
         artifactId: artifact.id,
       });
-      setFileReferences((old) => [...old, ref]);
+      if (
+        selectedRef.current !== botId ||
+        referenceContext.current !== contextId
+      )
+        return;
+      setFileReferences((old) => [
+        ...old.filter(
+          (item) =>
+            item.locationId !== ref.locationId || item.path !== ref.path,
+        ),
+        { ...ref, label: artifact.name },
+      ]);
       setText(
-        (old) => old + (old ? "\n" : "") + uiText("引用檔案：") + ref.path,
+        (old) => old + (old ? "\n" : "") + uiText("引用成果：") + artifact.name,
       );
-      await refresh();
+      added = true;
     });
+    return added;
+  };
   const uploadFiles = async (files: FileList | null) => {
-    if (!files?.length || !selected || busy) return;
+    if (
+      !files?.length ||
+      !selected ||
+      busy ||
+      contextChanging ||
+      networkOffline
+    )
+      return;
     const botId = selected;
     setBusy(true);
     setError("");
@@ -198,11 +243,13 @@ export function useChatComposer({
     name: s.name,
     value: uiText("請依照技能「{0}」（ID：{1}）執行：", [s.name, s.id]),
   }));
-  const connectorChoices = (state?.connectors ?? []).map((c) => ({
-    id: c.id,
-    name: c.name,
-    value: uiText("請使用連接器「{0}」（ID：{1}）：", [c.name, c.id]),
-  }));
+  const connectorChoices = (state?.connectors ?? [])
+    .filter((c) => c.enabled && detail?.bot.connectorIds?.includes(c.id))
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      value: uiText("請使用連接器「{0}」（ID：{1}）：", [c.name, c.id]),
+    }));
   const suggestions =
     trigger && !dismissedSuggestion
       ? (trigger[1] === "/" ? skillChoices : connectorChoices).filter((item) =>
@@ -217,18 +264,24 @@ export function useChatComposer({
         : selection.start;
     const end = replaceTrigger ? caret : selection.end;
     const inserted = value + " ";
-    setText(text.slice(0, start) + inserted + text.slice(end));
+    const nextText = text.slice(0, start) + inserted + text.slice(end);
+    insertedSelection.current = {
+      text: nextText,
+      position: start + inserted.length,
+    };
+    setText(nextText);
+    if (selected) {
+      try {
+        sessionStorage.setItem(`apsis.bot-draft.${selected}`, nextText);
+      } catch {
+        /* Keep the in-memory draft when browser storage is unavailable. */
+      }
+    }
     setCaret(start + inserted.length);
     setDismissedSuggestion(true);
-    requestAnimationFrame(() => {
-      input.current?.focus();
-      input.current?.setSelectionRange(
-        start + inserted.length,
-        start + inserted.length,
-      );
-    });
   };
   useEffect(() => {
+    insertedSelection.current = undefined;
     setText(sessionStorage.getItem(`apsis.bot-draft.${selected}`) || "");
     setFileReferences([]);
     setDismissedSuggestion(false);
@@ -250,6 +303,8 @@ export function useChatComposer({
     setDismissedSuggestion,
     draftSelection,
     busy,
+    contextChanging,
+    networkOffline,
     actionFeedback,
     attachments,
     setAttachments,

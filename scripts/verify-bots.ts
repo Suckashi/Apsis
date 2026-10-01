@@ -1,5 +1,6 @@
 import { fixtureStyle } from "./browser-style.ts";
 import assert from "node:assert/strict";
+import { expect } from "@playwright/test";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -170,7 +171,7 @@ try {
   assert.equal(
     await page.getByRole("radio").count(),
     0,
-    "avatar collection starts collapsed",
+    "avatar choices start collapsed",
   );
   const coreForm = await page.locator(".profile-form").evaluate((form) => {
     const controls = [
@@ -243,9 +244,11 @@ try {
     .getByText("選擇 Git 工作資料夾後，可在這裡查看修改。")
     .waitFor();
   await details.getByRole("button", { name: "檔案", exact: true }).click();
+  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "進入專注模式" }).click();
   assert.equal(await roster.isVisible(), false);
   assert.equal(await details.count(), 0);
+  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "離開專注模式" }).click();
   assert.equal(await roster.isVisible(), true);
   await details.waitFor();
@@ -263,7 +266,8 @@ try {
   const desktopPreference = await page.evaluate(() =>
     localStorage.getItem("apsis.layout.v1"),
   );
-  for (const width of [375, 768, 1024]) {
+  // Narrow desktop preferences and resize continuity are covered by verify-workspace-ux.
+  for (const width of [375, 768]) {
     await page.setViewportSize({ width, height: 900 });
     await details.waitFor({ state: "detached" });
     if (width === 375) {
@@ -285,7 +289,9 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await details.waitFor();
   assert.equal(await roster.isVisible(), false);
+  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "進入專注模式" }).click();
+  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "離開專注模式" }).click();
   assert.equal(
     await roster.isVisible(),
@@ -310,10 +316,14 @@ try {
     ),
     true,
   );
-  // Composer tools preserve the draft and insert at the saved cursor.
+  // With no connectors, attachments have one direct entry; slash skills retain the cursor.
   const toolsMenu = page.locator(
     ".composer-tools > .composer-popover:not(.model-picker)",
   );
+  assert.equal(await toolsMenu.count(), 0);
+  await expect(
+    page.getByRole("button", { name: "新增附件", exact: true }),
+  ).toBeVisible();
   await composerInput.fill("前文 後文");
   await composerInput.press("Home");
   await composerInput.press("ArrowRight");
@@ -326,23 +336,19 @@ try {
   const insertedDraft = await composerInput.inputValue();
   assert.ok(insertedDraft.startsWith("前文 請依照技能「" + skillName));
   assert.ok(insertedDraft.endsWith(" 後文"));
-  assert.equal(await toolsMenu.getAttribute("open"), null);
+  await expect(page.locator(".suggestions")).toHaveCount(0);
   await composerInput.fill("保留前文 /");
   await page.locator(".suggestions button").first().click();
   assert.ok(
     (await composerInput.inputValue()).startsWith("保留前文 請依照技能"),
   );
-  await toolsMenu.locator("summary").click();
-  await toolsMenu.locator("summary").press("Escape");
-  assert.equal(await toolsMenu.getAttribute("open"), null);
-  assert.equal(
-    await toolsMenu
-      .locator("summary")
-      .evaluate((el) => el === document.activeElement),
-    true,
-  );
-  await page.locator(".bot-actions-menu > summary").click();
-  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
+  await composerInput.fill("保留草稿 /");
+  await composerInput.press("ArrowDown");
+  await expect(page.locator(".suggestions button").first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".suggestions")).toHaveCount(0);
+  await expect(composerInput).toBeFocused();
+  await expect(composerInput).toHaveValue("保留草稿 /");
   await page
     .locator(".approval-mode-control > .composer-popover > summary")
     .click();
@@ -350,7 +356,6 @@ try {
   await page
     .locator(".approval-mode-control > .composer-popover > summary")
     .press("Escape");
-  await page.getByRole("button", { name: "完成", exact: true }).click();
   await page.screenshot({
     path: join(output, "integrated-composer.png"),
     fullPage: true,
@@ -379,7 +384,7 @@ try {
   await page.getByRole("button", { name: "移除 ui-check.txt" }).click();
   assert.equal(await page.locator(".attachment-chips").count(), 0);
   assert.equal(app.product!.queries.snapshot().bots[0].avatar, "cloud");
-  await page.getByRole("button", { name: /新 Bot 想做什麼/ }).click();
+  await page.locator(".header-profile").click();
   await page.getByLabel("名稱", { exact: true }).fill("研究助理");
   await page.locator(".profile-avatar-disclosure > summary").click();
   await page.getByRole("radio", { name: "橘色星星" }).check();
@@ -388,6 +393,15 @@ try {
     .fill("整理可靠的來源，製作清楚的研究報告。");
   await page.getByRole("button", { name: "儲存變更" }).click();
   await page.getByText("已儲存變更", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "儲存為範本" }).isVisible(),
+    false,
+    "low-frequency management actions stay collapsed after saving",
+  );
+  await page.locator(".profile-management > summary").click();
+  await page
+    .getByRole("button", { name: "儲存為範本" })
+    .scrollIntoViewIfNeeded();
   const saveButton = (await page
     .getByRole("button", { name: "儲存變更" })
     .boundingBox())!;
@@ -395,7 +409,7 @@ try {
     .getByRole("button", { name: "儲存為範本" })
     .boundingBox())!;
   assert.ok(
-    templateButton.y - (saveButton.y + saveButton.height) >= 8,
+    saveButton.y - (templateButton.y + templateButton.height) >= 8,
     "profile save and template actions must have a visible touch gap",
   );
   await page.screenshot({
@@ -404,6 +418,9 @@ try {
   });
   await page.setViewportSize({ width: 375, height: 844 });
   await page.getByRole("dialog", { name: "Bot 詳情" }).waitFor();
+  await page
+    .getByRole("button", { name: "儲存為範本" })
+    .scrollIntoViewIfNeeded();
   const mobileSaveButton = (await page
     .getByRole("button", { name: "儲存變更" })
     .boundingBox())!;
@@ -411,7 +428,8 @@ try {
     .getByRole("button", { name: "儲存為範本" })
     .boundingBox())!;
   assert.ok(
-    mobileTemplateButton.y - (mobileSaveButton.y + mobileSaveButton.height) >=
+    mobileSaveButton.y -
+      (mobileTemplateButton.y + mobileTemplateButton.height) >=
       8,
     "mobile profile actions must have a visible touch gap",
   );
@@ -431,7 +449,7 @@ try {
   await page.getByRole("button", { name: "傳送", exact: true }).click();
   await page.getByText("需要你的核准", { exact: true }).waitFor();
   await page
-    .getByRole("region", { name: "目前任務進度" })
+    .locator(".header-profile")
     .getByText("等待你的核准", { exact: true })
     .waitFor();
   await page.screenshot({
@@ -477,11 +495,13 @@ try {
     path: join(output, "desktop-completed.png"),
     fullPage: true,
   });
+  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "進入專注模式" }).click();
   await page.screenshot({
     path: join(output, "desktop-focus.png"),
     fullPage: true,
   });
+  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "離開專注模式" }).click();
   await page.getByRole("button", { name: "切換工作內容" }).click();
   await page.reload();
@@ -786,7 +806,14 @@ try {
     .locator(".message.assistant > .message-body")
     .getByText("協作結果：42", { exact: true })
     .waitFor();
-  await page.locator(".execution-delegation > summary").last().click();
+  const delegationSummary = page
+    .locator(".execution-delegation > summary")
+    .last();
+  await delegationSummary
+    .locator("xpath=ancestor::details[contains(@class, 'execution-tools')]")
+    .locator(":scope > summary")
+    .click();
+  await delegationSummary.click();
   await page.locator(".task-row > summary").filter({ hasText: "來自" }).click();
   await page.getByRole("button", { name: "開啟 Bot 對話" }).click();
   await page
@@ -815,15 +842,18 @@ try {
     true,
   );
   releaseSend();
-  const progress = page.getByRole("region", { name: "目前任務進度" });
-  await progress.getByText("正在整理兩次協作的結果", { exact: true }).waitFor();
+  const progress = page.locator(".message.live .task-history");
+  await page
+    .locator(".header-profile")
+    .getByText("正在整理兩次協作的結果", { exact: true })
+    .waitFor();
   await page.unroute(messageRoute);
   await page.emulateMedia({ reducedMotion: "no-preference" });
   assert.equal(
-    await progress
-      .locator(".activity-orbit")
-      .evaluate((el) => getComputedStyle(el).animationName),
-    "activity-turn",
+    await page
+      .locator(".composer-card .task-progress, .composer-status")
+      .count(),
+    0,
   );
   // A quiet model must not be presented as disconnected or falsely finished.
   await page.clock.install();
@@ -843,7 +873,7 @@ try {
     await liveHistory.locator(".execution-tools").getAttribute("open"),
     null,
   );
-  await progress.getByRole("button", { name: "查看過程" }).click();
+  await liveHistory.locator(".execution-tools > summary").click();
   await liveHistory
     .locator(".execution-tools .task-row:visible")
     .nth(13)
@@ -878,10 +908,10 @@ try {
   await page.setViewportSize({ width: 375, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   assert.equal(
-    await progress
-      .locator(".activity-orbit")
-      .evaluate((el) => getComputedStyle(el).animationName),
-    "none",
+    await page
+      .locator(".composer-card .activity-orbit, .composer-status")
+      .count(),
+    0,
   );
   assert.equal(
     await page.evaluate(
@@ -889,7 +919,10 @@ try {
     ),
     true,
   );
-  for (const button of await progress.getByRole("button").all()) {
+  for (const button of await page
+    .locator(".composer-card")
+    .getByRole("button")
+    .all()) {
     const box = await button.boundingBox();
     assert.ok(box && box.height >= 44 && box.width >= 44);
   }
@@ -935,12 +968,12 @@ try {
     path: join(output, "mobile-compact-history.png"),
     fullPage: true,
   });
-  // A broken live connection must remain visible even when no task is active.
+  // Browser offline is distinct from a disconnected event stream, even when idle.
   simulatingOffline = true;
   await page.context().setOffline(true);
   await page
     .locator(".connection-banner")
-    .getByText(/即時連線中斷/)
+    .getByText("目前離線。恢復網路後會自動同步。", { exact: true })
     .waitFor();
   assert.equal(await page.locator(".run-outcome").count(), 0);
   await page.screenshot({
@@ -953,7 +986,10 @@ try {
   // Pending, queued, stopping and cancelled states form one complete UI flow.
   await page.getByRole("textbox", { name: "傳送訊息" }).fill("feedback-hold");
   await page.getByRole("button", { name: "傳送", exact: true }).click();
-  await progress.getByText("等待模型回應", { exact: true }).waitFor();
+  await page
+    .locator(".header-profile")
+    .getByText("等待模型回應", { exact: true })
+    .waitFor();
   await page.getByRole("textbox", { name: "傳送訊息" }).fill("progress-worker");
   await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "聊天選項", exact: true }).click();
@@ -965,8 +1001,8 @@ try {
   await sendOptions.getByRole("button", { name: "完成", exact: true }).click();
   await page.getByRole("button", { name: "補充指示", exact: true }).click();
   await page
-    .locator(".queue-feedback")
-    .getByText(/1 個任務排隊中/)
+    .locator(".queued")
+    .getByText(/progress-worker/)
     .waitFor();
   let releaseStop!: () => void;
   const stopGate = new Promise<void>((resolve) => {
@@ -979,7 +1015,8 @@ try {
   });
   await page.getByRole("button", { name: "停止回覆", exact: true }).click();
   await page
-    .getByText("正在停止回覆，等待執行中的操作結束…", { exact: true })
+    .getByRole("button", { name: "停止回覆", exact: true })
+    .locator(".activity-orbit")
     .waitFor();
   assert.equal(
     await page
@@ -1026,8 +1063,12 @@ try {
     .execute("image", { path: screenshotPath });
   assert.equal(imageResult.content[0].type, "image");
   await page.locator(".header-profile").click();
+  await page.locator(".profile-management > summary").click();
   await page.getByRole("button", { name: "刪除 Bot", exact: true }).click();
-  await page.getByRole("button", { name: "取消", exact: true }).click();
+  await page
+    .getByRole("dialog", { name: "刪除 Bot", exact: true })
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
   assert.equal(app.product!.bots.bot(bot.id).id, bot.id);
   await page.getByRole("button", { name: "刪除 Bot", exact: true }).click();
   await page.screenshot({
@@ -1053,7 +1094,8 @@ try {
           "artifact download",
           "reload persistence",
           "desktop sidebar preferences and focus-mode restoration",
-          "responsive drawers never overwrite desktop preferences",
+          "compact drawers below 769px preserve desktop preferences",
+          "direct attachment entry and slash skill insertion/Escape preserve draft and focus",
           "files/changes sidebar and secondary Bot management dialogs",
           "auto-growing composer, IME Enter and Shift+Enter",
           "attachment upload/removal, quoted reply and model settings save",

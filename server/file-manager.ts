@@ -111,6 +111,16 @@ export class FileManager {
       revision: revision(data),
     };
   }
+  async status(id: string, path: string) {
+    try {
+      const info = await lstat(await this.target(id, path));
+      return { available: info.isFile(), size: info.size };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+        return { available: false };
+      throw error;
+    }
+  }
   async download(id: string, path: string) {
     const full = await this.target(id, path);
     const info = await lstat(full);

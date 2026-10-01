@@ -1,13 +1,10 @@
 import { uiText } from "./settings-dictionary.ts";
-import { useLayoutEffect, useEffect, useState } from "react";
+import { useLayoutEffect, useEffect, useRef, useState } from "react";
 import type { BotTemplate } from "../shared/product.ts";
-import {
-  BotAccessFields,
-  PermissionEditor,
-  type SettingsRequest,
-} from "./settings-controls.tsx";
-import { AvatarPicker } from "./bot-ui.tsx";
 import type { Snapshot } from "../shared/api.ts";
+import type { SettingsRequest } from "./settings-controls.tsx";
+import { BrandMark } from "./avatar-mark.tsx";
+import { TemplateEditor } from "./template-editor.tsx";
 import { settingsText as t, useSettingsLocale } from "./settings-locale.ts";
 
 export function TemplateSettings({
@@ -28,12 +25,31 @@ export function TemplateSettings({
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<BotTemplate>();
   const [initialDraft, setInitialDraft] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState("");
   const dirty = !!editing && JSON.stringify(editing) !== initialDraft;
+  const section = useRef<HTMLElement>(null);
+  const returnFocus = useRef("");
+  const deleteFocus = useRef("");
   useLayoutEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
-  const [confirmDelete, setConfirmDelete] = useState("");
+  useLayoutEffect(() => {
+    if (!editing && returnFocus.current) {
+      section.current
+        ?.querySelector<HTMLButtonElement>(
+          `button[data-edit-template="${CSS.escape(returnFocus.current)}"]`,
+        )
+        ?.focus();
+      returnFocus.current = "";
+    } else if (!editing && !confirmDelete && deleteFocus.current) {
+      const target = section.current?.querySelector<HTMLButtonElement>(
+        `button[data-remove-template="${CSS.escape(deleteFocus.current)}"]`,
+      );
+      (target || section.current?.querySelector<HTMLElement>("h3"))?.focus();
+      deleteFocus.current = "";
+    }
+  }, [editing?.id, confirmDelete]);
   const [reload, setReload] = useState(0);
   useEffect(() => {
     let cancelled = false;
@@ -79,19 +95,23 @@ export function TemplateSettings({
         c.id === editing.connectionId &&
         (c.models || [c.model]).includes(editing.model || ""),
     );
-  return (
-    <section className="template-settings">
-      <h3>{t("templates")}</h3>
-      <p className="muted">{t("templateHelp")}</p>
+  const feedback = (
+    <>
       {notice && (
         <p className="notice" role="status">
           {notice}
         </p>
       )}
       {error && (
-        <p className="notice" role="alert">
+        <p
+          className="notice"
+          role="alert"
+          tabIndex={0}
+          aria-label={uiText("範本設定錯誤")}
+        >
           {error}
           <button
+            type="button"
             className="text-button"
             disabled={loading || busy}
             onClick={() => setReload((n) => n + 1)}
@@ -100,154 +120,79 @@ export function TemplateSettings({
           </button>
         </p>
       )}
-      {loading ? (
-        <p role="status">{t("loading")}</p>
-      ) : !templates.length && !error ? (
-        <p className="empty-section">{t("noTemplates")}</p>
-      ) : null}
-      <div className="template-list">
-        {templates.map((template) => (
-          <article className="template-card" key={template.id}>
-            {editing?.id === template.id ? (
-              <form
-                className="settings-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void perform(async () => {
-                    const { id: _id, ...request } = editing;
-                    const next = await api<BotTemplate>(
-                      `/templates/${template.id}`,
-                      "PUT",
-                      request,
-                    );
-                    setTemplates((rows) =>
-                      rows.map((row) => (row.id === next.id ? next : row)),
-                    );
-                    setEditing(undefined);
-                    setNotice(t("saved"));
-                  });
-                }}
-              >
-                <label>
-                  {t("name")}
-                  <input
-                    required
-                    maxLength={80}
-                    disabled={busy}
-                    value={editing.name}
-                    onChange={(e) =>
-                      setEditing({ ...editing, name: e.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  {t("description")}
-                  <textarea
-                    rows={4}
-                    maxLength={4000}
-                    disabled={busy}
-                    value={editing.description}
-                    onChange={(e) =>
-                      setEditing({ ...editing, description: e.target.value })
-                    }
-                  />
-                </label>
-                <fieldset disabled={busy}>
-                  <AvatarPicker
-                    value={editing.avatar}
-                    onChange={(avatar) => setEditing({ ...editing, avatar })}
-                  />
-                </fieldset>
-                <label>
-                  {t("model")}
-                  <select
-                    disabled={busy}
-                    value={
-                      !validModel
-                        ? "__replacement__"
-                        : editing.connectionId
-                          ? JSON.stringify([
-                              editing.connectionId,
-                              editing.model,
-                            ])
-                          : ""
-                    }
-                    onChange={(e) => {
-                      const [connectionId, model] = e.target.value
-                        ? (JSON.parse(e.target.value) as string[])
-                        : [undefined, undefined];
-                      setEditing({ ...editing, connectionId, model });
-                    }}
-                  >
-                    {!validModel && (
-                      <option disabled value="__replacement__">
-                        {t("selectModel")}
-                      </option>
-                    )}
-                    <option value="">{t("defaultModel")}</option>
-                    {catalog?.connections.flatMap((c) =>
-                      (c.models || [c.model]).map((model) => (
-                        <option
-                          key={`${c.id}:${model}`}
-                          value={JSON.stringify([c.id, model])}
-                        >
-                          {c.name} /{" "}
-                          {c.modelSettings?.[model]?.displayName || model}
-                        </option>
-                      )),
-                    )}
-                  </select>
-                </label>
-                {!validModel && (
-                  <p role="alert" className="notice">
-                    {t("replacement")}
-                  </p>
-                )}
-                {catalog && (
-                  <BotAccessFields
-                    connectors={catalog.connectors}
-                    connectorIds={editing.connectorIds}
-                    permissionMode={editing.permissionMode}
-                    disabled={busy}
-                    onChange={(patch) => setEditing({ ...editing, ...patch })}
-                  />
-                )}
-                <PermissionEditor
-                  value={editing.permissionRules}
-                  disabled={busy}
-                  onChange={(permissionRules) =>
-                    setEditing({ ...editing, permissionRules })
-                  }
-                />
-                <div className="settings-save-row">
-                  <button
-                    className="primary"
-                    disabled={busy || !editing.name.trim() || !validModel}
-                  >
-                    {busy ? t("saving") : t("save")}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => setEditing(undefined)}
-                  >
-                    {t("cancel")}
-                  </button>
+    </>
+  );
+  return (
+    <section className="template-settings" ref={section}>
+      {editing ? (
+        <TemplateEditor
+          key={editing.id}
+          value={editing}
+          change={setEditing}
+          catalog={catalog}
+          validModel={validModel}
+          busy={busy}
+          feedback={feedback}
+          cancel={() => {
+            setError("");
+            setNotice("");
+            setEditing(undefined);
+          }}
+          back={() => {
+            if (!dirty || window.confirm(uiText("捨棄尚未儲存的設定變更？"))) {
+              setError("");
+              setNotice("");
+              setEditing(undefined);
+            }
+          }}
+          save={() =>
+            void perform(async () => {
+              const { id: _id, ...request } = editing;
+              const next = await api<BotTemplate>(
+                `/templates/${editing.id}`,
+                "PUT",
+                request,
+              );
+              setTemplates((rows) =>
+                rows.map((row) => (row.id === next.id ? next : row)),
+              );
+              setEditing(undefined);
+              setNotice(t("saved"));
+            })
+          }
+        />
+      ) : (
+        <div className="template-settings-body">
+          <h3 tabIndex={-1}>{t("templates")}</h3>
+          <p className="muted">{t("templateHelp")}</p>
+          {feedback}
+          {loading ? (
+            <p role="status">{t("loading")}</p>
+          ) : !templates.length && !error ? (
+            <p className="empty-section">{t("noTemplates")}</p>
+          ) : null}
+          <div className="template-list">
+            {templates.map((template) => (
+              <article className="template-card" key={template.id}>
+                <div className="template-card-heading">
+                  <span className="avatar">
+                    <BrandMark avatar={template.avatar} size={30} />
+                  </span>
+                  <h4>{template.name}</h4>
                 </div>
-              </form>
-            ) : (
-              <>
-                <h4>{template.name}</h4>
                 <p className="template-description">{template.description}</p>
                 <small className="muted">
                   {template.model || t("defaultModel")} ·{" "}
-                  {uiText("共用技能自動可用")} · {template.connectorIds.length}{" "}
-                  {t("connectors")} ·{" "}
                   {t(
                     template.permissionMode === "readonly"
                       ? "readonly"
                       : "workspace",
+                  )}
+                  {template.connectorIds.length > 0 && (
+                    <>
+                      {" "}
+                      · {template.connectorIds.length} {t("connectors")}
+                    </>
                   )}
                 </small>
                 <div className="settings-save-row">
@@ -267,14 +212,15 @@ export function TemplateSettings({
                   <button
                     className="secondary"
                     disabled={busy}
+                    data-edit-template={template.id}
                     onClick={() => {
-                      if (
-                        dirty &&
-                        !window.confirm(uiText("捨棄尚未儲存的設定變更？"))
-                      )
-                        return;
+                      returnFocus.current = template.id;
+                      deleteFocus.current = "";
                       setInitialDraft(JSON.stringify(template));
                       setEditing({ ...template });
+                      setNotice("");
+                      setError("");
+                      setConfirmDelete("");
                     }}
                   >
                     {uiText("編輯")}
@@ -282,45 +228,49 @@ export function TemplateSettings({
                   <button
                     className="text-button"
                     disabled={busy}
-                    onClick={() => setConfirmDelete(template.id)}
+                    data-remove-template={template.id}
+                    onClick={() => {
+                      deleteFocus.current = template.id;
+                      setConfirmDelete(template.id);
+                    }}
                   >
                     {t("remove")}
                   </button>
                 </div>
-              </>
-            )}
-            {confirmDelete === template.id && (
-              <div className="notice">
-                <p>{uiText("移除此範本？既有 Bot 將保留。")}</p>
-                <div className="settings-save-row">
-                  <button
-                    className="danger-button"
-                    disabled={busy}
-                    onClick={() =>
-                      void perform(async () => {
-                        await api(`/templates/${template.id}`, "DELETE");
-                        setTemplates((rows) =>
-                          rows.filter((row) => row.id !== template.id),
-                        );
-                        setConfirmDelete("");
-                      })
-                    }
-                  >
-                    {t("remove")}
-                  </button>
-                  <button
-                    className="secondary"
-                    disabled={busy}
-                    onClick={() => setConfirmDelete("")}
-                  >
-                    {t("cancel")}
-                  </button>
-                </div>
-              </div>
-            )}
-          </article>
-        ))}
-      </div>
+                {confirmDelete === template.id && (
+                  <div className="notice">
+                    <p>{uiText("移除此範本？既有 Bot 將保留。")}</p>
+                    <div className="settings-save-row">
+                      <button
+                        className="danger-button"
+                        disabled={busy}
+                        onClick={() =>
+                          void perform(async () => {
+                            await api(`/templates/${template.id}`, "DELETE");
+                            setTemplates((rows) =>
+                              rows.filter((row) => row.id !== template.id),
+                            );
+                            setConfirmDelete("");
+                          })
+                        }
+                      >
+                        {t("remove")}
+                      </button>
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => setConfirmDelete("")}
+                      >
+                        {t("cancel")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

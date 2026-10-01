@@ -3,7 +3,8 @@ import {
   ApprovalModePicker,
 } from "./approval-mode-picker.tsx";
 import { uiText } from "./settings-dictionary.ts";
-import { useLayoutEffect, useEffect, useId, useState } from "react";
+import { useLayoutEffect, useEffect, useId, useRef, useState } from "react";
+import type { Snapshot } from "../shared/api.ts";
 import {
   DEFAULT_SETTINGS,
   SETTINGS_BOUNDS,
@@ -235,9 +236,11 @@ export function PermissionEditor({
 export function ExecutionSettings({
   api,
   onDirtyChange,
+  diagnostics,
 }: {
   api: SettingsRequest;
   onDirtyChange?: (dirty: boolean) => void;
+  diagnostics?: Snapshot["skillDiagnostics"];
 }) {
   const locale = useSettingsLocale();
   const [saved, setSaved] = useState<Settings>();
@@ -248,6 +251,12 @@ export function ExecutionSettings({
   const [reload, setReload] = useState(0);
   const [conflict, setConflict] = useState(false);
   const errorId = useId();
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Save remains available below the scroll area; bring a failed save's
+    // explanation into view without moving keyboard focus unexpectedly.
+    if (error && bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [error]);
   useEffect(() => {
     let cancelled = false;
     setBusy(true);
@@ -277,169 +286,200 @@ export function ExecutionSettings({
   }, [dirty, onDirtyChange]);
   return (
     <section className="execution-settings">
-      <h3>{t("execution")}</h3>
-      <p className="muted">{t("executionHelp")}</p>
-      {error && (
-        <div className="notice" id={errorId} role="alert">
-          {error}
-          <button
-            type="button"
-            className="text-button"
-            disabled={busy}
-            onClick={() => setReload((n) => n + 1)}
-          >
-            {t("retry")}
-          </button>
-        </div>
-      )}
-      {notice && (
-        <p className="notice" role="status">
-          {notice}
-        </p>
-      )}
-      {!draft ? (
-        <p role="status">{busy ? t("loading") : ""}</p>
-      ) : (
-        <form
-          className="settings-form"
-          onInvalidCapture={(event) => {
-            const details = (event.target as HTMLElement).closest("details");
-            if (details) details.open = true;
-          }}
-          aria-describedby={error ? errorId : undefined}
-          onSubmit={async (event) => {
-            event.preventDefault();
-            if (busy || !dirty || conflict) return;
-            setBusy(true);
-            setError("");
-            setNotice("");
-            try {
-              const next = await api<Settings>("/settings", "PATCH", draft);
-              setSaved(next);
-              setDraft(next);
-              setSettingsLocale(next.locale);
-              setNotice(t("saved"));
-            } catch (reason) {
-              const isConflict = (reason as { status?: number }).status === 409;
-              setConflict(isConflict);
-              setError(isConflict ? t("conflict") : (reason as Error).message);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <fieldset disabled={busy}>
-            <label>
-              {t("locale")}
-              <select
-                value={draft.locale}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    locale: e.target.value as Settings["locale"],
-                  })
-                }
-              >
-                <option value="zh-Hant">繁體中文</option>
-                <option value="en">English</option>
-              </select>
-            </label>
-            <div className="settings-mode-field">
-              <h3>{uiText("工具核准模式")}</h3>
-              <ApprovalModePicker
-                label={uiText("工具核准模式")}
-                value={draft.approvalMode}
+      <form
+        className="settings-form execution-settings-form"
+        onInvalidCapture={(event) => {
+          const details = (event.target as HTMLElement).closest("details");
+          if (details) details.open = true;
+        }}
+        aria-describedby={error ? errorId : undefined}
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!draft || busy || !dirty || conflict) return;
+          setBusy(true);
+          setError("");
+          setNotice("");
+          try {
+            const next = await api<Settings>("/settings", "PATCH", draft);
+            setSaved(next);
+            setDraft(next);
+            setSettingsLocale(next.locale);
+            setNotice(t("saved"));
+          } catch (reason) {
+            const isConflict = (reason as { status?: number }).status === 409;
+            setConflict(isConflict);
+            setError(isConflict ? t("conflict") : (reason as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <div className="execution-settings-body" ref={bodyRef}>
+          <h3>{t("execution")}</h3>
+          <p className="muted">{t("executionHelp")}</p>
+          {error && (
+            <div className="notice" id={errorId} role="alert">
+              {error}
+              <button
+                type="button"
+                className="text-button"
                 disabled={busy}
-                onChange={(approvalMode) =>
-                  setDraft({ ...draft, approvalMode })
-                }
-              />
-              <ApprovalModeHelp />
+                onClick={() => setReload((n) => n + 1)}
+              >
+                {t("retry")}
+              </button>
             </div>
-            {(
-              [
-                {
-                  title: uiText("任務執行"),
-                  keys: [
-                    "maxTurns",
-                    "taskTimeoutMs",
-                    "shellTimeoutSeconds",
-                    "outputLimit",
-                  ],
-                },
-                {
-                  title: uiText("Bot 協作"),
-                  keys: [
-                    "maxDelegationDepth",
-                    "maxDelegatedJobs",
-                    "maxConcurrent",
-                  ],
-                },
-              ] as const
-            ).map((group) => (
-              <fieldset className="execution-group" key={group.title}>
-                <legend>{group.title}</legend>
-                <div className="settings-fields">
-                  {group.keys.map((key) => {
-                    const factor = key === "taskTimeoutMs" ? 1000 : 1;
-                    return (
-                      <label key={key}>
-                        {labels[key][locale === "en" ? 1 : 0]}
-                        <input
-                          type="number"
-                          required
-                          step={key === "taskTimeoutMs" ? 0.001 : 1}
-                          min={SETTINGS_BOUNDS[key][0] / factor}
-                          max={SETTINGS_BOUNDS[key][1] / factor}
-                          value={
-                            Number.isNaN(draft[key]) ? "" : draft[key] / factor
-                          }
-                          onChange={(e) =>
-                            setDraft({
-                              ...draft,
-                              [key]:
-                                key === "taskTimeoutMs"
-                                  ? Math.round(e.target.valueAsNumber * factor)
-                                  : e.target.valueAsNumber,
-                            })
-                          }
-                        />
-                        <small className="field-help">
-                          {SETTINGS_BOUNDS[key][0] / factor}–
-                          {SETTINGS_BOUNDS[key][1] / factor}
-                        </small>
-                      </label>
-                    );
-                  })}
+          )}
+          {!draft ? (
+            <p role="status">{busy ? t("loading") : ""}</p>
+          ) : (
+            <>
+              <fieldset disabled={busy}>
+                <label>
+                  {t("locale")}
+                  <select
+                    value={draft.locale}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        locale: e.target.value as Settings["locale"],
+                      })
+                    }
+                  >
+                    <option value="zh-Hant">繁體中文</option>
+                    <option value="en">English</option>
+                  </select>
+                </label>
+                <div className="settings-mode-field">
+                  <h3>{uiText("工具核准模式")}</h3>
+                  <ApprovalModePicker
+                    label={uiText("工具核准模式")}
+                    value={draft.approvalMode}
+                    disabled={busy}
+                    onChange={(approvalMode) =>
+                      setDraft({ ...draft, approvalMode })
+                    }
+                  />
+                  <ApprovalModeHelp />
                 </div>
+                {(
+                  [
+                    {
+                      title: uiText("任務執行"),
+                      keys: [
+                        "maxTurns",
+                        "taskTimeoutMs",
+                        "shellTimeoutSeconds",
+                        "outputLimit",
+                      ],
+                    },
+                    {
+                      title: uiText("Bot 協作"),
+                      keys: [
+                        "maxDelegationDepth",
+                        "maxDelegatedJobs",
+                        "maxConcurrent",
+                      ],
+                    },
+                  ] as const
+                ).map((group) => (
+                  <details className="execution-group" key={group.title}>
+                    <summary>{group.title}</summary>
+                    <fieldset>
+                      <legend className="visually-hidden">{group.title}</legend>
+                      <div className="settings-fields">
+                        {group.keys.map((key) => {
+                          const factor = key === "taskTimeoutMs" ? 1000 : 1;
+                          return (
+                            <label key={key}>
+                              {labels[key][locale === "en" ? 1 : 0]}
+                              <input
+                                type="number"
+                                required
+                                step={key === "taskTimeoutMs" ? 0.001 : 1}
+                                min={SETTINGS_BOUNDS[key][0] / factor}
+                                max={SETTINGS_BOUNDS[key][1] / factor}
+                                value={
+                                  Number.isNaN(draft[key])
+                                    ? ""
+                                    : draft[key] / factor
+                                }
+                                onChange={(e) =>
+                                  setDraft({
+                                    ...draft,
+                                    [key]:
+                                      key === "taskTimeoutMs"
+                                        ? Math.round(
+                                            e.target.valueAsNumber * factor,
+                                          )
+                                        : e.target.valueAsNumber,
+                                  })
+                                }
+                              />
+                              <small className="field-help">
+                                {SETTINGS_BOUNDS[key][0] / factor}–
+                                {SETTINGS_BOUNDS[key][1] / factor}
+                              </small>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  </details>
+                ))}
               </fieldset>
-            ))}
-          </fieldset>
-          <details className="settings-advanced">
-            <summary>{uiText("進階權限")}</summary>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={draft.dangerousCommandGuard}
-                disabled={busy || draft.approvalMode === "auto"}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    dangerousCommandGuard: e.target.checked,
-                  })
-                }
-              />
-              {uiText("危險命令確認（不要求核准模式不適用）")}
-            </label>
-            <PermissionEditor
-              value={draft.permissionRules}
-              onChange={(permissionRules) =>
-                setDraft({ ...draft, permissionRules })
-              }
-              disabled={busy}
-            />
-            <RememberedApprovals api={api} />
-          </details>
+              <details className="settings-advanced">
+                <summary>{uiText("進階權限")}</summary>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={draft.dangerousCommandGuard}
+                    disabled={busy || draft.approvalMode === "auto"}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        dangerousCommandGuard: e.target.checked,
+                      })
+                    }
+                  />
+                  {uiText("危險命令確認（不要求核准模式不適用）")}
+                </label>
+                <PermissionEditor
+                  value={draft.permissionRules}
+                  onChange={(permissionRules) =>
+                    setDraft({ ...draft, permissionRules })
+                  }
+                  disabled={busy}
+                />
+                <RememberedApprovals api={api} />
+              </details>
+              {!!diagnostics?.length && (
+                <details className="settings-advanced">
+                  <summary>{uiText("技能載入問題")}</summary>
+                  {diagnostics.map((issue) => (
+                    <p key={issue.path}>
+                      {issue.path}：{issue.message}
+                    </p>
+                  ))}
+                </details>
+              )}
+              <div className="settings-reset">
+                <button
+                  type="button"
+                  className="text-button"
+                  disabled={busy || conflict}
+                  onClick={() => {
+                    setDraft({ ...DEFAULT_SETTINGS, revision: draft.revision });
+                    setNotice("");
+                  }}
+                >
+                  {uiText("重設為預設值")}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+        {draft && (
           <div className="settings-save-row">
             <button className="primary" disabled={busy || !dirty || conflict}>
               {busy ? t("saving") : t("save")}
@@ -455,23 +495,12 @@ export function ExecutionSettings({
             >
               {t("cancel")}
             </button>
-            <button
-              type="button"
-              className="text-button"
-              disabled={busy || conflict}
-              onClick={() => {
-                setDraft({ ...DEFAULT_SETTINGS, revision: draft.revision });
-                setNotice("");
-              }}
-            >
-              {uiText("重設為預設值")}
-            </button>
             <span className="muted" role="status">
-              {dirty ? t("unsaved") : ""}
+              {dirty ? t("unsaved") : notice}
             </span>
           </div>
-        </form>
-      )}
+        )}
+      </form>
     </section>
   );
 }

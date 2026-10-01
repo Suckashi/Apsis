@@ -70,33 +70,6 @@ export const botAvatarSeries = [
 }[];
 
 export type BotAvatarId = (typeof botAvatars)[number]["id"];
-export const avatarDrawCost = 30;
-export const avatarAchievements = [
-  "collaboration",
-  "routine",
-  "delivery",
-] as const;
-export type AvatarAchievement = (typeof avatarAchievements)[number];
-export interface AvatarDraw {
-  id: string;
-  avatarId: BotAvatarId;
-  createdAt: string;
-  balanceAfter: number;
-}
-export interface AvatarCollection {
-  startedAt: string;
-  revision: number;
-  balance: number;
-  drawCost: number;
-  owned: { avatarId: BotAvatarId; acquiredAt?: string }[];
-  achievements: Partial<Record<AvatarAchievement, string>>;
-  remaining: number;
-  lastDraw?: AvatarDraw;
-}
-export interface AvatarDrawResponse {
-  draw: AvatarDraw;
-  avatarCollection: AvatarCollection;
-}
 
 export function isBotAvatar(value: unknown): value is BotAvatarId {
   return botAvatars.some((avatar) => avatar.id === value);

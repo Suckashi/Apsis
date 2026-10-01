@@ -1,3 +1,4 @@
+import { botAvatars } from "../shared/bot-avatars.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile } from "node:fs/promises";
@@ -63,6 +64,92 @@ async function fixture(
   };
   return { ...app, dir, base, request, close, product: app.product! };
 }
+
+test("roster activity and unread follow replies received after a task started", async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const bot = await f.product.bots.create("Activity Bot");
+  const start = Date.now();
+  const at = (offset: number) => new Date(start + offset).toISOString();
+  f.product.db.bots.put({ ...bot, createdAt: at(-60000), readAt: at(-20000) });
+  f.product.db.jobs.put({
+    id: randomUUID(),
+    botId: bot.id,
+    prompt: "Long task",
+    status: "completed",
+    createdAt: at(-30000),
+  });
+  f.store.conversations.append(bot.sessionId, {
+    id: randomUUID(),
+    role: "assistant",
+    content: "Reply received after reading began",
+    status: "complete",
+    createdAt: at(-10000),
+  });
+  let entry = f.product.queries
+    .snapshot()
+    .bots.find((item) => item.id === bot.id)!;
+  assert.equal(entry.updatedAt, at(-10000));
+  assert.equal(entry.unread, true);
+  await f.product.bots.update(bot.id, { read: true });
+  assert.equal(
+    f.product.queries.snapshot().bots.find((item) => item.id === bot.id)!
+      .unread,
+    false,
+  );
+  f.store.conversations.append(bot.sessionId, {
+    id: randomUUID(),
+    role: "user",
+    content: "A later draft submitted as a message",
+    status: "complete",
+    createdAt: at(10000),
+  });
+  entry = f.product.queries.snapshot().bots.find((item) => item.id === bot.id)!;
+  assert.equal(entry.updatedAt, at(10000));
+  assert.equal(entry.unread, false);
+});
+
+test("message-specific reads never consume a later or another Bot reply", async (t) => {
+  const f = await fixture();
+  t.after(f.close);
+  const bot = await f.product.bots.create("Read Bot");
+  const other = await f.product.bots.create("Other Bot");
+  const at = (offset: number) => new Date(Date.now() + offset).toISOString();
+  const first = {
+    id: randomUUID(),
+    role: "assistant" as const,
+    content: "First",
+    status: "complete" as const,
+    createdAt: at(10000),
+  };
+  const later = {
+    ...first,
+    id: randomUUID(),
+    content: "Later",
+    createdAt: at(20000),
+  };
+  f.store.conversations.append(bot.sessionId, first);
+  f.store.conversations.append(bot.sessionId, later);
+  await f.product.bots.update(bot.id, { readMessageId: first.id });
+  assert.equal(f.product.bots.bot(bot.id).readAt, first.createdAt);
+  assert.equal(
+    f.product.queries.snapshot().bots.find((item) => item.id === bot.id)!
+      .unread,
+    true,
+  );
+  await assert.rejects(
+    f.product.bots.update(other.id, { readMessageId: later.id }),
+    /找不到可確認已讀/,
+  );
+  await f.product.bots.update(bot.id, { readMessageId: later.id });
+  await f.product.bots.update(bot.id, { readMessageId: first.id });
+  assert.equal(f.product.bots.bot(bot.id).readAt, later.createdAt);
+  assert.equal(
+    f.product.queries.snapshot().bots.find((item) => item.id === bot.id)!
+      .unread,
+    false,
+  );
+});
 
 test("project knowledge API isolates edits and merges and rejects stale revisions", async (t) => {
   const f = await fixture();
@@ -283,86 +370,62 @@ test("Bot customization validates before creation and persists edits", async (t)
   assert.equal(f.product.bots.bot(id).avatar, "bloom");
 });
 
-test("avatar rewards, concurrent draws and ownership are enforced through the product API", async (t) => {
+test("all avatars are directly selectable through Bot and template APIs without an economy", async (t) => {
   const f = await fixture();
   t.after(f.close);
-  const bot = await f.product.bots.create("Collector");
-  for (const [path, method, body] of [
-    ["/api/v2/bots", "POST", { name: "Locked", avatar: "captain" }],
-    [`/api/v2/bots/${bot.id}`, "PATCH", { avatar: "captain" }],
-    ["/api/v2/templates", "POST", { name: "Locked", avatar: "captain" }],
-  ] as const) {
-    assert.equal((await f.request(path, method, body)).response.status, 403);
-  }
-  const template = f.product.bots.template({ name: "Basic" });
-  const { id: _templateId, ...templateInput } = template;
-  assert.equal(
-    (
-      await f.request(`/api/v2/templates/${template.id}`, "PUT", {
-        ...templateInput,
-        avatar: "captain",
-      })
-    ).response.status,
-    403,
-  );
-  // Even a preexisting invalid template cannot bypass create validation.
-  f.product.db.put("template", { ...template, avatar: "captain" });
-  assert.equal(
-    (await f.request("/api/v2/bots", "POST", { templateId: template.id }))
-      .response.status,
-    403,
-  );
-  for (let i = 0; i < 3; i++) {
-    const job = await f.product.jobs.submit(bot.id, {
-      prompt: `task ${i}`,
-      requestId: randomUUID(),
+  const bot = await f.product.bots.create("Avatar test");
+  for (const avatar of botAvatars) {
+    const created = await f.request("/api/v2/bots", "POST", {
+      name: avatar.label,
+      avatar: avatar.id,
     });
-    await until(() => !f.product.execution.active.size);
-    assert.equal(f.product.db.get<Job>("job", job.id)?.status, "completed");
+    assert.equal(created.response.status, 201);
+    assert.equal(created.data.avatar, avatar.id);
+    const updated = await f.request("/api/v2/bots/" + bot.id, "PATCH", {
+      avatar: avatar.id,
+    });
+    assert.equal(updated.response.status, 200);
+    assert.equal(f.product.bots.bot(bot.id).avatar, avatar.id);
+    const template = await f.request("/api/v2/templates", "POST", {
+      name: avatar.label,
+      avatar: avatar.id,
+    });
+    assert.equal(template.response.status, 201);
+    const copied = await f.product.bots.create(undefined, {
+      templateId: template.data.id,
+    });
+    assert.equal(copied.avatar, avatar.id);
   }
+  for (const [path, method, body] of [
+    ["/api/v2/bots", "POST", { name: "Invalid", avatar: "unknown" }],
+    ["/api/v2/bots/" + bot.id, "PATCH", { avatar: "unknown" }],
+    ["/api/v2/templates", "POST", { name: "Invalid", avatar: "unknown" }],
+  ] as const)
+    assert.equal((await f.request(path, method, body)).response.status, 400);
+  const job = await f.product.jobs.submit(bot.id, {
+    prompt: "work",
+    requestId: randomUUID(),
+  });
+  await until(() => !f.product.execution.active.size);
+  assert.equal(f.product.db.jobs.get(job.id)?.status, "completed");
   assert.equal(
-    (await f.request("/api/v2/state")).data.avatarCollection.balance,
-    30,
+    "avatarRewardsEligible" in f.product.db.jobs.get(job.id)!,
+    false,
   );
-  const ids = [randomUUID(), randomUUID()];
-  const results = await Promise.all(
-    ids.map((requestId) =>
-      f.request("/api/v2/avatar-collection/draw", "POST", { requestId }),
-    ),
+  assert.equal(
+    "avatarCollection" in (await f.request("/api/v2/state")).data,
+    false,
   );
-  assert.deepEqual(results.map((r) => r.response.status).sort(), [200, 409]);
-  const index = results.findIndex((r) => r.response.status === 200);
-  const won = results[index].data.draw;
-  const retries = await Promise.all(
-    Array.from({ length: 3 }, () =>
-      f.request("/api/v2/avatar-collection/draw", "POST", {
-        requestId: ids[index],
-      }),
-    ),
-  );
-  for (const retry of retries) {
-    assert.equal(retry.response.status, 200);
-    assert.deepEqual(retry.data.draw, won);
-    assert.equal(retry.data.avatarCollection.balance, 0);
-  }
-  assert.equal(f.product.db.all("avatar-draw").length, 1);
   assert.equal(
     (
-      await f.request(`/api/v2/bots/${bot.id}`, "PATCH", {
-        avatar: won.avatarId,
+      await f.request("/api/v2/avatar-collection/draw", "POST", {
+        requestId: randomUUID(),
       })
     ).response.status,
-    200,
+    404,
   );
-  const saved = f.product.bots.template({
-    name: "Collected",
-    avatar: won.avatarId,
-  });
-  const copy = await f.product.bots.create(undefined, { templateId: saved.id });
-  assert.equal(copy.avatar, won.avatarId);
-  const before = f.product.avatarCollection.view();
-  await f.product.bots.remove(bot.id);
-  assert.deepEqual(f.product.avatarCollection.view(), before);
+  for (const kind of ["avatar-collection", "avatar-reward", "avatar-draw"])
+    assert.equal(f.product.db.all(kind).length, 0);
 });
 
 test("interrupted task notice can be dismissed without deleting the task", async (t) => {

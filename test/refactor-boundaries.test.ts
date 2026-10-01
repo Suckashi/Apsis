@@ -13,9 +13,15 @@ import { parseMessage } from "../server/message-schema.ts";
 import type { RunOptions } from "../server/runtime.ts";
 import type { Bot } from "../shared/product.ts";
 
-async function directory(t: TestContext) {
+async function directory(
+  t: TestContext,
+  close: () => void | Promise<void> = () => {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "apsis-refactor-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.after(async () => {
+    await close();
+    await rm(dir, { recursive: true, force: true });
+  });
   return dir;
 }
 
@@ -59,10 +65,11 @@ test("a missing knowledge file never resets an existing store", async (t) => {
 });
 
 test("Bot config resolves afresh between runs and transcripts never rewrite knowledge", async (t) => {
-  const dir = await directory(t);
+  let app: Awaited<ReturnType<typeof createApp>>;
+  const dir = await directory(t, () => app.close());
   const seen: { name?: string; model?: string; displayName?: string }[] = [];
   let first!: RunOptions;
-  const app = await createApp({
+  app = await createApp({
     dataDir: join(dir, "data"),
     workspaceDir: join(dir, "work"),
     globalSkillsDirectory: join(dir, "global-skills"),
@@ -75,11 +82,6 @@ test("Bot config resolves afresh between runs and transcripts never rewrite know
       });
       return { text: "done" };
     },
-  });
-  t.after(async () => {
-    await app.product.close();
-    app.server.closeAllConnections();
-    await new Promise<void>((resolve) => app.server.close(() => resolve()));
   });
   app.server.listen(0, "127.0.0.1");
   await once(app.server, "listening");
@@ -139,8 +141,9 @@ test("Bot config resolves afresh between runs and transcripts never rewrite know
 });
 
 test("repository filters isolate Bot records and failed transactions roll back", async (t) => {
-  const db = await new ProductDB().init(await directory(t));
-  t.after(() => db.db.close());
+  let db: ProductDB;
+  const dir = await directory(t, () => db.db.close());
+  db = await new ProductDB().init(dir);
   const bot = (id: string, sessionId: string): Bot => ({
     id,
     sessionId,

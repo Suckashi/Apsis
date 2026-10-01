@@ -53,7 +53,7 @@ export class ProductTools {
     return [
       makeTool(
         "verify_web",
-        'Verify a static HTML/JS app in a disposable local browser. path is a workspace-relative HTML file. steps is a JSON array of {action,selector,value?}; action: fill, click, press, expect_text (visible text contains value), expect_value (exact input value), expect_visible. Use CSS selectors and at least one meaningful assertion. Example: [{"action":"fill","selector":"#amount","value":"1000"},{"action":"click","selector":"button[type=submit]"},{"action":"expect_text","selector":"#result","value":"333.33"}]. Run after the last code edit. No external network, app server, account or browser setup required. Returns persisted check evidence; failures must be repaired before claiming success.',
+        'Verify a static HTML/JS app in a disposable local browser. path is a workspace-relative HTML file. steps is a JSON array of {action,selector,value?}; action: fill, click, press, expect_text (visible text contains value), expect_value (exact input value), expect_visible, expect_style (exact computed CSS value). For expect_style include property, for example {"action":"expect_style","selector":"#result","property":"color","value":"rgb(17, 17, 17)"}. Read the real stylesheet and inspect real elements; never add visible or hidden probe elements solely for verification. Matching a style does not prove accessibility or overall visual quality. Each CSS selector must identify exactly one element. Use {"action":"reload"} without selector/value to reload the same page while preserving this check\'s browser storage; add an assertion after reload to verify persistence. Every call starts a fresh browser, so data from earlier calls is not retained. Use at least one meaningful assertion. Example: [{"action":"fill","selector":"#amount","value":"1000"},{"action":"click","selector":"button[type=submit]"},{"action":"expect_text","selector":"#result","value":"333.33"}]. Run after the last code edit. No external network, app server, account or browser setup required. Returns persisted check evidence; check selector ambiguity and expected results before changing application code in response to failures.',
         ["path", "steps"],
         async (input, signal) => {
           const job = this.deps.db.jobs
@@ -73,7 +73,7 @@ export class ProductTools {
           this.deps.notify(bot.id);
           if (receipt.status === "failed")
             throw new Error(
-              `網頁驗證失敗：${receipt.steps.find((s) => s.error)?.error || receipt.errors.join("；")}。請修正網頁並重新執行 verify_web。檢查紀錄 ${receipt.id}`,
+              `網頁驗證失敗：${receipt.steps.find((s) => s.error)?.error || receipt.errors.join("；")}。請確認選擇器、預期結果及網頁內容，再執行 verify_web。檢查紀錄 ${receipt.id}`,
             );
           return receipt;
         },
@@ -211,13 +211,35 @@ export class ProductTools {
           return this.deps.browser.act(bot.id, a, !!job?.location?.projectId);
         },
       ),
-      makeTool(
-        "publish_file",
-        "Publish an existing workspace file as a downloadable result card. File must already exist.",
-        ["path", "name"],
-        (a, signal) =>
-          this.deps.publish(bot, runId, a.path, a.name, "result", signal),
-      ),
+      {
+        ...makeTool(
+          "publish_file",
+          "Publish an existing workspace file as a result card with preview and download actions. For a multi-file static HTML app, supply assets as an explicit array of workspace-relative files (CSS, JS, modules, images, data, etc.), excluding the main path. Up to 64 files including the main HTML, 20 MB total, HTML max 1 MB. All included files are saved as immutable snapshots; preview uses only these resources and download is one ZIP preserving paths. Include every required local asset, and verify the final app before publishing. Omitting assets publishes only the single file. Files must already exist. create_document already publishes its results; do not publish those returned artifacts a second time. In ordinary user-facing handoffs, refer to the readable filename and result card rather than internal IDs or storage paths; provide exact paths or technical evidence when requested.",
+          ["path", "name"],
+          (a, signal) =>
+            this.deps.publish(
+              bot,
+              runId,
+              a.path,
+              a.name,
+              "result",
+              signal,
+              undefined,
+              undefined,
+              (a as Record<string, unknown>).assets,
+            ),
+        ),
+        parameters: Type.Object(
+          {
+            path: Type.String(),
+            name: Type.String(),
+            assets: Type.Optional(
+              Type.Array(Type.String(), { minItems: 1, maxItems: 63 }),
+            ),
+          },
+          { additionalProperties: false },
+        ),
+      },
       makeTool(
         "read_document",
         "Extract PDF, DOCX, XLSX or UTF-8 document text from a workspace path.",
@@ -230,12 +252,24 @@ export class ProductTools {
             ),
           ),
       ),
-      makeTool(
-        "create_document",
-        "Create DOCX, XLSX or PDF. format is docx/xlsx/pdf; name excludes extension; content is plain text, or JSON array of arrays for xlsx. Publishes a result card.",
-        ["format", "name", "content"],
-        (a, signal) => this.deps.createDocument(bot, runId, a, signal),
-      ),
+      {
+        ...makeTool(
+          "create_document",
+          "Create and publish DOCX, XLSX or PDF. format is docx/xlsx/pdf; name is a readable filename, not a workspace path. Supply exactly one of source_path (workspace-relative UTF-8 file, max 256 KB) or content (inline text). Prefer source_path when converting an existing file: it preserves source text without retyping or rewriting. .md/.markdown sources default to markdown; inline content defaults to plain. For formatted DOCX/PDF use content_format=markdown with headings, paragraphs, emphasis, lists, links, code and tables. XLSX source/content is a JSON array of arrays. Images retain alt text only; HTML is literal. Revisions of the same named document within this run are retained and labelled. PDF returns actual pageCount; generation does not verify content or layout. Read back and check results before claiming success. No software installation is needed. The returned artifact already has a preview/download card; no second publish is needed. Default handoff: readable filenames, a brief summary of checks and honest remaining limitations. Do not repeat internal fields, hashes or UUID paths unless the user requests technical details.",
+          ["format", "name"],
+          (a, signal) => this.deps.createDocument(bot, runId, a, signal),
+        ),
+        parameters: Type.Object(
+          {
+            format: Type.String(),
+            name: Type.String(),
+            content: Type.Optional(Type.String()),
+            source_path: Type.Optional(Type.String()),
+            content_format: Type.Optional(Type.String()),
+          },
+          { additionalProperties: false },
+        ),
+      },
       makeTool(
         "create_routine",
         "Create a recurring task for this Bot. cron is 5-field cron, timezone is an IANA timezone. Confirm ambiguous schedules with the user first.",

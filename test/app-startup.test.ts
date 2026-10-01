@@ -87,10 +87,12 @@ test(
     const child = spawn(process.execPath, [index], {
       cwd: dir,
       env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     const exited = once(child, "exit");
     let output = "";
+    assert.ok(child.stdout);
+    assert.ok(child.stderr);
     child.stdout.on("data", (chunk) => {
       output += chunk.toString();
     });
@@ -140,7 +142,8 @@ test(
       await readFile(join(oldDirectory, "settings.toml"), "utf8"),
       oldSettings,
     );
-    child.kill("SIGTERM");
+    if (process.platform === "win32") child.send({ type: "apsis:shutdown" });
+    else child.kill("SIGTERM");
     await exited;
     assert.equal(child.exitCode, 0, output);
     assert.equal(child.signalCode, null);

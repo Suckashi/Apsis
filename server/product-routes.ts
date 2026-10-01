@@ -14,7 +14,6 @@ export class ProductRoutes {
   constructor(deps: RouteDependencies) {
     this.handlers = [
       new CoreRoutes({
-        avatarCollection: deps.avatarCollection,
         bootstrap: deps.bootstrap,
         bot: deps.bot,
         db: deps.db,
@@ -57,12 +56,14 @@ export class ProductRoutes {
         workspaces: deps.workspaces,
       }),
       new OperationRoutes({
+        htmlPreview: deps.htmlPreview,
         connector: deps.connector,
         connectors: deps.connectors,
         db: deps.db,
         decide: deps.decide,
         notify: deps.notify,
         policy: deps.policy,
+        readDocument: deps.readDocument,
         routine: deps.routine,
         runRoutine: deps.runRoutine,
         tasks: deps.tasks,

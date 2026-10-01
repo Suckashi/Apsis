@@ -122,17 +122,19 @@ async function openSettings(
     .locator(".settings-tabs")
     .getByRole("button", { name: tab })
     .click();
+  // These existing functional checks edit execution limits. The reading verifier
+  // separately proves they remain collapsed when the General tab first opens.
+  if (tab.test("執行與語言") || tab.test("Execution & language"))
+    await p
+      .locator("details.execution-group")
+      .first()
+      .locator("summary")
+      .click();
 }
-async function openChatOptions(p: Page) {
-  const options = p.getByRole("dialog", {
-    name: /聊天選項|Chat options/,
-    exact: true,
-  });
-  if (await options.isVisible()) return;
-  await p.locator(".bot-actions-menu > summary").click();
-  await p
-    .getByRole("button", { name: /聊天選項|Chat options/, exact: true })
-    .click();
+async function readyApprovalControl(p: Page) {
+  await expect(
+    p.locator(".composer-tools .approval-mode-control > details > summary"),
+  ).toBeVisible();
 }
 async function check(name: string, run: () => Promise<void>) {
   try {
@@ -188,7 +190,7 @@ try {
         bot.id,
       );
       await page.reload();
-      await openChatOptions(page);
+      await readyApprovalControl(page);
       await page
         .locator(".approval-mode-control > .composer-popover > summary")
         .click();
@@ -204,7 +206,7 @@ try {
       await protect(second);
       try {
         await second.goto(url);
-        await openChatOptions(second);
+        await readyApprovalControl(second);
         await second
           .locator(".approval-mode-control > .composer-popover > summary")
           .click();
@@ -234,7 +236,7 @@ try {
           "switching modes must not invoke the model",
         );
         await page.reload();
-        await openChatOptions(page);
+        await readyApprovalControl(page);
         await page
           .locator(".approval-mode-control > .composer-popover > summary")
           .click();
@@ -302,7 +304,7 @@ try {
     "pending mode save disables choices and failed save retains the effective mode",
     async () => {
       await page.reload();
-      await openChatOptions(page);
+      await readyApprovalControl(page);
       const trigger = page.locator(
         ".approval-mode-control > .composer-popover > summary",
       );
@@ -631,6 +633,11 @@ try {
         .getByRole("button", { name: "Execution & language", exact: true })
         .click();
       await expect(turns).toHaveValue(String(before.maxTurns));
+      await page
+        .locator("details.execution-group")
+        .first()
+        .locator("summary")
+        .click();
       await turns.fill("33");
       await expect(
         page.getByText("Unsaved changes", { exact: true }),
@@ -640,6 +647,74 @@ try {
       await confirmDiscard(() => page.keyboard.press("Escape"), true);
       await expect(dialog(page)).toHaveCount(0);
       assert.deepEqual(app.product.settings.read(), before);
+    },
+  );
+  await check(
+    "OpenAI and Anthropic API URLs can be added, saved and edited on desktop and mobile",
+    async () => {
+      for (const provider of ["OpenAI", "Anthropic"]) {
+        await openSettings(page, /模型連線|Model connections/);
+        const providers = page.locator(".provider-settings");
+        await providers
+          .getByRole("button", { name: /新增供應商|Add provider/, exact: true })
+          .click();
+        await providers
+          .getByRole("button", { name: new RegExp(`^${provider} `) })
+          .click();
+        const endpoint = providers.getByLabel(/API 網址|API URL/);
+        await expect(endpoint).toBeVisible();
+        await expect(endpoint).toHaveValue("");
+        assert.equal(await endpoint.getAttribute("required"), null);
+        await providers
+          .getByLabel(/名稱|Name/, { exact: true })
+          .fill(`${provider} URL fixture`);
+        await endpoint.fill("https://gateway.example/v1");
+        await providers
+          .getByLabel(/手動加入模型 ID|Add model ID manually/)
+          .fill("url-fixture-model");
+        await providers.getByRole("button", { name: /^(加入|Add)$/ }).click();
+        await providers
+          .getByRole("button", {
+            name: /儲存供應商|Save provider/,
+            exact: true,
+          })
+          .click();
+        const card = providers
+          .locator(".provider-card")
+          .filter({ hasText: `${provider} URL fixture` });
+        await expect(card).toContainText("https://gateway.example/v1");
+        await card.getByRole("button", { name: /編輯|Edit/ }).click();
+        await expect(endpoint).toHaveValue("https://gateway.example/v1");
+        await endpoint.fill("https://edited.example/v1");
+        await providers
+          .getByRole("button", {
+            name: /儲存供應商|Save provider/,
+            exact: true,
+          })
+          .click();
+        await page.reload();
+        await openSettings(page, /模型連線|Model connections/);
+        await card.getByRole("button", { name: /編輯|Edit/ }).click();
+        await expect(endpoint).toHaveValue("https://edited.example/v1");
+        assert.equal(
+          app.connections
+            .view()
+            .find((c) => c.name === `${provider} URL fixture`)?.url,
+          "https://edited.example/v1",
+        );
+        await page.setViewportSize({ width: 375, height: 812 });
+        await expect(endpoint).toBeVisible();
+        await endpoint.scrollIntoViewIfNeeded();
+        const bounds = await endpoint.boundingBox();
+        assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 375);
+        await page.screenshot({
+          path: join(output, `${provider.toLowerCase()}-api-url-mobile.png`),
+        });
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await page.screenshot({
+          path: join(output, `${provider.toLowerCase()}-api-url-desktop.png`),
+        });
+      }
     },
   );
   await check(
@@ -764,6 +839,7 @@ try {
       await expect(
         profile.getByLabel(/工作區權限|Workspace access/),
       ).toHaveValue("readonly");
+      await profile.locator(".profile-management > summary").click();
       await profile
         .getByRole("button", { name: /儲存為範本|Save as template/ })
         .click();
@@ -893,6 +969,7 @@ try {
         .click();
       await edit();
       await expect(name).toHaveValue(before.name);
+      await templates.locator(".template-advanced > summary").click();
       const access = templates.getByLabel("Workspace access");
       await access.selectOption(
         before.permissionMode === "readonly" ? "workspace" : "readonly",
@@ -912,6 +989,7 @@ try {
       await openSettings(page, /Bot 範本|Bot templates/);
       await edit();
       await expect(name).toHaveValue(before.name);
+      await templates.locator(".template-advanced > summary").click();
       await expect(access).toHaveValue(before.permissionMode);
     },
   );
@@ -1061,7 +1139,7 @@ try {
               });
             }
             await p.keyboard.press("Escape");
-            await openChatOptions(p);
+            await readyApprovalControl(p);
             const trigger = p.locator(
               ".approval-mode-control > .composer-popover > summary",
             );

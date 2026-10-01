@@ -26,9 +26,53 @@
   scrollbar-gutter: stable;
 }
 .provider-settings {
-  display: grid;
-  gap: 20px;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.settings-content.settings-models {
+  padding: 0;
+  overflow: hidden;
+}
+.provider-settings-body {
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 28px 32px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 16px;
+}
+.provider-editor-footer {
+  flex-shrink: 0;
+  padding: 16px 32px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  display: grid;
+  gap: 8px;
+}
+.provider-editor-footer .notice {
+  max-height: min(4.5em, 16dvh);
+  min-height: 44px;
+  padding: 8px 12px;
+  overflow: auto;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.provider-settings .notice:focus-visible,
+.provider-model-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.provider-test {
+  justify-self: start;
+  width: auto;
 }
 .provider-settings .settings-section-heading {
   margin: 0;
@@ -80,6 +124,28 @@
 }
 .provider-default small {
   font-weight: 400;
+}
+.provider-default .model-picker {
+  max-width: none;
+}
+.provider-default .model-picker > summary {
+  border: 1px solid var(--control);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
+  justify-content: space-between;
+}
+.provider-default .model-picker .composer-popover-content {
+  position: static;
+  width: 100%;
+  max-height: none;
+  margin-top: 8px;
+  box-shadow: none;
+  overflow: visible;
+}
+.provider-default .model-picker-search,
+.provider-default .model-picker-options button {
+  font-size: 0.875rem;
 }
 .provider-list {
   display: grid;
@@ -136,7 +202,7 @@
   overflow-wrap: anywhere;
 }
 .provider-back {
-  justify-self: start;
+  align-self: flex-start;
   min-height: 44px;
   margin: -12px 0 -12px -8px;
 }
@@ -159,7 +225,7 @@
   grid-column: 1 / -1;
 }
 
-.execution-settings .settings-form > fieldset,
+.execution-settings-body fieldset,
 .permission-editor,
 .bot-access-fields,
 .settings-checklist {
@@ -187,12 +253,104 @@
 .execution-group {
   border: 0;
   border-top: 1px solid var(--line);
-  padding: 20px 0 0;
+  padding: 0;
   margin: 20px 0 0;
 }
-.execution-group legend {
+.execution-group > summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 12px 0;
   font-weight: 600;
-  padding-right: 12px;
+}
+.execution-group > fieldset {
+  padding: 8px 0 16px;
+}
+.settings-content.settings-general {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+.execution-settings,
+.execution-settings .execution-settings-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.execution-settings .execution-settings-form {
+  gap: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.execution-settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 28px 32px;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 12px;
+}
+@media (min-width: 769px) {
+  .execution-settings-body {
+    container: execution-controls / inline-size;
+    padding-block: 24px;
+  }
+  .execution-settings-body > fieldset > label:first-child {
+    margin-block: 8px;
+  }
+  .execution-settings-body > .settings-reset {
+    margin-top: 8px;
+  }
+  .execution-settings-body .settings-mode-field {
+    border-bottom: 0;
+    margin: 16px 0 0;
+    padding-block: 16px;
+  }
+  .execution-settings-body .execution-group {
+    margin-top: 0;
+  }
+  .execution-settings-body > .settings-advanced {
+    padding-top: 0;
+  }
+  @container execution-controls (min-width: 34rem) {
+    .settings-mode-field .approval-mode-picker {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      max-width: none;
+    }
+    .settings-mode-field .approval-mode-option {
+      position: relative;
+      min-height: 56px;
+      padding-right: 32px;
+      border: 1px solid var(--line);
+      gap: 8px;
+    }
+    .settings-mode-field .approval-mode-option > svg {
+      flex-shrink: 0;
+    }
+    .settings-mode-field .approval-mode-option[aria-checked="true"] {
+      border-color: currentColor;
+    }
+    .settings-mode-field .mode-check {
+      position: absolute;
+      right: 10px;
+    }
+  }
+}
+.execution-settings-form > .settings-save-row {
+  flex-shrink: 0;
+  padding: 16px 32px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.settings-reset {
+  margin-top: 20px;
+}
+.settings-reset > button {
+  min-height: 44px;
 }
 .settings-advanced {
   border-top: 1px solid var(--line);
@@ -246,8 +404,94 @@
 .template-description {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 12rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.settings-content.settings-templates {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+}
+.template-settings,
+.template-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.template-settings-body,
+.template-editor-body {
+  padding: 28px 32px;
   overflow: auto;
+  flex: 1;
+  min-height: 0;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 12px;
+}
+.template-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.template-editor-body > label,
+.template-editor-body > h3,
+.template-editor-body > p {
+  margin: 0;
+}
+.template-editor .profile-disclosure > summary {
+  font-size: 0.875rem;
+}
+.template-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  align-self: flex-start;
+  margin: -12px 0 -8px -8px;
+}
+.template-editor-footer {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  padding: 16px 32px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  overflow: visible;
+}
+.template-editor-footer .notice {
+  margin: 0 0 12px;
+  overflow-wrap: anywhere;
+  min-height: 44px;
+  overflow: auto;
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  max-height: min(4.5em, 16dvh);
+}
+.template-settings .notice:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.template-editor-footer .settings-save-row {
+  justify-content: flex-end;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.template-editor-footer .settings-save-row button {
+  padding-inline: 12px;
+}
+.template-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.template-card-heading h4 {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .template-card > .settings-save-row {
   margin-top: 16px;
@@ -275,6 +519,19 @@
   padding-top: 16px;
 }
 @media (max-width: 640px) {
+  .template-settings-body,
+  .template-editor-body {
+    padding: 20px 16px;
+  }
+  .template-editor-footer {
+    padding: 12px 16px;
+  }
+  .execution-settings-body {
+    padding: 20px 16px;
+  }
+  .execution-settings-form > .settings-save-row {
+    padding: 12px 16px;
+  }
   .settings-fields {
     grid-template-columns: 1fr;
   }
@@ -339,7 +596,7 @@
   color: var(--muted);
 }
 .provider-model-list {
-  max-height: 260px;
+  max-height: min(260px, 60cqh);
   overflow: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--line);
@@ -396,16 +653,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-  position: sticky;
-  bottom: -28px;
-  padding-bottom: 20px;
-  background: var(--surface);
-  z-index: 2;
+  justify-content: flex-end;
 }
 .provider-form-actions button {
   min-height: 44px;
+  padding-inline: 8px;
+  font-size: 0.875rem;
 }
 @media (max-width: 800px) {
   .provider-list {
@@ -441,7 +694,109 @@
   .provider-default {
     padding: 12px;
   }
-  .provider-form-actions {
-    bottom: -20px;
+  .provider-settings-body {
+    padding: 20px 16px;
+  }
+  .provider-editor-footer {
+    padding: 12px 16px;
+  }
+}
+@media (max-height: 480px) {
+  .provider-settings-body {
+    padding: 12px 16px;
+  }
+  .provider-editor-footer {
+    padding: 10px 16px;
+  }
+  .settings-modal {
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+  .settings-modal > header {
+    padding: 8px 16px;
+  }
+  .settings-modal > header h2 {
+    font-size: 0.875rem;
+    line-height: 1.3;
+  }
+  .settings-modal > header p {
+    display: none;
+  }
+  .settings-layout {
+    flex-direction: column;
+  }
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    padding: 4px;
+    gap: 4px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .settings-tabs button {
+    flex-direction: row;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    margin: 0;
+    padding: 4px 6px;
+    text-align: left;
+    font-size: 0.75rem;
+    line-height: 1.25;
+  }
+  .settings-tabs button > svg {
+    flex-shrink: 0;
+  }
+  .settings-tabs button > span {
+    overflow-wrap: normal;
+  }
+  .settings-tabs button.selected {
+    box-shadow: inset 0 -2px var(--accent);
+  }
+  .template-editor-body {
+    padding: 12px 16px;
+  }
+  .template-editor-footer {
+    padding: 10px 16px;
+  }
+}
+
+/* Desktop settings share a compact frame; page-specific guidance stays in the body. */
+@media (min-width: 901px) and (min-height: 481px) {
+  .settings-modal > header {
+    padding: 16px 24px;
+    min-height: 76px;
+    align-items: center;
+  }
+  .settings-modal > header h2 {
+    font-size: 1rem;
+    line-height: 1.4;
+    letter-spacing: 0;
+  }
+  .settings-modal > header p {
+    display: none;
+  }
+  .settings-tabs {
+    padding-top: 24px;
+  }
+  .settings-content {
+    padding: 24px;
+  }
+  .settings-content.settings-models,
+  .settings-content.settings-templates,
+  .settings-content.settings-general {
+    padding: 0;
+  }
+  .provider-settings-body,
+  .template-settings-body,
+  .template-editor-body,
+  .execution-settings-body {
+    padding: 24px;
+  }
+  .provider-editor-footer,
+  .template-editor-footer,
+  .execution-settings-form > .settings-save-row {
+    padding-inline: 24px;
   }
 }

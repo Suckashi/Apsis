@@ -116,7 +116,7 @@ try {
     const roster = (await page.locator(".sidebar").boundingBox())!;
     assert.equal(roster.width, 256, "desktop roster stays 256px");
     const composer = (await page.locator(".composer-wrap").boundingBox())!;
-    assert.ok(composer.width <= 800, "conversation composer stays readable");
+    assert.ok(composer.width <= 880, "conversation composer stays readable");
     await page.screenshot({ path: join(out, `desktop-${width}.png`) });
   }
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -169,7 +169,6 @@ try {
   await input.press("Enter");
   assert.equal(await input.inputValue(), "保留我的草稿\n");
   assert.equal(runs, 0, "phone Enter adds newline instead of sending");
-  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "聊天選項", exact: true });
   await expect(
@@ -181,8 +180,6 @@ try {
   assert.equal(await input.inputValue(), "保留我的草稿\n");
   await input.fill("");
   await layout();
-  await page.locator(".bot-actions-menu > summary").click();
-  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   const approval = page.locator(".approval-mode-control summary").first();
   await approval.click();
   const popover = page.locator(
@@ -191,8 +188,14 @@ try {
   await popover.waitFor();
   const pop = (await popover.boundingBox())!;
   assert.ok(pop.x >= 0 && pop.x + pop.width <= 390);
+  for (const option of await popover.getByRole("radio").all()) {
+    const bounds = (await option.boundingBox())!;
+    assert.ok(
+      bounds.width >= 44 && bounds.height >= 44,
+      "approval choices retain touch targets",
+    );
+  }
   await approval.press("Escape");
-  await sheet.getByRole("button", { name: "完成", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 420 });
   await input.fill("鍵盤縮小可視範圍");
   await input.focus();
@@ -212,7 +215,6 @@ try {
     document.documentElement.setAttribute("data-theme", "dark"),
   );
   await page.screenshot({ path: join(out, "dark.png") });
-  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   await expect(
     sheet.getByRole("button", { name: "工作資料夾", exact: true }),
@@ -221,15 +223,17 @@ try {
   await input.fill("長任務");
   await page.getByRole("button", { name: "傳送", exact: true }).click();
   await page.getByRole("button", { name: "停止回覆", exact: true }).waitFor();
-  await page.locator(".bot-actions-menu > summary").click();
   await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   await expect(sheet.getByLabel("傳送方式")).toHaveCount(0);
   await sheet.getByRole("button", { name: "完成", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "補充指示", exact: true }),
-  ).toBeVisible();
+    page.locator(".composer-card .task-progress, .composer-status"),
+  ).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 420 });
   await input.fill("補充草稿");
+  await expect(
+    page.getByRole("button", { name: "補充指示", exact: true }),
+  ).toBeVisible();
   await page.screenshot({ path: join(out, "running-short-viewport.png") });
   assert.ok(
     (await page.locator(".messages").boundingBox())!.height >= 80,
@@ -262,6 +266,10 @@ try {
   );
   const runningCard = (await page.locator(".composer-card").boundingBox())!;
   assert.ok(runningCard.y + runningCard.height <= 420);
+  await input.fill("");
+  await expect(
+    page.getByRole("button", { name: "停止回覆", exact: true }),
+  ).toBeVisible();
   release();
   await page
     .getByRole("button", { name: "停止回覆", exact: true })

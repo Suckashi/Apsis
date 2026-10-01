@@ -1,14 +1,23 @@
-export type WebCheckStep = {
-  action:
-    | "fill"
-    | "click"
-    | "press"
-    | "expect_text"
-    | "expect_value"
-    | "expect_visible";
-  selector: string;
-  value?: string;
-};
+export type WebCheckStep =
+  | { action: "reload"; selector?: never; value?: never; property?: never }
+  | {
+      action: "expect_style";
+      selector: string;
+      property: string;
+      value: string;
+    }
+  | {
+      action:
+        | "fill"
+        | "click"
+        | "press"
+        | "expect_text"
+        | "expect_value"
+        | "expect_visible";
+      selector: string;
+      value?: string;
+      property?: never;
+    };
 
 export interface WebVerification {
   id: string;

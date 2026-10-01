@@ -139,10 +139,7 @@ function decode(text: string): ConfigValues {
       url = ollamaUrl(url);
       for (const [, m] of entries) ollamaModelName(m.model);
     } else if (provider.type === "openai-compatible") url = compatibleUrl(url);
-    else if (url !== undefined)
-      configError(
-        `settings.toml providers.${id}.baseUrl：自訂網址請使用 openai-compatible。`,
-      );
+    else if (url !== undefined) url = compatibleUrl(url);
     connections.push({
       id,
       name: provider.name,

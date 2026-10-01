@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Memory, Project } from "../shared/types.ts";
 import { Modal } from "./bot-ui.tsx";
+import { Icon } from "./chat-visuals.tsx";
+import { uiText as t, uiError } from "./settings-dictionary.ts";
 
 export function ProjectSettings({
   project,
@@ -18,29 +20,50 @@ export function ProjectSettings({
   const [editing, setEditing] = useState<Partial<Memory>>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [reload, setReload] = useState(0);
+  const editTrigger = useRef<HTMLButtonElement | null>(null);
+  const addTrigger = useRef<HTMLButtonElement | null>(null);
+  const returnFocus = useRef(false);
   const base = `/projects/${project.id}`;
   useEffect(() => {
     let live = true;
+    setLoading(true);
+    setLoadError("");
     api<Memory[]>(base + "/memories")
       .then((rows) => {
         if (live) setMemories(rows);
       })
       .catch((e) => {
-        if (live) setError(e.message);
+        if (live) setLoadError(e.message);
+      })
+      .finally(() => {
+        if (live) setLoading(false);
       });
     return () => {
       live = false;
     };
-  }, [base]);
-  const act = async (fn: () => Promise<void>) => {
+  }, [base, reload]);
+  useEffect(() => {
+    if (editing) returnFocus.current = true;
+    else if (!busy && returnFocus.current && editTrigger.current) {
+      (editTrigger.current.isConnected
+        ? editTrigger.current
+        : addTrigger.current
+      )?.focus();
+      returnFocus.current = false;
+    }
+  }, [editing, busy]);
+  const act = async (fn: () => Promise<void>, message: string) => {
     setBusy(true);
     setError("");
-    setSaved(false);
+    setSaved("");
     try {
       await fn();
       await refresh();
-      setSaved(true);
+      setSaved(message);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -48,109 +71,162 @@ export function ProjectSettings({
     }
   };
   return (
-    <Modal label="專案設定" close={close}>
-      <section className="modal cw-settings-modal">
+    <Modal label={t("專案設定")} close={close}>
+      <section className="modal cw-settings-modal project-settings-modal">
         <header>
-          <h2>{project.name} · 專案設定</h2>
-          <button aria-label="關閉專案設定" onClick={close}>
-            ×
+          <div>
+            <h2>{t("專案設定")}</h2>
+            <p className="project-settings-name">{project.name}</p>
+          </div>
+          <button aria-label={t("關閉專案設定")} onClick={close}>
+            <Icon name="close" size={18} />
           </button>
         </header>
-        <p className="cw-muted">{project.path}</p>
-        {error && <p role="alert">{error}</p>}
-        {saved && <p role="status">已儲存</p>}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void act(async () => {
-              await api(base, "PATCH", { description });
-            });
-          }}
-        >
-          <label>
-            專案說明
-            <textarea
-              value={description}
-              maxLength={4000}
-              onChange={(e) => {
-                setDescription(e.target.value);
-                setSaved(false);
-              }}
-            />
-          </label>
-          <button disabled={busy}>儲存說明</button>
-        </form>
-        <h3>專案知識</h3>
-        <p className="cw-muted">
-          這個專案的任務共用這些記憶；Bot 建議新增內容時，仍會先請你確認。
-        </p>
-        {memories.length === 0 && <p>尚無專案記憶。</p>}
-        {memories.map((m) => (
-          <article className="memory" key={m.id}>
-            <p>{m.content}</p>
-            <small>
-              v{m.revision ?? 1} · {m.enabled === false ? "已停用" : "使用中"}
-            </small>
-            <button disabled={busy} onClick={() => setEditing(m)}>
-              編輯
-            </button>
-          </article>
-        ))}
-        {!editing && (
-          <button
-            onClick={() => {
-              setSaved(false);
-              setEditing({ content: "" });
-            }}
-          >
-            新增專案記憶
-          </button>
-        )}
-        {editing && (
+        <div className="project-settings-body">
+          <div className="project-settings-location">
+            <span>{t("工作資料夾")}</span>
+            <p>{project.path}</p>
+          </div>
+          {error && <p role="alert">{uiError(error)}</p>}
+          {saved && <p role="status">{t(saved)}</p>}
           <form
             onSubmit={(e) => {
               e.preventDefault();
               void act(async () => {
-                await api(base + "/memories", "POST", {
-                  id: editing.id,
-                  revision: editing.revision ?? 1,
-                  content: editing.content,
-                  enabled: editing.enabled !== false,
-                });
-                setMemories(await api<Memory[]>(base + "/memories"));
-                setEditing(undefined);
-              });
+                await api(base, "PATCH", { description });
+              }, "專案說明已儲存。");
             }}
           >
             <label>
-              記憶內容
+              {t("專案說明")}
               <textarea
-                required
+                disabled={busy}
+                value={description}
                 maxLength={4000}
-                value={editing.content || ""}
-                onChange={(e) =>
-                  setEditing({ ...editing, content: e.target.value })
-                }
+                onChange={(e) => {
+                  setDescription(e.target.value);
+                  setSaved("");
+                }}
               />
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={editing.enabled !== false}
-                onChange={(e) =>
-                  setEditing({ ...editing, enabled: e.target.checked })
-                }
-              />
-              啟用
             </label>
             <div className="cw-actions">
-              <button disabled={busy}>儲存記憶</button>
-              <button type="button" onClick={() => setEditing(undefined)}>
-                取消
+              <button disabled={busy} className="project-save">
+                {t(busy ? "儲存中…" : "儲存說明")}
               </button>
             </div>
           </form>
-        )}
+          <section
+            className="project-settings-knowledge"
+            aria-label={t("專案知識")}
+          >
+            <h3>{t("專案知識")}</h3>
+            <p className="cw-muted">
+              {t(
+                "這個專案的任務共用這些記憶；Bot 建議新增內容時，仍會先請你確認。",
+              )}
+            </p>
+            {loading && <p role="status">{t("載入中…")}</p>}
+            {loadError && (
+              <div className="project-memory-error">
+                <p role="alert">{uiError(loadError)}</p>
+                <button onClick={() => setReload((old) => old + 1)}>
+                  {t("重新載入記憶")}
+                </button>
+              </div>
+            )}
+            {!loading && !loadError && memories.length === 0 && (
+              <p className="project-memory-empty">{t("尚無專案記憶。")}</p>
+            )}
+            {memories.map((m) => (
+              <article className="memory" key={m.id}>
+                <p>{m.content}</p>
+                <div className="project-memory-footer">
+                  <small>
+                    v{m.revision ?? 1} ·{" "}
+                    {t(m.enabled === false ? "已停用" : "使用中")}
+                  </small>
+                  <button
+                    disabled={busy || loading || !!loadError}
+                    onClick={(event) => {
+                      editTrigger.current = event.currentTarget;
+                      setSaved("");
+                      setEditing(m);
+                    }}
+                  >
+                    {t("編輯")}
+                  </button>
+                </div>
+              </article>
+            ))}
+            {!editing && (
+              <button
+                ref={addTrigger}
+                disabled={busy || loading || !!loadError}
+                onClick={(event) => {
+                  editTrigger.current = event.currentTarget;
+                  setSaved("");
+                  setEditing({ content: "" });
+                }}
+              >
+                {t("新增專案記憶")}
+              </button>
+            )}
+            {editing && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void act(async () => {
+                    await api(base + "/memories", "POST", {
+                      id: editing.id,
+                      revision: editing.revision ?? 1,
+                      content: editing.content,
+                      enabled: editing.enabled !== false,
+                    });
+                    setMemories(await api<Memory[]>(base + "/memories"));
+                    setEditing(undefined);
+                  }, "專案記憶已儲存。");
+                }}
+              >
+                <label>
+                  {t("記憶內容")}
+                  <textarea
+                    disabled={busy}
+                    autoFocus
+                    required
+                    maxLength={4000}
+                    value={editing.content || ""}
+                    onChange={(e) =>
+                      setEditing({ ...editing, content: e.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={editing.enabled !== false}
+                    onChange={(e) =>
+                      setEditing({ ...editing, enabled: e.target.checked })
+                    }
+                  />
+                  {t("啟用")}
+                </label>
+                <div className="cw-actions">
+                  <button disabled={busy} className="project-save">
+                    {t(busy ? "儲存中…" : "儲存記憶")}
+                  </button>
+                  <button
+                    disabled={busy}
+                    type="button"
+                    onClick={() => setEditing(undefined)}
+                  >
+                    {t("取消")}
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+        </div>
       </section>
     </Modal>
   );

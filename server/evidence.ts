@@ -23,8 +23,16 @@ export function boundedEvidence(
 }
 export class ToolExecutionError extends Error {
   evidence: Evidence;
-  constructor(message: string, evidence: Evidence) {
+  // A failed process may still have changed files; this classifies completion,
+  // not whether its effects were rolled back.
+  outcome: "failed" | "unknown";
+  constructor(
+    message: string,
+    evidence: Evidence,
+    outcome: "failed" | "unknown" = "unknown",
+  ) {
     super(message);
     this.evidence = evidence;
+    this.outcome = outcome;
   }
 }

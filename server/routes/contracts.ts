@@ -12,7 +12,6 @@ import { ProductDB } from "../product-db.ts";
 import { BotBrowser } from "../bot-browser.ts";
 
 import { McpConfig } from "../mcp-config.ts";
-import { AvatarCollectionService } from "../avatar-collection.ts";
 
 import { SettingsService } from "../settings.ts";
 
@@ -28,7 +27,6 @@ import type { ProductQueries } from "../product-queries.ts";
 import type { ProductTools } from "../product-tools.ts";
 
 export interface RouteDependencies {
-  avatarCollection: AvatarCollectionService;
   bootstrap: () => Promise<void>;
   bot: BotService["bot"];
   browser: BotBrowser;

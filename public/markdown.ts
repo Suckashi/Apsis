@@ -5,6 +5,27 @@ const t = (message: string, ...args: string[]) => uiText(message, args);
 
 // Model output is untrusted: raw HTML stays text, and unsafe link schemes are rejected.
 const markdown = new MarkdownIt({ html: false, breaks: true, linkify: true });
+
+// Read parsed text without rendering HTML or requesting linked assets.
+// Formatting markers disappear while literal punctuation and code stay intact.
+export function markdownPreview(text: string) {
+  const plain = (tokens: ReturnType<typeof markdown.parse>): string =>
+    tokens
+      .map((token) => {
+        if (token.children) return plain(token.children);
+        if (["text", "code_inline", "code_block", "fence"].includes(token.type))
+          return token.content;
+        if (
+          token.type === "softbreak" ||
+          token.type === "hardbreak" ||
+          token.type.endsWith("_close")
+        )
+          return token.block || token.type.endsWith("break") ? " " : "";
+        return "";
+      })
+      .join("");
+  return plain(markdown.parse(text, {})).replace(/\s+/g, " ").trim();
+}
 const codeLanguages: Record<string, string> = {
   ts: "TypeScript",
   typescript: "TypeScript",
@@ -49,7 +70,7 @@ markdown.renderer.rules.fence = (tokens, index) => {
     language && /^[a-z0-9_+-]+$/i.test(language)
       ? ` class="language-${language}"`
       : "";
-  return `<div class="code-block"><div class="code-header"><span class="code-language">${markdown.utils.escapeHtml(label)}</span><button class="copy-code" type="button" data-copy-code aria-label="${t("複製程式碼")}">${t("複製")}</button></div><pre tabindex="0" aria-label="${t("程式碼，可左右捲動")}"><code${languageClass}>${markdown.utils.escapeHtml(token.content)}</code></pre></div>\n`;
+  return `<div class="code-block"><div class="code-header"><span class="code-language">${markdown.utils.escapeHtml(label)}</span><button class="copy-code" type="button" data-copy-code aria-label="${t("複製程式碼")}">${t("複製")}</button></div><span class="code-copy-feedback visually-hidden" role="status"></span><pre role="group" tabindex="0" aria-label="${t("程式碼，可左右捲動")}"><code${languageClass}>${markdown.utils.escapeHtml(token.content)}</code></pre></div>\n`;
 };
 markdown.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
   tokens[index].attrSet("target", "_blank");
@@ -60,7 +81,7 @@ markdown.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
 markdown.renderer.rules.image = (tokens, index) =>
   `<span class="markdown-image">${markdown.utils.escapeHtml(t("[圖片：{0}]", tokens[index].content || t("未提供說明")))}</span>`;
 markdown.renderer.rules.table_open = () =>
-  `<div class="markdown-table" role="region" aria-label="${t("表格，可左右捲動")}" tabindex="0"><table>`;
+  `<div class="markdown-table" role="group" aria-label="${t("表格，可左右捲動")}" tabindex="0"><table>`;
 markdown.renderer.rules.table_close = () => "</table></div>\n";
 // Use classes for alignment because the app's CSP disallows inline styles.
 for (const name of ["th_open", "td_open"]) {

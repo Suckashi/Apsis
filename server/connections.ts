@@ -185,7 +185,9 @@ export class Connections {
         ? { OLLAMA_URL: row.url }
         : row.provider === "openai-compatible"
           ? { COMPATIBLE_BASE_URL: row.url }
-          : {}),
+          : row.provider === "anthropic"
+            ? { ANTHROPIC_BASE_URL: row.url }
+            : { OPENAI_BASE_URL: row.url }),
     };
   }
   discoveryKey(input: Record<string, unknown>) {
@@ -290,7 +292,11 @@ export class Connections {
         ? ollamaUrl(input.url)
         : provider === "openai-compatible"
           ? compatibleUrl(input.url)
-          : undefined;
+          : input.url === undefined && previous?.provider === provider
+            ? previous?.url
+            : input.url === undefined || input.url === ""
+              ? undefined
+              : compatibleUrl(input.url);
     if (
       input.apiKey !== undefined &&
       input.apiKey !== null &&

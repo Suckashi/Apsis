@@ -197,7 +197,7 @@ export function createTools({
     ),
     tool(
       "search_history",
-      "Search your scoped archived history. Query must be 2–200 characters. For older results, set optional before to the smallest sequence returned; read_history loads surrounding messages.",
+      "Search archived history in the current task context using short literal terms, filenames, or identifiers (2–200 characters). Space-separated terms must all occur in the same message, in any order. Double quotes match a complete phrase, including filenames with spaces. This is not semantic question answering. If no results, shorten the query or try another exact term from the conversation. For older results, set optional before to the smallest sequence returned; read_history loads surrounding messages.",
       ["query"],
       (a) => {
         const query = a.query.trim().toLocaleLowerCase();
@@ -416,9 +416,12 @@ export function createTools({
           operation.authorization = failure.authorization;
         await recordOperation?.({
           ...operation,
-          status:
-            executed || (executionStarted && t.name === "shell")
-              ? "unknown"
+          status: executed
+            ? "unknown"
+            : executionStarted && t.name === "shell"
+              ? failure instanceof ToolExecutionError
+                ? failure.outcome
+                : "unknown"
               : "failed",
           endedAt: new Date().toISOString(),
           error: failure.message,

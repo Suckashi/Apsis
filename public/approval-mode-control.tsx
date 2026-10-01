@@ -5,6 +5,7 @@ import {
   approvalModes,
 } from "./approval-mode-picker.tsx";
 import { ComposerPopover } from "./composer-popover.tsx";
+import { Icon } from "./chat-visuals.tsx";
 import { useId, useRef, useState } from "react";
 import type { ApprovalMode, Settings } from "../shared/settings.ts";
 import type { SettingsRequest } from "./settings-controls.tsx";
@@ -48,7 +49,7 @@ export function ApprovalModeControl({
                       )!.label,
                     )}
             </span>
-            <span aria-hidden="true"> ▾</span>
+            <Icon name="chevron-down" size={14} />
           </>
         }
       >

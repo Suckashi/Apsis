@@ -84,9 +84,7 @@ try {
   });
   app.product.notify(bot.id);
   await expect(page.locator(".model-setup-notice")).toHaveCount(0);
-  await page.locator(".bot-actions-menu > summary").click();
-  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
-  const picker = page.locator(".mobile-compose-sheet .model-picker");
+  const picker = page.locator(".composer-send-actions .model-picker");
   await picker.locator("summary").click();
   const search = picker.getByRole("combobox", {
     name: "搜尋模型",
@@ -107,14 +105,9 @@ try {
   await search.press("Escape");
   await expect(picker).not.toHaveAttribute("open", "");
   await picker.locator("summary").click();
-  await page
-    .getByRole("dialog", { name: "聊天選項", exact: true })
-    .locator("h2")
-    .click();
+  await input.click();
   await expect(picker).not.toHaveAttribute("open", "");
   await page.reload();
-  await page.locator(".bot-actions-menu > summary").click();
-  await page.getByRole("button", { name: "聊天選項", exact: true }).click();
   await expect(picker.locator("summary")).toContainText("Beta writer");
   await expect(input).toHaveValue("保留我的草稿");
 
@@ -126,15 +119,35 @@ try {
       true,
     );
   await noOverflow();
+  const workPanel = page.locator(".details");
+  await page.getByRole("button", { name: "切換工作內容", exact: true }).click();
+  for (const width of [1024, 1150, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(workPanel).toBeVisible();
+    await expect(workPanel).toHaveAttribute(
+      "role",
+      width < 1150 ? "dialog" : "complementary",
+    );
+    await expect(input).toHaveValue("保留我的草稿");
+    await noOverflow();
+  }
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.reload();
+  await expect(workPanel).toHaveAttribute("role", "dialog");
+  await expect(input).toHaveValue("保留我的草稿");
+  await page.getByRole("button", { name: "關閉工作內容", exact: true }).click();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(workPanel).toHaveCount(0);
   await page.screenshot({ path: join(output, "desktop-light.png") });
   await page.evaluate(() =>
     document.documentElement.setAttribute("data-theme", "dark"),
   );
   await page.screenshot({ path: join(output, "desktop-dark.png") });
-  await page.getByRole("button", { name: "完成", exact: true }).click();
   await input.fill("hold adoption");
   await page.getByRole("button", { name: "傳送", exact: true }).click();
-  await page.locator(".task-progress").waitFor();
+  await expect(
+    page.getByRole("button", { name: "停止回覆", exact: true }),
+  ).toBeVisible();
   await input.fill("請使用繁體中文");
   await page.getByRole("button", { name: "補充指示", exact: true }).click();
   await expect(
@@ -146,10 +159,14 @@ try {
     page.locator('.message-delivery[data-state="applied"]'),
   ).toHaveText("已採用");
   finishRun?.();
-  await page.locator(".task-progress").waitFor({ state: "hidden" });
+  await expect(
+    page.getByRole("button", { name: "傳送", exact: true }),
+  ).toBeVisible();
   await input.fill("hold cancellation");
   await page.getByRole("button", { name: "傳送", exact: true }).click();
-  await page.locator(".task-progress").waitFor();
+  await expect(
+    page.getByRole("button", { name: "停止回覆", exact: true }),
+  ).toBeVisible();
   await input.fill("這則補充還沒有採用");
   await page.getByRole("button", { name: "補充指示", exact: true }).click();
   await expect(

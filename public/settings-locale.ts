@@ -2,10 +2,20 @@ import { useSyncExternalStore } from "react";
 
 export type Locale = "zh-Hant" | "en";
 let locale: Locale = "zh-Hant";
+try {
+  if (localStorage.getItem("apsis.locale") === "en") locale = "en";
+} catch {
+  /* Server settings will provide the locale. */
+}
 const listeners = new Set<() => void>();
 export const getSettingsLocale = () => locale;
 export function setSettingsLocale(next: Locale) {
   locale = next;
+  try {
+    localStorage.setItem("apsis.locale", next);
+  } catch {
+    /* Locale changes still work without storage. */
+  }
   if (typeof document !== "undefined") document.documentElement.lang = next;
   listeners.forEach((listener) => listener());
 }

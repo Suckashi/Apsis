@@ -2,6 +2,7 @@ import { BrandMark } from "./bot-ui.tsx";
 import { uiText } from "./settings-dictionary.ts";
 import { getSettingsLocale } from "./settings-locale.ts";
 import type { Snapshot } from "../shared/api.ts";
+import { markdownPreview } from "./markdown.ts";
 const time = (at: string) => {
   const date = new Date(at);
   if (Number.isNaN(date.getTime())) return "";
@@ -24,14 +25,6 @@ const time = (at: string) => {
     day: "numeric",
   });
 };
-const chatPreview = (text: string) =>
-  text
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
 
 export function ChatRoster({
   bots,
@@ -39,15 +32,21 @@ export function ChatRoster({
   select,
   hidden,
   query,
+  loading = false,
 }: {
   bots: Snapshot["bots"];
   selected: string | null;
   select: (id: string) => void;
   hidden: boolean;
   query: string;
+  loading?: boolean;
 }) {
   return (
-    <nav className="roster" aria-label={uiText("Bot 名單")}>
+    <nav
+      className="roster"
+      aria-label={uiText("Bot 名單")}
+      tabIndex={!bots.length ? 0 : undefined}
+    >
       {bots.map((b) => {
         const preview =
           b.status === "waiting"
@@ -55,11 +54,20 @@ export function ChatRoster({
             : b.status === "working"
               ? uiText("正在處理…")
               : b.status === "error"
-                ? `${uiText("處理失敗")} · ${chatPreview(b.lastMessage)}`
-                : chatPreview(b.lastMessage);
+                ? uiText("處理失敗")
+                : markdownPreview(b.lastMessage);
         return (
           <div className="bot-entry" key={b.id}>
             <button
+              aria-label={[
+                b.name,
+                selected === b.id ? uiText("目前對話") : "",
+                b.unread ? uiText("有新訊息") : "",
+                b.pinned ? uiText("已釘選") : "",
+                b.status === "idle" ? "" : preview,
+              ]
+                .filter(Boolean)
+                .join("，")}
               aria-current={selected === b.id ? "page" : undefined}
               title={b.name}
               className={`bot-row ${selected === b.id ? "selected" : ""} ${b.unread ? "has-unread" : ""} status-${b.status}`}
@@ -67,7 +75,7 @@ export function ChatRoster({
             >
               <span className={`avatar tone-${b.id.charCodeAt(0) % 4}`}>
                 <BrandMark size={24} avatar={b.avatar} />
-                <i className={b.status} />
+                {b.status !== "idle" && <i className={b.status} />}
               </span>
               <span className="bot-summary">
                 <span className="bot-line">
@@ -94,7 +102,18 @@ export function ChatRoster({
           </div>
         );
       })}
-      {!bots.length && (
+      {loading && (
+        <div
+          className="roster-loading"
+          role="group"
+          aria-label={uiText("正在載入 Bot 名單")}
+        >
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
+      {!loading && !bots.length && (
         <p className="roster-empty">
           {query
             ? uiText("找不到符合的 Bot")

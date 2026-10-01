@@ -166,7 +166,11 @@ async function runShell(
     if (signal?.aborted) throw new ToolExecutionError("命令已停止。", evidence);
     if (timedOut) throw new ToolExecutionError("命令執行逾時。", evidence);
     if (exitCode !== 0)
-      throw new ToolExecutionError(`命令結束碼：${exitCode}`, evidence);
+      throw new ToolExecutionError(
+        `命令結束碼：${exitCode}`,
+        evidence,
+        typeof exitCode === "number" ? "failed" : "unknown",
+      );
     if (inputError)
       throw new ToolExecutionError(
         "無法完整傳送命令，請檢查執行結果。",

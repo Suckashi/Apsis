@@ -1,6 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderMarkdown } from "../public/markdown.ts";
+import { markdownPreview, renderMarkdown } from "../public/markdown.ts";
+
+test("conversation previews read Markdown without format debris or losing literal content", () => {
+  assert.equal(
+    markdownPreview("- **專案目標**：讀書清單\n- 第一版：`brief.md`"),
+    "專案目標：讀書清單 第一版：brief.md",
+  );
+  assert.equal(
+    markdownPreview(
+      "## 結果\n\n> [完整報告](https://example.com/report_(final))\n\n![讀書清單](https://example.com/image.png)",
+    ),
+    "結果 完整報告 讀書清單",
+  );
+  assert.equal(
+    markdownPreview(
+      "```js\nconst delta = -1;\n```\n\n版本 v1.2，2 * 3 = 6，路徑 a_b。",
+    ),
+    "const delta = -1; 版本 v1.2，2 * 3 = 6，路徑 a_b。",
+  );
+  assert.equal(
+    markdownPreview("<script>alert(1)</script> &amp; **文字**"),
+    "<script>alert(1)</script> & 文字",
+  );
+});
 
 test("assistant Markdown supports headings, nested lists, quotes, code and aligned tables", () => {
   const html = renderMarkdown(
@@ -45,7 +68,10 @@ test("partial streaming fences render safely and the complete source keeps code 
     ),
   );
   assert.match(complete, /class="code-language">TypeScript<\/span>/);
-  assert.match(complete, /<pre tabindex="0" aria-label="程式碼，可左右捲動">/);
+  assert.match(
+    complete,
+    /<pre role="group" tabindex="0" aria-label="程式碼，可左右捲動">/,
+  );
   assert.match(renderMarkdown("第一行\n第二行"), /第一行<br>\n第二行/);
 });
 

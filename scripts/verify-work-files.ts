@@ -8,11 +8,16 @@ import type { AddressInfo } from "node:net";
 import { Document, Packer, Paragraph } from "docx";
 import ExcelJS from "exceljs";
 import { chromium } from "playwright";
+import { expect } from "@playwright/test";
 import { createApp } from "../server/app.ts";
 import { browserExecutable } from "../server/bot-browser.ts";
 import { createShareGateway } from "../server/share-gateway.ts";
 const directory = await mkdtemp(join(tmpdir(), "apsis-files-browser-"));
-const output = resolve("artifacts/work-files-verification");
+const desktopOnly = process.argv.includes("--desktop");
+const output = resolve(
+  "artifacts/work-files-verification",
+  desktopOnly ? "desktop" : ".",
+);
 await mkdir(output, { recursive: true });
 const app = await createApp({
   dataDir: join(directory, "data"),
@@ -46,7 +51,7 @@ const htmlFixture = (
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="./assets/style.css"><style>h1 { font-size: 24px }</style>
 </head><body><h1>${heading}</h1><img src="../sample.png" alt="Local image">
-<button id="counter">Count: 0</button><p id="module"></p>
+<form id="counter-form"><button id="counter" type="submit">Count: 0</button></form><p id="module"></p>
 <script>document.body.dataset.inline = 'ready'</script>
 <script src="./assets/app.js"></script><script type="module" src="./assets/module.mjs"></script>
 </body></html>`;
@@ -65,7 +70,7 @@ await app.product.files.save(
 await app.product.files.save(
   location.id,
   "site/assets/app.js",
-  "let count = 0; document.querySelector('#counter').onclick = () => document.querySelector('#counter').textContent = 'Count: ' + ++count;",
+  "let count = 0; document.querySelector('#counter-form').onsubmit = event => {event.preventDefault();document.querySelector('#counter').textContent = 'Count: ' + ++count;};",
   null,
 );
 await app.product.files.save(
@@ -124,6 +129,7 @@ if (process.argv.includes("--serve")) {
     viewport: { width: 1440, height: 1000 },
   });
   const errors: string[] = [];
+  let expectingDirectoryFailure = false;
   const violations: unknown[] = [];
   await page.exposeFunction("reportCsp", (event: unknown) =>
     violations.push(event),
@@ -143,7 +149,14 @@ if (process.argv.includes("--serve")) {
   );
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => {
-    if (m.type() === "error" && !m.text().includes("409 (Conflict)"))
+    if (
+      m.type() === "error" &&
+      !m.text().includes("409 (Conflict)") &&
+      !(
+        expectingDirectoryFailure &&
+        m.text().includes("503 (Service Unavailable)")
+      )
+    )
       errors.push(m.text());
   });
   try {
@@ -154,6 +167,38 @@ if (process.argv.includes("--serve")) {
     await page.getByRole("button", { name: "切換工作內容" }).click();
     await page.getByRole("button", { name: "檔案", exact: true }).click();
     const files = page.getByRole("region", { name: "工作資料與檔案" });
+    const directoryFailure = async (route: import("playwright").Route) => {
+      if (new URL(route.request().url()).searchParams.get("path") === "site")
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Fixture directory read failed." }),
+        });
+      else await route.continue();
+    };
+    expectingDirectoryFailure = true;
+    await page.route("**/files?**", directoryFailure);
+    const site = files.getByRole("button", { name: "site", exact: true });
+    await site.press("Enter");
+    const childFiles = files.getByRole("list", { name: "site", exact: true });
+    await expect(childFiles.getByRole("alert")).toHaveText(
+      "Fixture directory read failed.",
+    );
+    await expect(site).toHaveAttribute("aria-expanded", "true");
+    await expect(site).toHaveAccessibleName("site");
+    await page.screenshot({ path: join(output, "directory-retry.png") });
+    await page.unroute("**/files?**", directoryFailure);
+    await childFiles
+      .getByRole("button", { name: "重新載入", exact: true })
+      .press("Enter");
+    await expect(childFiles).toBeFocused();
+    await expect(
+      childFiles.getByRole("button", { name: "展示 頁.HTML", exact: true }),
+    ).toBeVisible();
+    await expect(childFiles.getByRole("alert")).toHaveCount(0);
+    expectingDirectoryFailure = false;
+    await site.press("Enter");
+    await expect(site).toHaveAttribute("aria-expanded", "false");
     await files
       .getByRole("button", { name: "sample.docx", exact: true })
       .click();
@@ -181,8 +226,10 @@ if (process.argv.includes("--serve")) {
     await files
       .getByRole("button", { name: "sample.pdf", exact: true })
       .click();
-    await files.getByTitle("sample.pdf").waitFor();
-    await files.getByTitle("sample.pdf").scrollIntoViewIfNeeded();
+    await files.locator("iframe.file-pdf[title='sample.pdf']").waitFor();
+    await files
+      .locator("iframe.file-pdf[title='sample.pdf']")
+      .scrollIntoViewIfNeeded();
     await page.waitForTimeout(1200);
     await writeFile(
       join(output, "pdf-frames.json"),
@@ -260,6 +307,10 @@ if (process.argv.includes("--serve")) {
       .getByRole("button", { name: "展示 頁.HTML", exact: true })
       .click();
     const html = page.frameLocator(".file-html");
+    await expect(files.locator(".html-preview-note")).toBeVisible();
+    await expect(files.locator(".html-preview-note")).toContainText(
+      "預覽不保存網頁資料",
+    );
     await html
       .getByRole("heading", { name: "HTML preview", exact: true })
       .waitFor();
@@ -302,15 +353,47 @@ if (process.argv.includes("--serve")) {
       },
     );
     await files.getByRole("button", { name: "原始碼", exact: true }).click();
+    await expect(files.locator(".html-preview-note")).toBeHidden();
     assert.match(
       await files.locator(".file-document").innerText(),
       /<!doctype html>/,
     );
-    assert.equal(await files.locator(".file-html").count(), 0);
+    await expect(files.locator(".file-html")).toBeHidden();
     await files.getByRole("button", { name: "預覽", exact: true }).click();
     await html
       .getByRole("heading", { name: "HTML preview", exact: true })
       .waitFor();
+    await expect(
+      html.getByRole("button", { name: "Count: 1", exact: true }),
+    ).toBeVisible();
+    await files.getByRole("button", { name: "展開預覽", exact: true }).click();
+    await expect(page.locator("dialog[open]")).toHaveAttribute(
+      "aria-modal",
+      "true",
+    );
+    await expect(
+      html.getByRole("button", { name: "Count: 1", exact: true }),
+    ).toBeVisible();
+    await files
+      .getByRole("button", { name: "引用給 Bot", exact: true })
+      .focus();
+    await page.keyboard.press("Tab");
+    await expect(files.locator(".file-content")).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(
+      html.getByRole("button", { name: "Count: 1", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(
+      files.getByRole("button", { name: "展開預覽", exact: true }),
+    ).toBeFocused();
+    await expect(
+      html.getByRole("button", { name: "Count: 1", exact: true }),
+    ).toBeVisible();
+    await html.getByRole("button", { name: "Count: 1", exact: true }).click();
+    await expect(
+      html.getByRole("button", { name: "Count: 2", exact: true }),
+    ).toBeVisible();
     await writeFile(
       join(location.path, htmlPath),
       htmlFixture("Refreshed HTML"),
@@ -366,9 +449,10 @@ if (process.argv.includes("--serve")) {
       path: join(output, "desktop-files.png"),
       fullPage: true,
     });
-    await page.locator(".bot-actions-menu > summary").click();
-    await page.getByRole("button", { name: "聊天選項", exact: true }).click();
-    await page.getByRole("button", { name: "工作資料夾", exact: true }).click();
+    await page
+      .locator(".chat-header")
+      .getByRole("button", { name: "工作資料夾", exact: true })
+      .click();
     const folderDialog = page.getByRole("dialog", {
       name: "工作資料夾",
       exact: true,
@@ -376,7 +460,6 @@ if (process.argv.includes("--serve")) {
     await folderDialog.getByLabel("主機資料夾完整路徑").fill(location.path);
     await folderDialog.getByRole("button", { name: "使用此資料夾" }).click();
     await folderDialog.waitFor({ state: "hidden" });
-    await page.getByRole("button", { name: "完成", exact: true }).click();
     await files
       .getByRole("button", { name: "notes.md", exact: true })
       .waitFor();
@@ -392,17 +475,17 @@ if (process.argv.includes("--serve")) {
         .count(),
       0,
     );
-    await page.locator(".bot-actions-menu > summary").click();
-    await page.getByRole("button", { name: "聊天選項", exact: true }).click();
-    await page.getByRole("button", { name: "工作資料夾", exact: true }).click();
+    await page
+      .locator(".chat-header")
+      .getByRole("button", { name: "工作資料夾", exact: true })
+      .click();
     await folderDialog.getByLabel("主機資料夾完整路徑").fill(location.path);
     await folderDialog.getByRole("button", { name: "使用此資料夾" }).click();
     await folderDialog.waitFor({ state: "hidden" });
-    await page.getByRole("button", { name: "完成", exact: true }).click();
     await files
       .getByRole("button", { name: "notes.md", exact: true })
       .waitFor();
-    for (const width of [390, 768]) {
+    for (const width of desktopOnly ? [] : [390, 768]) {
       await page.setViewportSize({ width, height: 844 });
       await page.waitForTimeout(250);
       if (!(await files.isVisible()))
@@ -462,7 +545,7 @@ if (process.argv.includes("--serve")) {
       () => (document.documentElement.dataset.theme = "dark"),
     );
     await page.screenshot({
-      path: join(output, "mobile-dark.png"),
+      path: join(output, desktopOnly ? "desktop-dark.png" : "mobile-dark.png"),
       fullPage: true,
     });
     // Exercise real browser cookie/sandbox behavior through the authenticated
@@ -621,7 +704,9 @@ if (process.argv.includes("--serve")) {
         "expand and collapse folders",
         "single working folder dialog",
         "new task isolates files",
-        "desktop/mobile preview and no overflow",
+        desktopOnly
+          ? "desktop preview"
+          : "desktop/mobile preview and no overflow",
         "light/dark",
         "no browser errors",
       ],

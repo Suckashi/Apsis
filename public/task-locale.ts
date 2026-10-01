@@ -7,6 +7,38 @@ import type { ToolOperation } from "../shared/types.ts";
 import type { Locale } from "./settings-locale.ts";
 
 const english = new Map<string, string>([
+  ["已收到新的回覆", "New reply received"],
+  ["這次執行已中斷", "This run was interrupted"],
+  ["正在開啟新話題…", "Starting a new topic…"],
+  ["修改的檔案", "Changed files"],
+  ["無法確認檔案", "Unable to check file"],
+  ["已移動或移除", "Moved or removed"],
+  ["確認中…", "Checking…"],
+  ["重新確認檔案", "Check file again"],
+  ["預覽檔案", "Preview file"],
+  ["下載檔案", "Download file"],
+  ["預覽", "Preview"],
+  ["工作資料夾", "Workspace"],
+  ["開啟檔案目前的內容", "Opens the current file contents"],
+  ["已等待時間", "Elapsed time"],
+  ["最近操作", "Recent operations"],
+  ["工作計畫", "Work plan"],
+  ["未確認完成", "Not confirmed"],
+  ["工作詳情", "Work details"],
+  ["進度回報", "Progress updates"],
+  ["工具操作", "Tool operations"],
+  ["工具輸出", "Tool output"],
+  ["執行目標", "Operation target"],
+  ["檔案變更", "File changes"],
+  ["原始執行紀錄", "Raw run record"],
+  ["模型回應中斷", "Model response interrupted"],
+  ["這次執行未完成", "This run did not finish"],
+  ["已停止執行", "Run stopped"],
+  [
+    "已執行的操作可能已保留。重新嘗試前，請先確認目前檔案與進度。",
+    "Completed operations may have been saved. Check the current files and progress before retrying.",
+  ],
+  ["中斷前的部分回覆", "Partial reply before interruption"],
   ["需處理", "Action needed"],
   ["未讀", "Unread"],
   ["正在執行操作", "Running an operation"],
@@ -23,6 +55,16 @@ const english = new Map<string, string>([
   ["需要你的核准", "Your approval is needed"],
   ["工作位置：", "Workspace: "],
   ["技術詳情", "Technical details"],
+  ["錯誤詳情", "Error details"],
+  ["完整錯誤內容", "Full error"],
+  [
+    "工具參數不符合要求，詳情中保留原始錯誤。",
+    "The tool arguments did not match its requirements. The original error is available in the details.",
+  ],
+  [
+    "操作發生錯誤，請展開查看完整原因。",
+    "The operation encountered an error. Expand the details for the full reason.",
+  ],
   ["這項操作會修改檔案。", "This operation will modify files."],
   [
     "這項操作會執行指令；請確認指令與工作位置。",
@@ -117,6 +159,10 @@ const english = new Map<string, string>([
     "Live updates disconnected. Reconnecting and syncing automatically.",
   ],
   ["正在連接即時更新…", "Connecting to live updates…"],
+  [
+    "目前離線。恢復網路後會自動同步。",
+    "You're offline. Conversations will sync when the network returns.",
+  ],
   ["回到最新訊息", "Jump to latest message"],
   [
     "正在停止任務，等待執行中的操作結束…",
@@ -175,12 +221,15 @@ const english = new Map<string, string>([
   ["交辦任務", "Delegate task"],
   ["發布成果", "Publish file"],
   ["建立文件", "Create document"],
+  ["讀回文件", "Read document"],
   ["查詢技能", "List skills"],
   ["讀取技能", "Read skill"],
   ["儲存技能", "Save skill"],
   ["查詢歷史", "Search history"],
+  ["讀回對話", "Read surrounding history"],
   ["儲存記憶", "Save memory"],
   ["更新記憶", "Update memory"],
+  ["整理記憶", "Manage memory"],
   ["建立排程", "Create schedule"],
   ["使用連接服務", "Use connector"],
   ["使用工具", "Use tool"],
@@ -201,6 +250,9 @@ export function taskStatus(
 // arbitrary model progress, commands, filenames, user prompts, or tool output.
 export function taskProgress(locale: Locale, text: string) {
   if (locale !== "en") return text;
+  const preparing = /^正在準備(.+)（尚未執行）$/.exec(text);
+  if (preparing && english.has(preparing[1]))
+    return `Preparing: ${english.get(preparing[1])} (not started)`;
   if (text.startsWith("正在")) {
     const action = text.slice(2);
     if (english.has(action)) return `${english.get(action)}…`;

@@ -10,8 +10,6 @@ import type { WorkLocation } from "../shared/types.ts";
 
 import { ProductDB } from "./product-db.ts";
 
-import { AvatarCollectionService } from "./avatar-collection.ts";
-
 import { SettingsService } from "./settings.ts";
 
 import type { ExecutionState } from "./execution-state.ts";
@@ -21,7 +19,6 @@ import { now, fail, string } from "./product-support.ts";
 import { transitionJob } from "./task-lifecycle.ts";
 
 interface Dependencies {
-  avatarCollection: AvatarCollectionService;
   db: ProductDB;
   execution: ExecutionState;
   files: FileManager;
@@ -186,7 +183,6 @@ export class JobService {
     }
     if (this.deps.execution.closed) fail("服務正在關閉。", 503);
     const job: Job = {
-      avatarRewardsEligible: true,
       location,
       fileReferences,
       workContextId,
@@ -435,7 +431,6 @@ export class JobService {
           this.deps.execution.steers.delete(bot.id);
           await this.deps.finishSteering(sessionId, job.runId);
           this.deps.db.jobs.put(job);
-          this.deps.avatarCollection.finish(job);
           this.deps.notify(bot.id, job.id);
         }
       }

@@ -4,9 +4,9 @@ import type { useChatComposer } from "./use-chat-composer.ts";
 import type { BotDetail as Detail } from "../shared/api.ts";
 import { api } from "./chat-api.ts";
 import { uiText } from "./settings-dictionary.ts";
-import { BrandMark, CopyButton } from "./bot-ui.tsx";
+import { BrandMark, CopyButton, useMedia } from "./bot-ui.tsx";
 import { Icon, Markdown } from "./chat-visuals.tsx";
-import { ArtifactCard, DraftCard } from "./artifact-cards.tsx";
+import { ArtifactDeliveries, DraftCard } from "./artifact-cards.tsx";
 import { ConversationLoading } from "./activity-feedback.tsx";
 import {
   RunHistory,
@@ -14,6 +14,62 @@ import {
   UnlinkedDelegations,
 } from "./task-history.tsx";
 import { WorkApproval } from "./work-approval.tsx";
+import { useSettingsLocale } from "./settings-locale.ts";
+import { taskText } from "./task-locale.ts";
+import type { RunFile } from "../shared/run-files.ts";
+import type { Artifact } from "../shared/product.ts";
+import { ReplyAnnouncement } from "./reply-announcement.tsx";
+import { UserMessageText } from "./user-message.tsx";
+import { runOutcome } from "../shared/work-presentation.ts";
+
+function FailedReply({
+  content,
+  error,
+  stopped,
+}: {
+  content: string;
+  error?: string;
+  stopped: boolean;
+}) {
+  const locale = useSettingsLocale();
+  const t = (text: string) => taskText(locale, text);
+  // Older messages contain partial output followed by the recorded error.
+  const reason = error || content.trim().split("\n\n").at(-1) || content;
+  const partial = content.trimEnd().endsWith(reason)
+    ? content.trimEnd().slice(0, -reason.length).trimEnd()
+    : content;
+  const streamInterrupted = reason.trim() === "terminated";
+  return (
+    <>
+      <div className="message-error">
+        <strong>
+          {t(
+            stopped
+              ? "已停止執行"
+              : streamInterrupted
+                ? "模型回應中斷"
+                : "這次執行未完成",
+          )}
+        </strong>
+        {!stopped && (
+          <p>
+            {t("已執行的操作可能已保留。重新嘗試前，請先確認目前檔案與進度。")}
+          </p>
+        )}
+        <details>
+          <summary>{uiText("錯誤詳情")}</summary>
+          <code>{reason}</code>
+        </details>
+      </div>
+      {partial && (
+        <details className="execution-partial">
+          <summary>{t("中斷前的部分回覆")}</summary>
+          <Markdown text={partial} />
+        </details>
+      )}
+    </>
+  );
+}
 
 interface Props {
   data: Pick<
@@ -25,12 +81,12 @@ interface Props {
   pinnedBottom: React.RefObject<boolean>;
   bottom: React.RefObject<HTMLDivElement | null>;
   setAwayFromBottom: React.Dispatch<React.SetStateAction<boolean>>;
-  setSettings: React.Dispatch<React.SetStateAction<boolean>>;
   expandedRuns: Record<string, boolean>;
   toggleRun: (id: string) => void;
   availableBots: Set<string>;
   select: (id: string) => void;
-  hasDefaultModel: boolean;
+  previewFile: (file: RunFile) => void;
+  previewArtifact: (artifact: Artifact) => void;
 }
 export function ConversationMessages({
   data,
@@ -39,23 +95,18 @@ export function ConversationMessages({
   pinnedBottom,
   setAwayFromBottom,
   bottom,
-  setSettings,
   expandedRuns,
   toggleRun,
   availableBots,
   select,
-  hasDefaultModel,
+  previewFile,
+  previewArtifact,
 }: Props) {
+  const locale = useSettingsLocale();
+  const desktop = useMedia("(min-width: 769px)");
   const { detail, selected, selectedRef, setDetail, perform, refresh } = data;
-  const {
-    busy,
-    setText,
-    input,
-    pendingRequest,
-    setReplyTo,
-    referenceArtifact,
-    setRetryOf,
-  } = composer;
+  const { busy, setText, input, pendingRequest, setReplyTo, setRetryOf } =
+    composer;
   const bot = detail?.bot;
   const running = !!detail?.session.running;
   const summaries = new Map(detail?.runSummaries.map((r) => [r.id, r]));
@@ -63,14 +114,80 @@ export function ConversationMessages({
     (r) => r.id === detail.session.activeRunId && r.status === "running",
   );
   const pending = detail?.approvals.filter((a) => a.status === "pending") || [];
+  const readingSize = React.useRef({
+    height: 0,
+    atStart: false,
+    preservePage: false,
+  });
+  React.useLayoutEffect(() => {
+    const element = scroller.current;
+    const column = element?.querySelector(".message-column");
+    if (
+      !desktop ||
+      !element ||
+      !column ||
+      typeof ResizeObserver === "undefined"
+    )
+      return;
+    readingSize.current = {
+      height: element.scrollHeight,
+      atStart: element.scrollTop < 2,
+      preservePage: false,
+    };
+    // Secondary records may arrive without a new message or text delta.
+    // Keep following only while the reader has chosen the latest messages.
+    const observer = new ResizeObserver(() => {
+      if (pinnedBottom.current) element.scrollTop = element.scrollHeight;
+      else if (readingSize.current.atStart && !readingSize.current.preservePage)
+        element.scrollTop = 0;
+      readingSize.current.height = element.scrollHeight;
+    });
+    observer.observe(column);
+    return () => observer.disconnect();
+  }, [desktop, detail?.bot.id, scroller, pinnedBottom]);
+  const syncReadingPosition = React.useCallback(() => {
+    const el = scroller.current;
+    if (!el) return;
+    pinnedBottom.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+    setAwayFromBottom(!pinnedBottom.current);
+  }, [scroller, pinnedBottom, setAwayFromBottom]);
   return (
     <div
       className="messages"
+      role="region"
+      tabIndex={desktop && !!detail?.session.messages.length ? 0 : undefined}
+      aria-label={uiText("與 {0} 的對話", [bot?.name || "Bot"])}
       ref={scroller}
+      onKeyDown={(event) => {
+        if (
+          !desktop ||
+          event.target !== event.currentTarget ||
+          !event.ctrlKey ||
+          event.altKey ||
+          event.shiftKey ||
+          (event.key !== "Home" && event.key !== "End")
+        )
+          return;
+        // A native animated jump can retain an obsolete destination when
+        // records load mid-scroll. Resolve the requested edge immediately.
+        event.preventDefault();
+        const element = event.currentTarget;
+        pinnedBottom.current = event.key === "End";
+        readingSize.current.atStart = event.key === "Home";
+        element.scrollTop = pinnedBottom.current ? element.scrollHeight : 0;
+        setAwayFromBottom(!pinnedBottom.current);
+      }}
       onScroll={() => {
         const el = scroller.current!;
-        pinnedBottom.current =
-          el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+        // Native scroll anchoring can fire before ResizeObserver after records
+        // grow. Preserve the reader's previous edge choice until that resize.
+        if (!desktop || el.scrollHeight === readingSize.current.height) {
+          pinnedBottom.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+          readingSize.current.atStart =
+            !readingSize.current.preservePage && el.scrollTop < 2;
+        }
         setAwayFromBottom(!pinnedBottom.current);
         if (detail?.bot.id === selected) {
           try {
@@ -87,10 +204,13 @@ export function ConversationMessages({
         }
       }}
     >
+      <ReplyAnnouncement selected={selected} detail={detail} />
       {!detail ? (
         <ConversationLoading />
       ) : (
-        <div className="message-column">
+        <div
+          className={`message-column ${!detail.session.messages.length && !running ? "is-empty" : ""}`}
+        >
           {detail.session.olderCursor && (
             <button
               className="secondary"
@@ -102,12 +222,20 @@ export function ConversationMessages({
                   const height = el?.scrollHeight || 0;
                   const top = el?.scrollTop || 0;
                   pinnedBottom.current = false;
+                  // Pagination preserves the existing message's position;
+                  // the newly prepended page is not an explicit Home jump.
+                  readingSize.current.atStart = false;
+                  readingSize.current.preservePage = true;
                   const page = await api<{
                     messages: Detail["session"]["messages"];
                     olderCursor?: number;
                   }>(
                     `/bots/${id}/history?before=${detail.session.olderCursor}`,
-                  );
+                  ).catch((error) => {
+                    if (selectedRef.current === id)
+                      readingSize.current.preservePage = false;
+                    throw error;
+                  });
                   if (selectedRef.current !== id) return;
                   setDetail(
                     (old) =>
@@ -129,7 +257,9 @@ export function ConversationMessages({
                       },
                   );
                   requestAnimationFrame(() => {
+                    if (selectedRef.current !== id) return;
                     if (el) el.scrollTop = top + el.scrollHeight - height;
+                    readingSize.current.preservePage = false;
                   });
                 })
               }
@@ -143,33 +273,61 @@ export function ConversationMessages({
                 <BrandMark size={32} avatar={bot?.avatar} />
               </span>
               <h2>{uiText("你好，我是 {0}。", [bot?.name])}</h2>
-              <p>{uiText("告訴我你想完成什麼，我會在這裡接著做。")}</p>
-              <div className="starter-prompts">
-                {[
-                  uiText("幫我研究一個主題，整理來源與結論"),
-                  uiText("讀取我的文件，整理成一份報告"),
-                  uiText("幫我修改程式並驗證結果"),
-                ].map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => {
-                      setText(p);
-                      input.current?.focus();
-                    }}
-                  >
-                    {p}
-                    <Icon name="arrow" size={15} />
-                  </button>
-                ))}
-              </div>
-              {!hasDefaultModel && (
-                <button
-                  className="setup-hint"
-                  onClick={() => setSettings(true)}
+              <p>
+                {uiText(
+                  detail.contextSetupError
+                    ? "先選好模型，就能開始。也可以先寫下需求。"
+                    : "告訴我你想完成什麼，我會在這裡接著做。",
+                )}
+              </p>
+              {!detail.contextSetupError && !composer.text.length && (
+                <section
+                  className="intro-examples"
+                  aria-label={uiText("開始對話的範例")}
                 >
-                  {uiText("先連接一個模型，即可開始對話")}
-                  <span>→</span>
-                </button>
+                  <p className="intro-examples-help">
+                    {uiText("選一個開頭，再補上你的內容。")}
+                  </p>
+                  <div className="starter-prompts">
+                    {[
+                      {
+                        icon: "search",
+                        title: "研究一個主題",
+                        description: "比較資料，整理來源與結論",
+                        prompt: "幫我研究：",
+                      },
+                      {
+                        icon: "file",
+                        title: "整理一份文件",
+                        description: "摘要重點，整理成可用的內容",
+                        prompt: "幫我整理這份文件：",
+                      },
+                      {
+                        icon: "monitor",
+                        title: "修改程式碼",
+                        description: "說明要修改的地方與預期結果",
+                        prompt: "幫我修改程式：",
+                      },
+                    ].map((example) => (
+                      <button
+                        type="button"
+                        key={example.icon}
+                        onClick={() => {
+                          // Examples help start an empty draft; never replace ongoing work.
+                          if (!composer.text.length)
+                            composer.insertChoice(uiText(example.prompt));
+                        }}
+                      >
+                        <Icon name={example.icon} size={20} />
+                        <span>
+                          <strong>{uiText(example.title)}</strong>
+                          <small>{uiText(example.description)}</small>
+                        </span>
+                        <Icon name="arrow" size={14} />
+                      </button>
+                    ))}
+                  </div>
+                </section>
               )}
             </div>
           )}
@@ -178,12 +336,21 @@ export function ConversationMessages({
               {index > 0 &&
                 m.workContextId !==
                   detail.session.messages[index - 1].workContextId && (
-                  <div className="topic-divider" role="separator">
+                  <div
+                    className="topic-divider"
+                    role="separator"
+                    aria-label={uiText("新話題")}
+                  >
                     {uiText("新話題")}
                   </div>
                 )}
               <article
                 id={`message-${m.id}`}
+                aria-label={
+                  m.role === "user"
+                    ? uiText("你的訊息")
+                    : uiText("{0} 的回覆", [bot?.name || "Bot"])
+                }
                 className={`message ${m.role} ${m.status === "error" ? "failed" : ""}`}
               >
                 <div className="message-body">
@@ -194,14 +361,26 @@ export function ConversationMessages({
                         href={`#message-${detail.jobs.find((j) => j.runId === m.runId)?.replyTo}`}
                         onClick={(e) => {
                           e.preventDefault();
-                          document
-                            .getElementById(
-                              `message-${detail.jobs.find((j) => j.runId === m.runId)?.replyTo}`,
-                            )
-                            ?.scrollIntoView({
-                              behavior: "smooth",
-                              block: "center",
-                            });
+                          const original = document.getElementById(
+                            `message-${detail.jobs.find((j) => j.runId === m.runId)?.replyTo}`,
+                          );
+                          const request =
+                            original?.querySelector<HTMLDetailsElement>(
+                              ".request-disclosure",
+                            );
+                          if (request) request.open = true;
+                          request
+                            ?.querySelector<HTMLElement>("summary")
+                            ?.focus({ preventScroll: true });
+                          original?.scrollIntoView({
+                            behavior: window.matchMedia(
+                              "(prefers-reduced-motion: reduce)",
+                            ).matches
+                              ? "instant"
+                              : "smooth",
+                            block: "start",
+                          });
+                          syncReadingPosition();
                         }}
                       >
                         {uiText("回覆：")}
@@ -231,33 +410,63 @@ export function ConversationMessages({
                         <code>{m.content}</code>
                       </details>
                     </div>
+                  ) : m.status === "error" ? (
+                    <FailedReply
+                      content={m.content}
+                      error={
+                        m.runId
+                          ? detail.jobs.find((j) => j.runId === m.runId)?.error
+                          : undefined
+                      }
+                      stopped={
+                        !!m.runId &&
+                        summaries.get(m.runId)?.status === "cancelled"
+                      }
+                    />
+                  ) : m.role === "user" ? (
+                    <UserMessageText
+                      text={m.content}
+                      storageKey={`apsis.bot-request.${detail.bot.id}.${m.id}`}
+                      initiallyOpen={
+                        running && m.runId === detail.session.activeRunId
+                      }
+                      syncReadingPosition={syncReadingPosition}
+                    />
                   ) : (
                     <Markdown text={m.content} />
                   )}
                 </div>
+                {m.role === "assistant" && m.runId && (
+                  <ArtifactDeliveries
+                    artifacts={detail.artifacts.filter(
+                      (a) => a.kind === "result" && a.runId === m.runId,
+                    )}
+                    preview={previewArtifact}
+                  />
+                )}
                 {m.role === "assistant" &&
                   m.runId &&
                   summaries.has(m.runId) && (
                     <RunHistory
+                      compactReply
                       botId={detail.bot.id}
                       summary={summaries.get(m.runId)!}
                       open={!!expandedRuns[m.runId]}
                       toggle={() => toggleRun(m.runId!)}
                       select={select}
                       available={availableBots}
+                      previewFile={previewFile}
+                      deliveredPaths={detail.artifacts
+                        .filter(
+                          (a) => a.kind === "result" && a.runId === m.runId,
+                        )
+                        .flatMap((a) =>
+                          a.bundle
+                            ? a.bundle.files.map((file) => file.path)
+                            : [a.path],
+                        )}
                     />
                   )}
-                {m.role === "assistant" &&
-                  m.runId &&
-                  detail.artifacts
-                    .filter((a) => a.kind === "result" && a.runId === m.runId)
-                    .map((a) => (
-                      <ArtifactCard
-                        key={a.id}
-                        artifact={a}
-                        reference={() => referenceArtifact(a)}
-                      />
-                    ))}
                 <div className="message-footer">
                   {m.delivery?.kind === "steer" && (
                     <span
@@ -281,6 +490,47 @@ export function ConversationMessages({
                     </span>
                   )}
                   <div className="message-actions">
+                    {m.role === "assistant" &&
+                      m.runId &&
+                      summaries.has(m.runId) &&
+                      runOutcome(summaries.get(m.runId)!).quiet && (
+                        <button
+                          className="reply-record-action"
+                          id={`reply-record-${m.runId}`}
+                          aria-expanded={!!expandedRuns[m.runId]}
+                          aria-controls={`task-record-${m.runId}`}
+                          onClick={() => toggleRun(m.runId!)}
+                        >
+                          {taskText(locale, "回覆紀錄")}
+                        </button>
+                      )}
+                    {m.role === "assistant" &&
+                      m.status === "error" &&
+                      detail.jobs.some(
+                        (j) =>
+                          j.runId === m.runId &&
+                          (j.status === "failed" || j.status === "interrupted"),
+                      ) && (
+                        <button
+                          disabled={busy || running}
+                          onClick={() => {
+                            const job = detail.jobs.find(
+                              (j) =>
+                                j.runId === m.runId &&
+                                (j.status === "failed" ||
+                                  j.status === "interrupted"),
+                            );
+                            if (!job) return;
+                            pendingRequest.current = undefined;
+                            setReplyTo(undefined);
+                            setRetryOf(job.id);
+                            setText(job.prompt);
+                            input.current?.focus();
+                          }}
+                        >
+                          {uiText("重新交辦")}
+                        </button>
+                      )}
                     {m.delivery?.state === "not-applied" && (
                       <button
                         onClick={() => {
@@ -311,7 +561,10 @@ export function ConversationMessages({
             </React.Fragment>
           ))}
           {running && (
-            <article className="message assistant live">
+            <article
+              className="message assistant live"
+              aria-label={uiText("{0} 正在回覆", [bot?.name || "Bot"])}
+            >
               {activeSummary && (
                 <RunHistory
                   key={activeSummary.id}
@@ -382,25 +635,27 @@ export function ConversationMessages({
                 </span>
               </div>
             ))}
-          {detail.artifacts
-            .filter(
+          <ArtifactDeliveries
+            artifacts={detail.artifacts.filter(
               (a) =>
                 a.kind === "result" &&
                 !detail.session.messages.some(
                   (m) => m.role === "assistant" && m.runId === a.runId,
                 ),
-            )
-            .map((a) => (
-              <ArtifactCard
-                key={a.id}
-                artifact={a}
-                reference={() => referenceArtifact(a)}
-              />
-            ))}
+            )}
+            preview={previewArtifact}
+          />
           {detail.jobs
             .filter(
               (j) =>
                 !j.dismissedAt &&
+                !detail.session.messages.some(
+                  (m) =>
+                    m.role === "assistant" &&
+                    m.status === "error" &&
+                    !!j.runId &&
+                    m.runId === j.runId,
+                ) &&
                 ((j.status === "failed" && !j.runId) ||
                   j.status === "interrupted"),
             )
@@ -437,7 +692,11 @@ export function ConversationMessages({
           {detail.session.messages.length > 0 &&
             detail.session.messages.at(-1)?.workContextId !==
               detail.session.context?.id && (
-              <div className="topic-divider" role="separator">
+              <div
+                className="topic-divider"
+                role="separator"
+                aria-label={uiText("新話題")}
+              >
                 {uiText("新話題")}
               </div>
             )}

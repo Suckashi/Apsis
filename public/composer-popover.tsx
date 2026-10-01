@@ -6,11 +6,13 @@ export function ComposerPopover({
   children,
   className = "",
   detailsRef,
+  closeOnSelect = false,
 }: {
   label: React.ReactNode;
   children: React.ReactNode;
   className?: string;
   detailsRef?: React.RefObject<HTMLDetailsElement | null>;
+  closeOnSelect?: boolean;
 }) {
   const internalRef = useRef<HTMLDetailsElement>(null);
   const ref = detailsRef ?? internalRef;
@@ -44,7 +46,23 @@ export function ComposerPopover({
       }}
     >
       <summary>{label}</summary>
-      <div className="composer-popover-content">{children}</div>
+      <div
+        className="composer-popover-content"
+        onClick={(event) => {
+          if (
+            closeOnSelect &&
+            (event.target as HTMLElement).closest("button") &&
+            ref.current
+          ) {
+            ref.current.open = false;
+            ref.current
+              .querySelector("summary")
+              ?.focus({ preventScroll: true });
+          }
+        }}
+      >
+        {children}
+      </div>
     </details>
   );
 }

@@ -90,7 +90,12 @@ export class Workspace {
       throw Object.assign(new Error("請使用工作區內的相對路徑。"), {
         status: 400,
       });
-    const segments = input.replaceAll("\\", "/").split("/").filter(Boolean);
+    // Current-directory segments are ordinary relative paths and are already
+    // canonicalized by permission matching. Parent traversal stays forbidden.
+    const segments = input
+      .replaceAll("\\", "/")
+      .split("/")
+      .filter((part) => part !== "" && part !== ".");
     if (segments.some((p) => !Workspace.allowed(p)))
       throw Object.assign(new Error("不允許系統資料、無效路徑或離開工作區。"), {
         status: 403,
@@ -121,10 +126,12 @@ export class Workspace {
     return current;
   }
   async list(input = ""): Promise<WorkspaceFile[]> {
-    const entries = await readdir(await this.resolve(input), {
+    const directory = await this.resolve(input);
+    const entries = await readdir(directory, {
       withFileTypes: true,
     }).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT" && this.lazy && !input) return [];
+      if (error.code === "ENOENT" && this.lazy && directory === this.root)
+        return [];
       throw error;
     });
     return entries

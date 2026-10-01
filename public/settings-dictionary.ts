@@ -2,9 +2,70 @@ import { getSettingsLocale } from "./settings-locale.ts";
 
 // Source messages are stable dictionary keys. User content is never translated.
 export const english: Record<string, string> = {
+  重試: "Retry",
+  輸入建議: "Input suggestions",
+  "方向鍵選擇 · Enter 插入 · Esc 關閉":
+    "Arrow keys to choose · Enter to insert · Esc to close",
+  話題清單: "Topic list",
+  收合話題訊息: "Collapse topic messages",
+  返回供應商: "Back to providers",
+  供應商操作結果: "Provider operation result",
+  "正在載入 Bot 名單": "Loading your Bots",
+  正在準備你的對話: "Preparing your conversations",
+  "載入 Bot 與最近的對話。": "Loading your Bots and recent conversations.",
+  等待恢復連線: "Waiting to reconnect",
+  "重新同步後，會載入你的 Bot 與對話。":
+    "Resync to load your Bots and conversations.",
+  "無法載入對話。": "Could not load your conversations.",
+  "無法更新對話。已載入的內容與草稿仍保留。":
+    "Could not update conversations. Loaded content and drafts are preserved.",
+  "無法連接 Apsis，請確認網路與服務。":
+    "Could not connect to Apsis. Check the network and service.",
+  重新同步: "Resync",
+  "正在同步…": "Syncing…",
+  "同步逾時，請再試一次。": "Sync timed out. Try again.",
+  "預覽成果 {0}": "Preview result {0}",
+  "下載成果 {0}": "Download result {0}",
+  "正在停止…": "Stopping…",
+  "第 {0} 版": "Version {0}",
+  "先前版本（{0}）": "Previous versions ({0})",
+  "{0} 的先前版本（{1}）": "Previous versions of {0} ({1})",
+  "1 頁": "1 page",
+  "{0} 頁": "{0} pages",
+  成果預覽: "Result preview",
+  網頁應用: "Web app",
+  "{0} 個檔案": "{0} files",
+  下載完整網頁: "Download complete web app",
+  "已包含 {0} 個檔案": "Includes {0} files",
+  附件預覽: "Attachment preview",
+  "預覽附件 {0}": "Preview attachment {0}",
+  "下載附件 {0}": "Download attachment {0}",
+  上傳時的版本: "Uploaded version",
+  發布時的版本: "Published version",
+  "文件以文字預覽，版面與完整內容請下載。":
+    "This is a text preview. Download the complete document with its formatting.",
+  "此預覽保留文件結構；圖片與列印版面請下載查看。":
+    "This preview preserves the document structure. Download to view images and print layout.",
+  "引用成果：": "Referenced result: ",
+  "正在加入引用…": "Adding reference…",
+  "無法加入引用，請重試。": "Could not add the reference. Try again.",
+  "預覽僅顯示部分內容，完整內容請下載。":
+    "Only part of the content is shown. Download the complete file.",
+  "網頁預覽使用這份檔案；另存的圖片、樣式與外部資源不包含在內。":
+    "This preview uses the published file. Separate images, styles and external resources are not included.",
+  "預覽不保存網頁資料；請下載完整網頁後確認保存功能。":
+    "Data is not saved in this preview. Download the complete website to check saving.",
+  "預覽不保存網頁資料；保存功能需在瀏覽器開啟原始網頁後確認。":
+    "Data is not saved in this preview. Open the original website in a browser to check saving.",
+  "可在對話中檢閱結果。": "Review the result in the conversation.",
+  "與 {0} 的對話": "Conversation with {0}",
+  "{0} 的回覆": "Reply from {0}",
+  "{0} 正在回覆": "{0} is replying",
+  你的訊息: "Your message",
+  目前對話: "Current conversation",
+  有新訊息: "New message",
+  選擇附件: "Choose attachments",
   目前選擇的夥伴: "Selected companion",
-  "基本款 · 免費選用": "Original · Free to use",
-  收藏頭像: "Collected avatar",
   "會顯示在 Bot 名單與對話中。": "Shown in your Bot list and conversations.",
   "完成一次主要工作 +10 點 · 30 點抽一位新夥伴":
     "Complete a main task: +10 points · Meet a new friend: 30 points",
@@ -15,6 +76,8 @@ export const english: Record<string, string> = {
   專案設定: "Project settings",
   "正在處理…": "Working…",
   處理失敗: "Could not finish",
+  先前話題的檔案: "Files from an earlier topic",
+  回到目前話題: "Back to current topic",
   開啟新話題: "Start a new topic",
   聊天選項: "Chat options",
   新話題: "New topic",
@@ -30,6 +93,8 @@ export const english: Record<string, string> = {
   "工作位置已固定；變更位置請建立新話題。":
     "The working folder is fixed. Start a new topic to change it.",
   "使用隔離的 Git 工作區": "Use an isolated Git worktree",
+  "Git 工作區選項": "Git worktree options",
+  目前資料夾: "Current folder",
   "起始分支（留空使用目前分支）":
     "Starting branch (leave blank for current branch)",
   未提交修改: "Uncommitted changes",
@@ -37,6 +102,7 @@ export const english: Record<string, string> = {
   重新整理: "Refresh",
   下載: "Download",
   瀏覽先前話題: "Browse earlier topics",
+  先前話題的訊息: "Messages from earlier topics",
   儲存: "Save",
   "選擇 Git 工作資料夾後，可在這裡查看修改。":
     "Choose a Git working folder to view changes here.",
@@ -111,18 +177,20 @@ export const english: Record<string, string> = {
     ]),
   ),
   ...Object.fromEntries(
-    Array.from({ length: 9 }, (_, i) => [
-      `系列 ${i + 1}`,
-      `Collection ${i + 1}`,
-    ]),
+    Array.from({ length: 9 }, (_, i) => [`系列 ${i + 1}`, `Series ${i + 1}`]),
   ),
   工作資料夾: "Working folder",
   自動資料夾: "Automatic folder",
+  一般對話: "General conversation",
+  工作位置: "Work location",
+  起始分支: "Starting branch",
   使用此資料夾: "Use this folder",
   返回檔案: "Back to files",
   展開預覽: "Expand preview",
   檔案預覽: "File preview",
   檔案檢視方式: "File view",
+  檔案內容: "File contents",
+  檔案資訊: "File information",
   原始碼: "Source",
   瀏覽與預覽檔案: "Browse and preview files",
   "不需設定即可交辦；只有使用既有檔案時才需要選擇。":
@@ -169,6 +237,33 @@ export const english: Record<string, string> = {
   "主機資料夾路徑（留空自動建立）":
     "Folder on the server (leave blank to create)",
   專案說明: "Project background",
+  "保存偏好、需求與工作背景，並選擇適用範圍。":
+    "Save preferences, requirements and background, and choose where they apply.",
+  尚未加入記憶: "No memories yet",
+  記憶管理: "Memory management",
+  進階選項: "Advanced options",
+  重新載入: "Reload",
+  "加入常用偏好或背景，讓 Bot 在適用範圍內延續工作。":
+    "Add useful preferences or background to help your Bot continue its work within the chosen scope.",
+  "記憶已儲存。": "Memory saved.",
+  "目前預設：{0}": "Current default: {0}",
+  "尚未設定預設模型。": "No default model configured.",
+  "Bot 已釘選。": "Bot pinned.",
+  "Bot 已取消釘選。": "Bot unpinned.",
+  "Bot 已隱藏。": "Bot hidden.",
+  "Bot 已顯示。": "Bot visible.",
+  關閉專案設定: "Close project settings",
+  儲存說明: "Save background",
+  專案知識: "Project knowledge",
+  "這個專案的任務共用這些記憶；Bot 建議新增內容時，仍會先請你確認。":
+    "Tasks in this project share these memories. You review additions suggested by a Bot before they are saved.",
+  "尚無專案記憶。": "No project memories yet.",
+  新增專案記憶: "Add project memory",
+  儲存記憶: "Save memory",
+  重新載入記憶: "Reload memories",
+  使用中: "Active",
+  "專案說明已儲存。": "Project background saved.",
+  "專案記憶已儲存。": "Project memory saved.",
   建立: "Create",
   瀏覽資料夾: "Browse folders",
   "僅瀏覽，不會改變目前任務的工作位置。":
@@ -218,44 +313,7 @@ export const english: Record<string, string> = {
   "此資料夾有執行中或等待核准的工作；可編輯草稿，完成後再儲存。":
     "This folder has active work. Keep editing your draft and save after it finishes.",
 
-  頭像收藏: "Avatar collection",
-  "把小夥伴，一個個帶回家。": "A little collection of lovely companions.",
-  "已收藏 {0} / {1}": "Collected {0} / {1}",
-  點數: "Points",
-  "抽一次 · {0} 點": "Draw once · {0} points",
-  "抽取中…": "Drawing…",
-  "正在揭曉…": "Revealing…",
-  確認上次抽取結果: "Check previous draw",
-  "上次結果待確認，重試不會重複扣點。":
-    "The previous result is unconfirmed. Retrying will not charge again.",
-  已全部收藏: "Collection complete",
-  "已全部收藏。": "Collection complete.",
-  "所有夥伴都到齊了，點數仍會繼續累積。":
-    "Everyone is here! You can keep earning points.",
-  "再累積 {0} 點，就能迎接新夥伴。":
-    "Earn {0} more points to meet a new companion.",
-  "每抽都是尚未擁有的新夥伴。":
-    "Every draw brings a new companion. No duplicates.",
-  "剩餘 {0} 款 · 每款機率 1/{0}（{1}%）":
-    "{0} remaining · Each has a 1/{0} chance ({1}%)",
-  如何獲得點數: "How to earn points",
-  "成功完成主要任務 +10 點；協作子任務不另計。舊任務不補算。":
-    "Complete a main task for +10 points. Delegated tasks do not earn base points. Earlier tasks are not counted.",
-  "首次獎勵各限一次，可同時達成。成果需成功交付檔案，上傳附件不計。":
-    "Each first-time bonus is awarded once; bonuses can combine. Delivery requires a successful task with a published file. Uploads do not count.",
-  "首次 Bot 協作": "First Bot collaboration",
-  首次完成排程: "First completed routine",
-  首次成果交付: "First file delivery",
-  已達成: "Achieved",
-  最近抽到的夥伴: "Latest companion",
-  這次抽到的夥伴: "Your new companion",
-  "剩餘 {0} 點": "{0} points remaining",
-  選用此頭像: "Use this avatar",
-  已選用: "Selected",
-  頭像篩選: "Filter avatars",
   全部: "All",
-  已擁有: "Owned",
-  抽取獲得: "Obtain by drawing",
   基本款: "Originals",
   航海冒險: "Ocean adventures",
   魔法旅途: "Magic journeys",
@@ -267,10 +325,6 @@ export const english: Record<string, string> = {
   三麗鷗: "Sanrio",
   頭像系列: "Avatar series",
   全部系列: "All series",
-  "系列篩選僅影響顯示，抽取涵蓋所有未擁有款式。":
-    "Series filters only change the display. Draws include all unowned avatars.",
-  "這個系列還沒有已擁有的夥伴。切換「全部」看看吧！":
-    "No companions owned in this series yet. Switch to All to explore!",
   安妮亞: "Anya",
   約兒: "Yor",
   洛伊德: "Loid",
@@ -312,10 +366,6 @@ export const english: Record<string, string> = {
   藍髮勇者: "Blue-haired hero",
   眼鏡僧侶: "Bespectacled priest",
   矮人戰士: "Dwarf warrior",
-  "尚未擁有這款頭像，請先抽取獲得。":
-    "You do not own this avatar yet. Obtain it by drawing first.",
-  "抽取請求識別碼無效。": "Invalid draw request ID.",
-  "點數不足，無法抽取頭像。": "Not enough points to draw an avatar.",
   工具與引用: "Tools & context",
   "全域：": "Global: ",
   "全域 · ": "Global · ",
@@ -386,13 +436,37 @@ export const english: Record<string, string> = {
   "Context token 上限": "Context token limit",
   "官方模型可自動判定；自訂端點需設定":
     "Official models use known profiles; custom endpoints require a limit",
-  搜尋聊天與話題: "History and tasks",
+  搜尋聊天與話題: "Search messages and topics",
   搜尋歷史: "Search history",
+  你: "You",
+  "Bot 回覆": "Bot reply",
+  工具紀錄: "Tool record",
+  "工具輸出，展開查看詳細內容。": "Tool output. Expand to view details.",
+  搜尋結果: "Search results",
+  返回搜尋結果: "Back to search results",
+  展開內容: "Expand content",
+  展開完整訊息: "Read full message",
+  收合訊息: "Collapse message",
+  "輸入至少兩個字，尋找訊息": "Enter at least two characters to find a message",
+  設定分類: "Settings categories",
+  搜尋說明: "Search tips",
+  展開完整原文: "Read full message",
+  返回話題清單: "Back to topics",
+  關閉歷史訊息: "Close message history",
+  "目前顯示搜尋片段，展開讀取完整原文。":
+    "Showing a search excerpt. Expand to read the full original message.",
+  引用片段: "Quote excerpt",
+  "空格分開關鍵字；雙引號搜尋完整片語。":
+    "Separate keywords with spaces; use double quotes for an exact phrase.",
+  "找不到符合的訊息，試試其他關鍵字。":
+    "No matching messages. Try another keyword.",
+  "尚無先前話題。": "No earlier topics yet.",
+  "此話題尚無訊息。": "No messages in this topic yet.",
   引用: "Quote",
   前後文: "Surrounding messages",
   更早的搜尋結果: "Earlier results",
   瀏覽舊任務: "Browse previous tasks",
-  選擇話題: "Select a task",
+  選擇話題: "Select a topic",
   更早的訊息: "Earlier messages",
   "Context 用量": "Context usage",
   實際回報: "Reported",
@@ -424,11 +498,22 @@ export const english: Record<string, string> = {
   任務執行: "Task execution",
   "Bot 協作": "Bot collaboration",
   重設為預設值: "Reset to defaults",
+  返回範本: "Back to templates",
+  範本設定錯誤: "Template settings error",
+  編輯範本: "Edit template",
+  "Bot 頭像": "Bot avatar",
+  進階設定: "Advanced settings",
+  "變更只套用到之後從此範本建立的 Bot。":
+    "Changes apply to Bots created from this template in the future.",
   "移除此範本？既有 Bot 將保留。":
     "Remove this template? Existing Bots will be kept.",
   已不存在: "Unavailable",
   純文字: "Plain text",
   複製程式碼: "Copy code",
+  "複製中…": "Copying…",
+  程式碼已複製: "Code copied",
+  "無法複製，請選取程式碼後手動複製。":
+    "Copy failed. Select the code and copy it manually.",
   "程式碼，可左右捲動": "Code, scroll horizontally",
   "[圖片：{0}]": "[Image: {0}]",
   未提供說明: "No description provided",
@@ -510,8 +595,14 @@ export const english: Record<string, string> = {
   黃色方方: "Yellow cube",
   操作失敗: "Operation failed",
   已複製: "Copied",
+  訊息已複製: "Message copied",
+  "無法複製，請重試或選取訊息後手動複製。":
+    "Unable to copy. Try again or select the message and copy it manually.",
   複製失敗: "Copy failed",
   複製: "Copy",
+  此話題的附件與成果: "Attachments and results for this topic",
+  "此話題尚無附件或成果。": "No attachments or results for this topic yet.",
+  其他附件與成果: "Other attachments and results",
   "附件：{0}，工作區路徑：{1}": "Attachment: {0}, workspace path: {1}",
   "附件上限為 20 MB。": "Attachments must be 20 MB or smaller.",
   "請使用連接器「{0}」（ID：{1}）：": "Use connector “{0}” (ID: {1}):",
@@ -523,6 +614,10 @@ export const english: Record<string, string> = {
   "建立中…": "Creating…",
   對話: "Chats",
   "搜尋 Bot": "Search Bots",
+  清除搜尋: "Clear search",
+  搜尋歷史訊息: "Search history",
+  "搜尋 {0} 的歷史訊息": "Search message history for {0}",
+  "{0} 的歷史訊息": "Message history for {0}",
   搜尋: "Search",
   "搜尋對話或 Bot": "Search chats or Bots",
   "你的 Bots": "Your Bots",
@@ -563,6 +658,22 @@ export const english: Record<string, string> = {
   "你好，我是": "Hello, I’m",
   "告訴我你想完成什麼，我會在這裡接著做。":
     "Tell me what you want to accomplish, and I’ll work on it here.",
+  "先選好模型，就能開始。也可以先寫下需求。":
+    "Choose a model to get started. You can write your request first.",
+  選好模型後即可開始: "Choose a model to get started",
+  "設定模型，開始對話": "Choose a model to start chatting",
+  開始對話的範例: "Conversation examples",
+  "選一個開頭，再補上你的內容。":
+    "Choose a starting point, then add your details.",
+  研究一個主題: "Research a topic",
+  "比較資料，整理來源與結論": "Compare information, sources and findings",
+  整理一份文件: "Organize a document",
+  "摘要重點，整理成可用的內容": "Summarize key points into useful content",
+  修改程式碼: "Change some code",
+  說明要修改的地方與預期結果: "Describe the change and the expected result",
+  "幫我研究：": "Help me research:",
+  "幫我整理這份文件：": "Help me organize this document:",
+  "幫我修改程式：": "Help me change this code:",
   "幫我研究一個主題，整理來源與結論":
     "Research a topic and summarize the sources and findings",
   "讀取我的文件，整理成一份報告": "Read my documents and put together a report",
@@ -700,12 +811,38 @@ export const english: Record<string, string> = {
   "啟用排程（Apsis 需保持執行）": "Enable schedule (Apsis must remain running)",
   立即試跑: "Run now",
   儲存排程: "Save schedule",
+  工作設定: "Work settings",
+  專案目前無法使用: "Project unavailable",
+  "使用已儲存的內容試跑。": "Test the saved schedule contents.",
+  "試跑已交辦，可回到對話查看。":
+    "Test run submitted. View it in the conversation.",
   "儲存中…": "Saving…",
+  "尚無執行紀錄。": "No runs yet.",
+  紀錄無法取得: "Record unavailable",
+  排程執行結果: "Schedule run result",
+  "讀取逾時，請再試一次。": "Reading timed out. Try again.",
+  回覆摘要: "Reply summary",
+  "完整回覆目前無法取得，以下為保存的摘要。":
+    "The full reply is currently unavailable. This is the saved summary.",
+  "結果會在執行結束後更新。": "The result will update when the run ends.",
+  "這次執行沒有文字回覆。": "This run has no text reply.",
+  "目前無法取得這次任務的紀錄。":
+    "The record for this run is currently unavailable.",
   "執行紀錄（": "Run history (",
   "清單更新失敗：{0}": "Could not refresh the list: {0}",
   "已加入 {0} 個 MCP 連接器。": "Added {0} MCP connectors.",
   "已加入 {0} 個。": "Added {0}. ",
   "模型和工具供所有 Bots 使用。": "Configure models and tools for your Bots.",
+  "摘要達到生成上限，尚未完整產生；已保留原有對話狀態。請調整模型生成預算後重試。":
+    "The summary reached its generation limit before completion. The previous conversation state was preserved. Adjust the model generation budget and retry.",
+  "摘要沒有產生可用文字；已保留原有對話狀態。請重試或檢查模型設定。":
+    "The summary returned no usable text. The previous conversation state was preserved. Retry or check the model settings.",
+  "調整介面語言與執行方式。":
+    "Choose your interface language and execution preferences.",
+  "保存常用的 Bot 設定，方便下次建立。":
+    "Save reusable Bot settings for your next Bot.",
+  "管理所有 Bot 共用的模型連線。":
+    "Manage model connections shared by all Bots.",
   關閉設定: "Close settings",
   "MCP 連接器": "MCP connectors",
   "連接支援 Streamable HTTP 的 MCP 服務。工具執行前會出現核准卡片。":
@@ -785,6 +922,8 @@ export const english: Record<string, string> = {
   連線設定: "Connection settings",
   "例如：公司模型服務": "Example: company model service",
   "API 網址": "API URL",
+  "留白使用官方 API 網址；也可填入代理或自架服務的 Base URL。":
+    "Leave blank to use the official API URL, or enter a proxy or self-hosted Base URL.",
   "網址變更後不會沿用原金鑰，請重新填寫。":
     "Changing the URL clears the saved key. Please enter it again.",
   "輸入 API key（無需驗證的端點可留白）":

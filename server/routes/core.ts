@@ -2,7 +2,6 @@ import {
   parseRequest,
   permissionPreviewSchema,
   settingsSchema,
-  drawSchema,
 } from "../request-schema.ts";
 import { repositoryInfo } from "../git-workspaces.ts";
 
@@ -12,7 +11,6 @@ import type { RouteDependencies, RequestContext } from "./contracts.ts";
 
 type Dependencies = Pick<
   RouteDependencies,
-  | "avatarCollection"
   | "bootstrap"
   | "bot"
   | "db"
@@ -96,13 +94,6 @@ export class CoreRoutes {
         reply(res, { ok: true });
         return true;
       }
-    }
-    if (path === "/avatar-collection/draw" && method === "POST") {
-      const input = parseRequest(drawSchema, await body(req));
-      const result = this.deps.avatarCollection.draw(input.requestId);
-      this.deps.notify();
-      reply(res, result);
-      return true;
     }
     if (path === "/state" && method === "GET") {
       reply(res, this.deps.snapshot());

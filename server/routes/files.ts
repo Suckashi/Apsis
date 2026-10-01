@@ -1,6 +1,7 @@
 import { parseRequest, fileRequestSchemas } from "../request-schema.ts";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
+import { previewDocx } from "../docx-preview.ts";
 
 import { fail, string, reply } from "../product-support.ts";
 
@@ -22,13 +23,17 @@ export class FileRoutes {
       return true;
     }
     const files = path.match(
-      /^\/work-locations\/([^/]+)\/(files|content|download|preview|directory|move|upload|trash|restore)$/,
+      /^\/work-locations\/([^/]+)\/(files|status|content|download|preview|directory|move|upload|trash|restore)$/,
     );
     if (files) {
       const id = files[1],
         action = files[2],
         filePath = url.searchParams.get("path") || "";
       if (method === "GET") {
+        if (action === "status") {
+          reply(res, await this.deps.files.status(id, filePath));
+          return true;
+        }
         if (action === "files") {
           reply(
             res,
@@ -58,6 +63,10 @@ export class FileRoutes {
           const full = await this.deps.files.download(id, filePath);
           const extension = extname(filePath).toLowerCase();
           if (action === "preview" && [".docx", ".xlsx"].includes(extension)) {
+            if (extension === ".docx") {
+              reply(res, await previewDocx(full));
+              return true;
+            }
             reply(res, {
               text: await this.deps.readDocument(
                 filePath,

@@ -1,0 +1,55 @@
+/* Small, standalone first paint; shares the application's appearance. */
+html,
+body {
+  margin: 0;
+}
+.boot-screen {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: #fcfcfd;
+  color: #18181b;
+  font:
+    14px/1.6 "Microsoft JhengHei UI",
+    system-ui,
+    sans-serif;
+  text-align: center;
+}
+[data-theme="dark"] .boot-screen {
+  background: #101013;
+  color: #fafafa;
+}
+.boot-screen h1 {
+  margin: 20px 0 4px;
+  font-size: 24px;
+  letter-spacing: -0.5px;
+}
+.boot-screen p {
+  margin: 4px 0;
+}
+.boot-screen a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 16px;
+  color: #6d28d9;
+}
+[data-theme="dark"] .boot-screen a {
+  color: #b59aff;
+}
+.boot-screen a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+.boot-en,
+html[lang="en"] .boot-zh {
+  display: none;
+}
+html[lang="en"] .boot-en {
+  display: inline;
+}

@@ -152,6 +152,122 @@ test("10,000-message history is paged, searchable in Chinese/English, isolated a
   assert.equal(db.message("owner", "m0")?.content, "台灣專案 evidence 0");
 });
 
+test("history combines literal terms within one scoped message and preserves quoted phrases", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "apsis-history-terms-"));
+  const db = new ConversationStore(dir);
+  t.after(() => db.db.close());
+  db.saveSession(session());
+  db.saveSession(session("other"));
+  const current = db.activeId("owner");
+  const append = (
+    id: string,
+    content: string,
+    owner = "owner",
+    context?: string,
+  ) =>
+    db.append(
+      owner,
+      { id, role: "assistant", content, status: "complete" },
+      context,
+    );
+  append(
+    "revision",
+    "已交付離線待辦清單・修正版，ReadMe 完整。檔案是 我的 提案.docx。",
+  );
+  append("separate-1", "待辦清單只有原版。");
+  append("separate-2", "修正版指的是其他文件。");
+  append("partial-file", "我的新提案.docx");
+  append("other-owner", "待辦清單 修正版 readme", "other");
+  const old = db.createContext("owner", "routine");
+  append("old-topic", "待辦清單 修正版 readme", "owner", old.id);
+  for (const query of [
+    "待辦清單 修正版",
+    "修正版 待辦清單",
+    "readme 修正版",
+    "待辦\t修正版",
+  ]) {
+    assert.deepEqual(
+      db.search(query, ["owner"], undefined, current).map((hit) => hit.id),
+      ["revision"],
+    );
+  }
+  assert.equal(
+    db.search('"待辦清單 修正版"', ["owner"], undefined, current).length,
+    0,
+  );
+  assert.deepEqual(
+    db
+      .search('"我的 提案.docx"', ["owner"], undefined, current)
+      .map((hit) => hit.id),
+    ["revision"],
+  );
+  assert.equal(
+    db.search("修正版 NOT readme", ["owner"], undefined, current).length,
+    0,
+  );
+  assert.equal(
+    db.search("待辦 不存在", ["owner"], undefined, current).length,
+    0,
+  );
+  for (let index = 0; index < 25; index++)
+    append("paged-" + index, "待辦清單 revision token");
+  const first = db.search("待辦 token", ["owner"], undefined, current);
+  assert.equal(first.length, 20);
+  const second = db.search(
+    "token 待辦",
+    ["owner"],
+    first.at(-1)!.sequence,
+    current,
+  );
+  assert.equal(second.length, 5);
+  assert.equal(new Set([...first, ...second].map((hit) => hit.id)).size, 25);
+});
+
+test("full history source restores both ends while search and neighbors stay bounded and scoped", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "apsis-history-source-"));
+  const db = new ConversationStore(directory);
+  t.after(() => db.db.close());
+  db.saveSession(session());
+  db.saveSession(session("other"));
+  const original =
+    "原文開頭\n" +
+    "內容🙂".repeat(1200) +
+    "\n找到完整原文\n" +
+    "後文".repeat(1000) +
+    "\n原文結尾";
+  db.append("owner", {
+    id: "long",
+    role: "assistant",
+    content: original,
+    createdAt: "2026-01-01",
+    status: "complete",
+  });
+  const [hit] = db.search("找到完整原文", ["owner"]);
+  assert.equal(hit.truncated, true);
+  assert.ok(hit.content.length <= 1500);
+  assert.ok(
+    !hit.content.includes("原文開頭") && !hit.content.includes("原文結尾"),
+  );
+  assert.equal(db.around(["owner"], hit.sequence)[0].truncated, true);
+  const full = db.fullMessage(["owner"], hit.sequence, hit.workContextId);
+  assert.equal(full.content, original);
+  assert.equal(full.truncated, false);
+  assert.throws(() => db.fullMessage(["other"], hit.sequence), /找不到訊息/);
+  assert.throws(
+    () => db.fullMessage(["owner"], hit.sequence, "another-context"),
+    /找不到訊息/,
+  );
+  for (const invalid of [0, -1, NaN, Infinity, 1.5, 999999])
+    assert.throws(() => db.fullMessage(["owner"], invalid), /找不到訊息/);
+  db.append("owner", {
+    id: "short",
+    role: "user",
+    content: "短原文",
+    status: "complete",
+  });
+  assert.equal(db.search("短原文", ["owner"])[0].truncated, false);
+});
+
 test("scratch rejects traversal and links to other contexts", async () => {
   const dir = await mkdtemp(join(tmpdir(), "apsis-scratch-scope-"));
   const root = join(dir, "private"),
@@ -457,6 +573,8 @@ test("overflow retries once, oversized input and summary failure preserve the la
   let normalCalls = 0,
     summaryCalls = 0,
     failSummary = false;
+  let summaryContent = "Preserve goal and unfinished proof";
+  let summaryFinishReason = "stop";
   const upstream = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
@@ -480,9 +598,9 @@ test("overflow retries once, oversized input and summary failure preserve the la
                   index: 0,
                   delta: {
                     role: "assistant",
-                    content: "Preserve goal and unfinished proof",
+                    content: summaryContent,
                   },
-                  finish_reason: "stop",
+                  finish_reason: summaryFinishReason,
                 },
               ],
             }) +
@@ -501,9 +619,9 @@ test("overflow retries once, oversized input and summary failure preserve the la
               index: 0,
               message: {
                 role: "assistant",
-                content: "Preserve goal and unfinished proof",
+                content: summaryContent,
               },
-              finish_reason: "stop",
+              finish_reason: summaryFinishReason,
             },
           ],
         }),
@@ -563,6 +681,34 @@ test("overflow retries once, oversized input and summary failure preserve the la
     store.conversations.load("owner").engineState,
     JSON.parse(JSON.stringify(saved)),
   );
+  failSummary = false;
+  for (const [content, finishReason, expected] of [
+    ["", "stop", /摘要沒有產生可用文字/],
+    ["Partial summary missing the constraints", "length", /摘要達到生成上限/],
+    ["", "length", /摘要達到生成上限/],
+  ] as const) {
+    summaryContent = content;
+    summaryFinishReason = finishReason;
+    const callsBeforeSummary: number = normalCalls;
+    await assert.rejects(
+      runDeep({
+        ...options,
+        signal: AbortSignal.timeout(15000),
+        modelSettings: { contextWindowTokens: 16384, maxOutputTokens: 1024 },
+      }),
+      expected,
+    );
+    assert.equal(
+      normalCalls,
+      callsBeforeSummary,
+      "do not continue with an invalid summary",
+    );
+    assert.deepEqual(
+      store.conversations.load("owner").engineState,
+      JSON.parse(JSON.stringify(saved)),
+      "retain the original checkpoint after incomplete summarization",
+    );
+  }
   const requests = normalCalls + summaryCalls;
   await assert.rejects(
     runDeep({ ...options, prompt: "巨大輸入".repeat(20000) }),

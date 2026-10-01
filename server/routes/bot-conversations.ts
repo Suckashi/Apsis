@@ -114,6 +114,16 @@ export class BotConversationRoutes {
       );
       return true;
     }
+    if (action === "history/message" && method === "GET") {
+      reply(
+        res,
+        history.fullMessage(
+          [bot.sessionId],
+          Number(url.searchParams.get("sequence")),
+        ),
+      );
+      return true;
+    }
     if (action === "history/around" && method === "GET") {
       reply(
         res,

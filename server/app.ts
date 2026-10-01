@@ -9,6 +9,7 @@ import {
 } from "./request-schema.ts";
 import { appDirectories, type DirectoryOptions } from "./app-directories.ts";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import {
   createServer,
@@ -29,6 +30,7 @@ import { Store } from "./store.ts";
 import { TaskService } from "./tasks.ts";
 import { Workspace } from "./workspace.ts";
 import { htmlPreviewRoute } from "./html-preview.ts";
+import { StaticAssets } from "./static-assets.ts";
 
 function fail(message: string, status = 400): never {
   throw Object.assign(new Error(message), { status });
@@ -67,6 +69,7 @@ function text(value: unknown, limit: number, label: string) {
 }
 
 export interface AppOptions extends DirectoryOptions {
+  browserBuild?: "development" | "production";
   globalSkillsDirectory?: string;
   worktreeRoot?: string;
   runner?: (options: RunOptions) => Promise<RunResult>;
@@ -81,6 +84,13 @@ export async function createApp(options: AppOptions = {}) {
   const connections = await new Connections(dataDir).init();
   const product = await new ProductService(tasks, connections).init();
   product.workspaces.worktreeRoot = worktreeRoot;
+  const staticAssets = new StaticAssets();
+  const browserAssets = new URL(
+    options.browserBuild === "development"
+      ? "../dist/public/"
+      : "../dist/production-public/",
+    import.meta.url,
+  );
 
   const server = createServer(async (req, res) => {
     const styleNonce = randomUUID().replaceAll("-", "");
@@ -127,6 +137,10 @@ export async function createApp(options: AppOptions = {}) {
           req.headers.host!,
           product.files,
           res,
+          {
+            get: (id) => product.db.artifacts.get(id),
+            root: join(tasks.store.directory, "artifacts"),
+          },
         ))
       )
         return;
@@ -138,10 +152,12 @@ export async function createApp(options: AppOptions = {}) {
           body,
         );
       if (
-        req.method === "GET" &&
+        ["GET", "HEAD"].includes(req.method || "") &&
         [
           "/",
           "/bot.js",
+          "/boot.js",
+          "/boot.css",
           "/bot.js.map",
           "/bot.css",
           "/providers.css",
@@ -153,11 +169,13 @@ export async function createApp(options: AppOptions = {}) {
           path === "/"
             ? new URL("../public/bot.html", import.meta.url)
             : path === "/bot.css" ||
+                path === "/boot.js" ||
+                path === "/boot.css" ||
                 path === "/providers.css" ||
                 path === "/files.css" ||
                 path === "/favicon.svg"
               ? new URL("../public" + path, import.meta.url)
-              : new URL("../dist/public" + path, import.meta.url);
+              : new URL(path.slice(1), browserAssets);
         const type = path.endsWith(".css")
           ? "text/css"
           : path.endsWith(".svg")
@@ -167,17 +185,19 @@ export async function createApp(options: AppOptions = {}) {
               : path.endsWith(".js")
                 ? "text/javascript"
                 : "text/html";
+        if (type !== "text/html")
+          return await staticAssets.serve(file, type, req, res);
         res.writeHead(200, { "Content-Type": type + "; charset=utf-8" });
         const data = await readFile(file);
         return res.end(
-          type === "text/html"
-            ? data
+          req.method === "HEAD"
+            ? undefined
+            : data
                 .toString("utf8")
                 .replace(
                   "</head>",
                   `<meta name="style-nonce" content="${styleNonce}"></head>`,
-                )
-            : data,
+                ),
         );
       }
       if (path === "/api/status" && req.method === "GET")

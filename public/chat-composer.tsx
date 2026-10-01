@@ -13,9 +13,13 @@ interface Props {
   botName: string;
   running: boolean;
   smallScreen: boolean;
-  status: React.ReactNode;
+  stopping: boolean;
+  stop: () => void;
   repairModel: () => void;
   hasModelOptions: boolean;
+  modelPicker: React.ReactNode;
+  approvalControl: React.ReactNode;
+  openOptions: () => void;
 }
 export function ChatComposer({
   composer,
@@ -24,10 +28,15 @@ export function ChatComposer({
   botName,
   running,
   smallScreen,
-  status,
+  stopping,
+  stop,
   repairModel,
   hasModelOptions,
+  modelPicker,
+  approvalControl,
+  openOptions,
 }: Props) {
+  const suggestionList = React.useRef<HTMLDivElement>(null);
   const {
     retryOf,
     setRetryOf,
@@ -42,6 +51,8 @@ export function ChatComposer({
     setDismissedSuggestion,
     input,
     busy,
+    contextChanging,
+    networkOffline,
     text,
     setText,
     setCaret,
@@ -52,9 +63,16 @@ export function ChatComposer({
     connectorChoices,
     insertChoice,
   } = composer;
+  const firstConversation =
+    !!detail && !detail.session.messages.length && !running;
+  const hasMessage =
+    !!text.trim() || !!attachments.length || !!fileReferences.length;
+  const stopAction = running && !hasMessage && !busy;
+  const actionLabel = uiText(
+    stopAction ? "停止回覆" : running ? "補充指示" : "傳送",
+  );
   return (
     <ComposerFrame as="div" className="composer-card">
-      {status}
       <div className="composer">
         {retryOf && (
           <div className="reply-chip">
@@ -89,9 +107,9 @@ export function ChatComposer({
             {fileReferences.map((ref) => (
               <span key={ref.locationId + ref.path}>
                 <Icon name="file" size={14} />
-                {ref.path}
+                {ref.label || ref.path}
                 <button
-                  aria-label={uiText("移除 {0}", [ref.path])}
+                  aria-label={uiText("移除 {0}", [ref.label || ref.path])}
                   onClick={() =>
                     setFileReferences((old) => old.filter((r) => r !== ref))
                   }
@@ -123,16 +141,52 @@ export function ChatComposer({
         {!!suggestions?.length && (
           <div
             className="suggestions"
+            ref={suggestionList}
+            role="group"
+            aria-label={uiText("輸入建議")}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
+                event.stopPropagation();
                 setDismissedSuggestion(true);
                 input.current?.focus();
+              } else if (
+                ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
+              ) {
+                const buttons = Array.from(
+                  event.currentTarget.querySelectorAll("button"),
+                );
+                const index = buttons.indexOf(
+                  event.target as HTMLButtonElement,
+                );
+                if (index < 0) return;
+                event.preventDefault();
+                if (event.key === "ArrowUp" && index === 0)
+                  input.current?.focus();
+                else
+                  buttons[
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? buttons.length - 1
+                        : event.key === "ArrowDown"
+                          ? (index + 1) % buttons.length
+                          : index - 1
+                  ]?.focus();
               }
             }}
           >
+            {!smallScreen && (
+              <p className="suggestions-help">
+                {uiText("方向鍵選擇 · Enter 插入 · Esc 關閉")}
+              </p>
+            )}
             {suggestions.map((s) => (
-              <button key={s.id} onClick={() => insertChoice(s.value, true)}>
+              <button
+                type="button"
+                key={s.id}
+                onClick={() => insertChoice(s.value, true)}
+              >
                 {s.name}
               </button>
             ))}
@@ -175,8 +229,8 @@ export function ChatComposer({
               !e.nativeEvent.isComposing
             ) {
               e.preventDefault();
-              document
-                .querySelector<HTMLButtonElement>(".suggestions button")
+              suggestionList.current
+                ?.querySelector<HTMLButtonElement>("button")
                 ?.focus();
               return;
             }
@@ -198,32 +252,49 @@ export function ChatComposer({
         />
         <div className="composer-actions">
           <div className="composer-tools">
-            <ComposerPopover
-              label={
-                <>
-                  <Icon name="plus" size={18} />
-                  <span>{uiText("工具")}</span>
-                </>
-              }
-            >
+            {!smallScreen && connectorChoices.length === 0 ? (
               <button
-                disabled={busy || !detail}
-                onClick={(e) => {
-                  e.currentTarget.closest("details")!.open = false;
-                  upload.current?.click();
-                }}
+                type="button"
+                className="composer-attach"
+                aria-label={uiText("新增附件")}
+                title={uiText("新增附件")}
+                disabled={busy || contextChanging || networkOffline || !detail}
+                onClick={() => upload.current?.click()}
               >
                 <Icon name="attach" size={18} />
-                {uiText("新增附件")}
               </button>
-              {[{ label: "連接器 @", items: connectorChoices }].map((group) => (
-                <section key={group.label} aria-label={uiText(group.label)}>
-                  <h3>{uiText(group.label)}</h3>
-                  {group.items.length ? (
-                    group.items.map((item) => (
+            ) : (
+              <ComposerPopover
+                label={
+                  <>
+                    <Icon name="plus" size={18} />
+                    <span className="visually-hidden">{uiText("工具")}</span>
+                  </>
+                }
+              >
+                <button
+                  disabled={
+                    busy || contextChanging || networkOffline || !detail
+                  }
+                  onClick={(e) => {
+                    const tools = e.currentTarget.closest("details")!;
+                    tools.open = false;
+                    tools.querySelector("summary")?.focus();
+                    upload.current?.click();
+                  }}
+                >
+                  <Icon name="attach" size={18} />
+                  {uiText("新增附件")}
+                </button>
+                {connectorChoices.length > 0 && (
+                  <section aria-label={uiText("連接器 @")}>
+                    <h3>{uiText("連接器 @")}</h3>
+                    {connectorChoices.map((item) => (
                       <button
                         key={item.id}
-                        disabled={busy || !detail}
+                        disabled={
+                          busy || contextChanging || networkOffline || !detail
+                        }
                         onClick={(e) => {
                           e.currentTarget.closest("details")!.open = false;
                           insertChoice(item.value);
@@ -231,48 +302,82 @@ export function ChatComposer({
                       >
                         {item.name}
                       </button>
-                    ))
-                  ) : (
-                    <p>{uiText("尚未設定")}</p>
-                  )}
-                </section>
-              ))}
-            </ComposerPopover>
+                    ))}
+                  </section>
+                )}
+              </ComposerPopover>
+            )}
+            {approvalControl}
           </div>
           <div className="composer-send-actions">
+            {smallScreen ? (
+              <button
+                className="mobile-compose-options"
+                onClick={openOptions}
+                aria-label={uiText("聊天選項")}
+              >
+                <Icon name="settings" size={18} />
+              </button>
+            ) : (
+              modelPicker
+            )}
             <button
               className={`send ${running ? "queue-send" : ""}`}
-              aria-label={running ? uiText("補充指示") : uiText("傳送")}
-              title={running ? uiText("補充指示") : uiText("傳送")}
+              aria-label={actionLabel}
+              title={stopping ? uiText("正在停止…") : actionLabel}
+              aria-busy={(stopAction && stopping) || undefined}
               disabled={
+                stopping ||
                 busy ||
+                contextChanging ||
+                networkOffline ||
                 !detail ||
                 !!detail.contextSetupError ||
-                (!text.trim() && !attachments.length)
+                (!stopAction && !hasMessage)
               }
-              onClick={() => void send()}
+              onClick={() => (stopAction ? stop() : void send())}
             >
-              {busy ? <ActivityMark /> : <Icon name="send" size={18} />}
+              {busy || stopping ? (
+                <ActivityMark />
+              ) : (
+                <Icon name={stopAction ? "stop" : "send"} size={18} />
+              )}
             </button>
           </div>
         </div>
         <input
           ref={upload}
           type="file"
-          className="visually-hidden"
+          hidden
+          aria-label={uiText("選擇附件")}
           multiple
           accept=".txt,.md,.csv,.pdf,.docx,.xlsx,.png,.jpg,.jpeg"
           onChange={(e) => void uploadFiles(e.target.files)}
         />
       </div>
       {detail?.contextSetupError && (
-        <div role="status" className="model-setup-notice">
-          <ActivityMark state="failed" />
+        <div
+          role="status"
+          className={`model-setup-notice ${firstConversation ? "setup-required" : ""}`}
+        >
+          {firstConversation ? (
+            <Icon name="settings" size={20} />
+          ) : (
+            <ActivityMark state="failed" />
+          )}
           <span>
-            <strong>{uiText("目前無法開始工作")}</strong>
+            <strong>
+              {uiText(
+                firstConversation ? "設定模型，開始對話" : "目前無法開始工作",
+              )}
+            </strong>
             <small>{uiError(detail.contextSetupError)}</small>
           </span>
-          <button type="button" onClick={repairModel}>
+          <button
+            type="button"
+            className={firstConversation ? "primary" : undefined}
+            onClick={repairModel}
+          >
             {uiText(hasModelOptions ? "修正此 Bot 的模型" : "設定模型連線")}
           </button>
         </div>

@@ -50,11 +50,6 @@ test("HTTP mutations reject unknown fields and wrong types before changing store
       { botId: bot.id, tool: "shell", args: [], extra: true },
     ],
     [
-      "/api/v2/avatar-collection/draw",
-      "POST",
-      { requestId: "draw-request-123456", extra: true },
-    ],
-    [
       "/api/v2/connectors",
       "POST",
       { name: "c", url: "http://127.0.0.1:1", token: false },

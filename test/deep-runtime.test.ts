@@ -6,15 +6,27 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { checkpoint, restoreCheckpoint } from "../server/context-checkpoint.ts";
 import { runAgent } from "../server/agent.ts";
 import { Store } from "../server/store.ts";
 import { Workspace } from "../server/workspace.ts";
 import { createTools } from "../server/tools.ts";
 import { toolSchema } from "../server/engines/common.ts";
-import type { AgentDefinition, Session } from "../shared/types.ts";
+import type {
+  AgentDefinition,
+  Session,
+  ToolOperation,
+} from "../shared/types.ts";
 
 test("Deep Agents streams, reads a real workspace file, and continues saved history", async (t) => {
   const requests: Record<string, any>[] = [];
+  const preparation: string[] = [];
+  const operations: ToolOperation[] = [];
+  let releaseArguments!: () => void;
+  const argumentGate = new Promise<void>((resolve) => {
+    releaseArguments = resolve;
+  });
   const upstream = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -37,10 +49,14 @@ test("Deep Agents streams, reads a real workspace file, and continues saved hist
             type: "function",
             function: {
               name: "workspace_read_file",
-              arguments: '{"path":"proof.txt"}',
+              arguments: '{"path":',
             },
           },
         ],
+      });
+      await argumentGate;
+      send({
+        tool_calls: [{ index: 0, function: { arguments: '"proof.txt"}' } }],
       });
       send({}, "tool_calls");
     } else {
@@ -99,7 +115,28 @@ test("Deep Agents streams, reads a real workspace file, and continues saved hist
     signal: AbortSignal.timeout(10000),
     emit: () => {},
   };
-  const first = await runAgent({ ...base, prompt: "Read proof.txt" });
+  const first = await runAgent({
+    ...base,
+    prompt: "Read proof.txt",
+    recordOperation: async (operation) => {
+      operations.push(operation);
+    },
+    emit: (event) => {
+      if (event.type === "progress" && event.text?.startsWith("正在準備")) {
+        preparation.push(event.text);
+        assert.equal(
+          operations.length,
+          0,
+          "incomplete streamed arguments have not executed a tool",
+        );
+        releaseArguments();
+      }
+    },
+  });
+  assert.deepEqual(preparation, ["正在準備讀取文件（尚未執行）"]);
+  assert.ok(
+    operations.some((o) => o.name === "read_file" && o.status === "succeeded"),
+  );
   assert.match(first.text, /PROOF-4521/);
   assert.equal(requests.length, 2);
   assert.match(JSON.stringify(requests[1].messages), /PROOF-4521/);
@@ -108,6 +145,35 @@ test("Deep Agents streams, reads a real workspace file, and continues saved hist
   assert.match(second.text, /PROOF-4521/);
   assert.equal(requests.length, 3);
   assert.match(JSON.stringify(requests[2].messages), /Evidence PROOF-4521/);
+  const prior = restoreCheckpoint(second.engineState)!;
+  const olderCss =
+    "Earlier fixture CSS used color: var(--done), with body inheritance.\n";
+  session.engineState = checkpoint({
+    messages: [
+      ...prior.messages,
+      ...Array.from({ length: 12 }, (_, index) => [
+        new HumanMessage(`Earlier fixture question ${index}: ${olderCss}`),
+        new AIMessage(olderCss.repeat(100)),
+      ]).flat(),
+    ],
+  });
+  const latestCss =
+    "Confirm the CSS pasted in this message. Do not modify files.\n\n" +
+    "```css\n.task__text { color: #1f2733; }\n" +
+    ".task.is-done .task__text { color: #606975; text-decoration: line-through; }\n```";
+  await runAgent({ ...base, prompt: latestCss });
+  assert.equal(requests.length, 4);
+  const latestWireUser = requests[3].messages.findLast(
+    (message: { role: string }) => message.role === "user",
+  );
+  assert.equal(latestWireUser.content, latestCss);
+  assert.ok(
+    requests[3].messages.some(
+      (message: { role: string; content: string }) =>
+        message.role === "assistant" && message.content.includes(olderCss),
+    ),
+    "the long prior history is present while current fenced input remains exact",
+  );
 });
 
 test("workspace edit tool uses structured Deep Agents arguments and records a patch", async () => {

@@ -62,10 +62,11 @@ export class BotAssetRoutes {
         this.deps.db.artifacts.get(string(input.artifactId, 100)) ||
         fail("找不到成果。", 404);
       if (artifact.botId !== bot.id) fail("找不到成果。", 404);
+      const snapshots = new Workspace(
+        join(this.deps.tasks.store.directory, "artifacts"),
+      );
       const source = artifact.snapshotPath
-        ? await new Workspace(
-            join(this.deps.tasks.store.directory, "artifacts"),
-          ).resolve(artifact.snapshotPath)
+        ? await snapshots.resolve(artifact.snapshotPath)
         : await this.deps.tasks.workspace.resolve(artifact.path);
       const data = await readFile(source);
       if (
@@ -77,8 +78,30 @@ export class BotAssetRoutes {
         bot.sessionId,
         contextId,
       );
-      const path = `references/${randomUUID()}/${basename(artifact.path)}`;
-      await this.deps.files.upload(location.id, path, data);
+      const prefix = `references/${randomUUID()}`;
+      const path = `${prefix}/${artifact.bundle?.entry || basename(artifact.path)}`;
+      if (artifact.bundle) {
+        for (const file of artifact.bundle.files) {
+          if (
+            this.deps.tasks.store.conversations.activeId(bot.sessionId) !==
+            contextId
+          )
+            fail("目前話題已變更，請重新載入。", 409);
+          const content = await readFile(
+            await snapshots.resolve(file.snapshotPath),
+          );
+          await this.deps.files.upload(
+            location.id,
+            `${prefix}/${file.path}`,
+            content,
+          );
+        }
+      } else await this.deps.files.upload(location.id, path, data);
+      if (
+        this.deps.tasks.store.conversations.activeId(bot.sessionId) !==
+        contextId
+      )
+        fail("目前話題已變更，請重新載入。", 409);
       this.deps.notify(bot.id);
       reply(res, {
         locationId: location.id,

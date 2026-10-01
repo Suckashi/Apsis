@@ -1,4 +1,5 @@
 import test from "node:test";
+import { previewEscapeScript } from "../shared/preview-escape.ts";
 import assert from "node:assert/strict";
 import {
   mkdtemp,
@@ -101,9 +102,10 @@ test("HTML preview scopes opaque-origin asset access and keeps application APIs 
     response.headers.get("content-type"),
     "text/html; charset=utf-8",
   );
-  assert.equal(await response.text(), "<h1>Preview</h1>");
+  assert.equal(await response.text(), `<h1>Preview</h1>${previewEscapeScript}`);
   const csp = response.headers.get("content-security-policy")!;
-  assert.match(csp, /sandbox allow-scripts/);
+  assert.match(csp, /sandbox allow-scripts allow-forms/);
+  assert.match(csp, /form-action 'none'/);
   assert.doesNotMatch(csp, /allow-same-origin/);
   assert.match(csp, /connect-src 'none'/);
   assert.match(csp, /frame-ancestors 'self'/);
@@ -240,6 +242,63 @@ test("plain chat stays lazy; new tasks isolate files, history and memory while r
   assert.equal(
     history.content[0].type === "text" && history.content[0].text,
     "[]",
+  );
+  const scopedRun = {
+    ...seen.at(-1)!,
+    executeAuthorizedTool: undefined,
+    authorize: undefined,
+    checkToolPermission: undefined,
+  };
+  // A compacted checkpoint must not erase the archive or widen its scope.
+  f.store.conversations.saveCheckpoint(
+    bot.sessionId,
+    scopedRun.historyContextId!,
+    {
+      marker: "summary omits the exact task name",
+    },
+  );
+  const currentHistory = await call(scopedRun, "search_history", {
+    query: "beta-secret",
+  });
+  assert.equal(currentHistory.content[0].type, "text");
+  const hits = JSON.parse(
+    (currentHistory.content[0] as { type: "text"; text: string }).text,
+  );
+  assert.ok(hits.length > 0);
+  assert.ok(
+    hits.every(
+      (hit: { workContextId: string }) =>
+        hit.workContextId === scopedRun.historyContextId,
+    ),
+  );
+  const surrounding = await call(scopedRun, "read_history", {
+    sequence: String(hits[0].sequence),
+  });
+  assert.equal(surrounding.content[0].type, "text");
+  const neighbors = JSON.parse(
+    (surrounding.content[0] as { type: "text"; text: string }).text,
+  );
+  assert.ok(
+    neighbors.some(
+      (hit: { content: string }) => hit.content === "answer beta-secret",
+    ),
+  );
+  assert.ok(
+    neighbors.every(
+      (hit: { workContextId: string; content: string }) =>
+        hit.workContextId === scopedRun.historyContextId &&
+        !hit.content.includes("alpha-secret"),
+    ),
+  );
+  const oldHit = f.store.conversations.search(
+    "alpha-secret",
+    [bot.sessionId],
+    undefined,
+    oldContext,
+  )[0];
+  await assert.rejects(
+    call(scopedRun, "read_history", { sequence: String(oldHit.sequence) }),
+    /找不到訊息/,
   );
   const stale = await f.request(`/bots/${bot.id}/messages`, "POST", {
     prompt: "wrong task",

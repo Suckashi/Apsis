@@ -35,6 +35,11 @@ Connection APIs accept optional `modelSettings`, keyed by selected model ID:
 `displayName` and `maxOutputTokens`. The latter defaults to 4096. No inference of
 reasoning support from names and no additional model calls are used.
 
+All provider forms expose an API URL. OpenAI and Anthropic use their official
+endpoints when the field is blank and accept a custom `baseUrl` for proxies or
+self-hosted services. Changing the endpoint clears the saved credential unless
+a new API key is supplied.
+
 ## Permissions and selections
 
 Rules match exact tool names (or `*`), optional workspace-relative file/directory

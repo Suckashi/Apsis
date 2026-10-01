@@ -31,6 +31,7 @@ export const botUpdateSchema = z.strictObject({
   pinned: z.boolean().optional(),
   hidden: z.boolean().optional(),
   read: z.boolean().optional(),
+  readMessageId: text(100).optional(),
 }) satisfies z.ZodType<BotUpdateRequest>;
 export const templateSchema = z.strictObject({
   ...profile,
@@ -98,7 +99,6 @@ export const permissionPreviewSchema = z.strictObject({
   args: z.record(z.string(), z.unknown()),
   runId: id.optional(),
 });
-export const drawSchema = z.strictObject({ requestId: id });
 export const takeoverSchema = z.strictObject({ take: z.boolean() });
 export const artifactReferenceSchema = z.strictObject({
   contextId: id,

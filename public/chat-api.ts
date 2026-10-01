@@ -3,6 +3,7 @@ export async function api<T>(
   path: string,
   method = "GET",
   body?: unknown,
+  options?: { signal?: AbortSignal },
 ): Promise<T> {
   const response = await fetch(
     path.startsWith("/api/") ? path : "/api/v2" + path,
@@ -10,6 +11,7 @@ export async function api<T>(
       method,
       headers: { "Content-Type": "application/json", "X-Apsis-Client": "1" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: options?.signal,
     },
   );
   const data = await response.json();

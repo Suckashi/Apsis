@@ -5,9 +5,12 @@ import {
   connectorSchema,
 } from "../request-schema.ts";
 import { randomUUID } from "node:crypto";
+import { previewEscapeScript } from "../../shared/preview-escape.ts";
 
-import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { join, resolve, extname } from "node:path";
+import type { ArtifactPreview } from "../../shared/api.ts";
+import { previewDocx } from "../docx-preview.ts";
 
 import { Workspace } from "../workspace.ts";
 
@@ -27,9 +30,11 @@ type Dependencies = Pick<
   | "decide"
   | "notify"
   | "policy"
+  | "readDocument"
   | "routine"
   | "runRoutine"
   | "tasks"
+  | "htmlPreview"
   | "writableBot"
 >;
 export class OperationRoutes {
@@ -126,22 +131,133 @@ export class OperationRoutes {
         return true;
       }
     }
-    const artifact = path.match(/^\/artifacts\/([^/]+)$/);
+    const artifact = path.match(/^\/artifacts\/([^/]+)(?:\/(preview|view))?$/);
     if (artifact && method === "GET") {
       const a =
         this.deps.db.artifacts.get(artifact[1]) || fail("找不到檔案。", 404);
-      const data = await readFile(
-        a.snapshotPath
-          ? await new Workspace(
-              join(this.deps.tasks.store.directory, "artifacts"),
-            ).resolve(a.snapshotPath)
-          : await this.deps.tasks.workspace.resolve(a.path),
-      );
+      if (artifact[2] && !a.snapshotPath) {
+        // A live-file reference cannot prove the delivered version.
+        if (artifact[2] === "preview")
+          reply(res, { kind: "download" } satisfies ArtifactPreview);
+        else fail("此格式不支援預覽。", 415);
+        return true;
+      }
+      const workspace = a.snapshotPath
+        ? new Workspace(join(this.deps.tasks.store.directory, "artifacts"))
+        : a.location
+          ? this.deps.tasks.locations.workspace(a.location)
+          : this.deps.tasks.workspace;
+      const downloadBundle = !artifact[2] && a.bundle;
+      const storedPath = downloadBundle
+        ? a.bundle!.archivePath
+        : a.snapshotPath || a.path;
+      const file = await workspace.resolve(storedPath);
+      const extension = extname(a.path).toLowerCase();
+      const imageTypes: Record<string, string> = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".avif": "image/avif",
+      };
+      if (artifact[2] === "preview") {
+        // Read only the published snapshot; never substitute the live work file.
+        const size = (await stat(file)).size;
+        let preview: ArtifactPreview;
+        if (size > 20 * 1024 * 1024) preview = { kind: "download" };
+        else if (imageTypes[extension]) preview = { kind: "image" };
+        else if (extension === ".pdf") preview = { kind: "pdf" };
+        else if ([".docx", ".xlsx"].includes(extension)) {
+          if (extension === ".docx") {
+            const document = await previewDocx(file);
+            reply(res, {
+              kind: "document",
+              content: document.text,
+              document: document.document,
+              truncated: document.truncated,
+            } satisfies ArtifactPreview);
+            return true;
+          }
+          const document = await this.deps.readDocument(storedPath, workspace);
+          const content =
+            typeof document === "string"
+              ? document
+              : JSON.stringify(document, null, 2);
+          preview = {
+            kind: "document",
+            content: content.slice(0, 100000),
+            truncated: content.length > 100000,
+          };
+        } else if (
+          size <= 1024 * 1024 &&
+          /\.(md|txt|csv|json|log|html?|css|js|ts|py|yaml|yml|toml)$/i.test(
+            a.path,
+          )
+        ) {
+          preview = {
+            kind:
+              extension === ".md"
+                ? "markdown"
+                : /\.html?$/i.test(extension)
+                  ? "html"
+                  : "text",
+            content: await readFile(file, "utf8"),
+            truncated: false,
+            ...(a.bundle
+              ? {
+                  previewUrl: this.deps.htmlPreview.url(
+                    `artifact-${a.id}`,
+                    a.bundle.entry,
+                  ),
+                }
+              : {}),
+          };
+        } else preview = { kind: "download" };
+        reply(res, preview);
+        return true;
+      }
+      const inline = artifact[2] === "view";
+      if (inline && a.bundle) {
+        res.writeHead(302, {
+          Location: this.deps.htmlPreview.url(
+            `artifact-${a.id}`,
+            a.bundle.entry,
+          ),
+          "Cache-Control": "no-store",
+          "Referrer-Policy": "no-referrer",
+        });
+        res.end();
+        return true;
+      }
+      const html = /\.html?$/i.test(extension);
+      if (inline && !imageTypes[extension] && extension !== ".pdf" && !html)
+        fail("此格式不支援預覽。", 415);
+      const data = await readFile(file);
       res.writeHead(200, {
-        "Content-Type": a.mime,
-        "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(a.name)}`,
+        "Content-Type": inline
+          ? html
+            ? "text/html; charset=utf-8"
+            : imageTypes[extension] || "application/pdf"
+          : downloadBundle
+            ? "application/zip"
+            : a.mime,
+        "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(downloadBundle ? a.name.replace(/\.html?$/i, "") + ".zip" : a.name)}`,
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy":
+          inline && html
+            ? "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+            : extension === ".pdf"
+              ? "default-src 'none'"
+              : "default-src 'none'; sandbox",
+        "Referrer-Policy": "no-referrer",
+        "Cache-Control": "no-store",
       });
-      res.end(data);
+      res.end(
+        inline && html
+          ? Buffer.concat([data, Buffer.from(previewEscapeScript)])
+          : data,
+      );
       return true;
     }
     if (path === "/connectors" && method === "POST") {

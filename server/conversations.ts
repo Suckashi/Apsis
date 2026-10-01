@@ -17,6 +17,8 @@ const fail = (message: string, status = 404): never => {
   throw Object.assign(new Error(message), { status });
 };
 export interface HistoryHit {
+  createdAt?: string;
+  truncated?: boolean;
   id: string;
   sessionId: string;
   workContextId: string;
@@ -367,17 +369,30 @@ export class ConversationStore {
     if (clean.length < 2 || clean.length > 200)
       fail("查詢需為 2–200 字。", 400);
     if (!sessionIds.length) return [];
-    const trigram = [...clean].length >= 3;
-    const condition = trigram
-      ? "m.seq IN (SELECT rowid FROM history_fts WHERE history_fts MATCH ?)"
-      : "instr(lower(m.content),lower(?))>0";
+    const terms = [
+      ...new Set(
+        Array.from(
+          clean.matchAll(/"([^"]+)"|(\S+)/gu),
+          (match) => match[1] ?? match[2],
+        ),
+      ),
+    ];
+    const condition = terms
+      .map((term) =>
+        [...term].length >= 3
+          ? "m.seq IN (SELECT rowid FROM history_fts WHERE history_fts MATCH ?)"
+          : "instr(lower(m.content),lower(?))>0",
+      )
+      .join(" AND ");
     const args: SQLInputValue[] = [
       ...sessionIds,
       contextId ?? null,
       contextId ?? null,
       before ?? null,
       before ?? null,
-      trigram ? '"' + clean.replaceAll('"', '""') + '"' : clean,
+      ...terms.map((term) =>
+        [...term].length >= 3 ? '"' + term.replaceAll('"', '""') + '"' : term,
+      ),
     ];
     return this.db
       .prepare(
@@ -385,28 +400,45 @@ export class ConversationStore {
       AND (? IS NULL OR m.context_id=?) AND (m.channel='chat' OR m.role='tool') AND (? IS NULL OR m.seq<?) AND ${condition} ORDER BY m.seq DESC LIMIT 20`,
       )
       .all(...args)
-      .map((row) => this.hit(row, clean));
+      .map((row) => this.hit(row, terms[0]));
   }
-  private hit(row: any, query = ""): HistoryHit {
+  private hit(row: any, query = "", complete = false): HistoryHit {
     const text = String(row.content);
+    const start = Math.max(
+      0,
+      text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) - 160,
+    );
+    const content = complete ? text : text.slice(start, start + 1500);
     return {
       id: String(row.id),
+      createdAt: (JSON.parse(String(row.value)) as ChatMessage).createdAt,
       sessionId: String(row.session_id),
       workContextId: String(row.context_id),
       role: String(row.role),
       sequence: Number(row.seq),
       channel: String(row.channel),
-      content: text.slice(
-        Math.max(
-          0,
-          text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) - 160,
-        ),
-        Math.max(
-          0,
-          text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) - 160,
-        ) + 1500,
-      ),
+      content,
+      truncated: content !== text,
     };
+  }
+  fullMessage(
+    sessionIds: string[],
+    sequence: number,
+    contextId?: string,
+  ): HistoryHit {
+    if (!Number.isSafeInteger(sequence) || sequence < 1)
+      return fail("找不到訊息。");
+    const row = this.db
+      .prepare("SELECT * FROM messages WHERE seq=?")
+      .get(sequence);
+    if (
+      !row ||
+      !sessionIds.includes(String(row.session_id)) ||
+      (contextId && row.context_id !== contextId) ||
+      (row.channel !== "chat" && row.role !== "tool")
+    )
+      return fail("找不到訊息。");
+    return this.hit(row, "", true);
   }
   around(
     sessionIds: string[],

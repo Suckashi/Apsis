@@ -11,7 +11,6 @@ import { ProductDB } from "./product-db.ts";
 import { BotBrowser } from "./bot-browser.ts";
 
 import { McpConfig } from "./mcp-config.ts";
-import { AvatarCollectionService } from "./avatar-collection.ts";
 import { taskPresentation } from "./task-progress.ts";
 
 import type { ExecutionState } from "./execution-state.ts";
@@ -19,7 +18,6 @@ import type { BotService } from "./bot-service.ts";
 import { fail } from "./product-support.ts";
 
 interface Dependencies {
-  avatarCollection: AvatarCollectionService;
   bot: BotService["bot"];
   browser: BotBrowser;
   connections: Connections;
@@ -44,13 +42,21 @@ export class ProductQueries {
       projects: this.deps.tasks.projects
         .list()
         .filter((p) => p.id !== "workspace"),
-      avatarCollection: this.deps.avatarCollection.view(),
       bots: this.deps.db.bots
         .list()
         .filter((b) => !b.deletedAt)
         .map((bot) => {
           const session = this.deps.tasks.view(bot.sessionId);
           const jobs = allJobs.filter((j) => j.botId === bot.id);
+          const latestMessage = session.messages.at(-1);
+          const updatedAt = [
+            bot.createdAt,
+            jobs.at(-1)?.createdAt,
+            latestMessage?.createdAt,
+          ]
+            .filter((at): at is string => !!at)
+            .sort()
+            .at(-1)!;
           const approval = approvals.some(
             (a) => a.botId === bot.id && a.status === "pending",
           );
@@ -70,12 +76,12 @@ export class ProductQueries {
                   : "idle",
             lastMessage:
               session.live?.text ||
-              session.messages.at(-1)?.content ||
+              latestMessage?.content ||
               "傳個訊息，開始聊聊",
-            updatedAt: jobs.at(-1)?.createdAt || bot.createdAt,
+            updatedAt,
             unread:
-              session.messages.at(-1)?.role === "assistant" &&
-              (jobs.at(-1)?.createdAt || "") > bot.readAt,
+              latestMessage?.role === "assistant" &&
+              (latestMessage.createdAt || "") > bot.readAt,
           };
         }),
       connections: this.deps.connections.view(),

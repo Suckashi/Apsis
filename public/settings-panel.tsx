@@ -1,7 +1,7 @@
 import { api } from "./chat-api.ts";
 
 import { uiText } from "./settings-dictionary.ts";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
 
 import { Modal } from "./bot-ui.tsx";
 import type { Snapshot } from "../shared/api.ts";
@@ -17,11 +17,13 @@ export function Settings({
   state,
   close,
   refresh,
+  fallbackFocus,
 }: {
   state: Snapshot;
   close: () => void;
   refresh: () => Promise<void>;
   report: (text: string) => void;
+  fallbackFocus?: RefObject<HTMLElement | null>;
 }) {
   useSettingsLocale();
   const [tab, setTab] = useState("models");
@@ -41,12 +43,24 @@ export function Settings({
     return () => window.removeEventListener("beforeunload", prevent);
   }, [dirty]);
   return (
-    <Modal label={t("settings")} close={guardedClose}>
+    <Modal
+      label={t("settings")}
+      close={guardedClose}
+      fallbackFocus={fallbackFocus}
+    >
       <section className="modal settings-modal">
         <header>
           <div>
             <h2>{t("settings")}</h2>
-            <p>{uiText("模型和工具供所有 Bots 使用。")}</p>
+            <p>
+              {uiText(
+                tab === "general"
+                  ? "調整介面語言與執行方式。"
+                  : tab === "templates"
+                    ? "保存常用的 Bot 設定，方便下次建立。"
+                    : "管理所有 Bot 共用的模型連線。",
+              )}
+            </p>
           </div>
           <button
             className="icon"
@@ -57,12 +71,12 @@ export function Settings({
           </button>
         </header>
         <div className="settings-layout">
-          <nav className="settings-tabs">
+          <nav className="settings-tabs" aria-label={uiText("設定分類")}>
             {[
-              ["general", t("general")],
-              ["models", t("models")],
-              ["templates", t("templates")],
-            ].map(([id, label]) => (
+              ["general", t("general"), "settings"],
+              ["models", t("models"), "spark"],
+              ["templates", t("templates"), "file"],
+            ].map(([id, label, icon]) => (
               <button
                 key={id}
                 className={tab === id ? "selected" : ""}
@@ -71,26 +85,20 @@ export function Settings({
                   if (id !== tab && canLeave()) setTab(id);
                 }}
               >
-                {label}
+                <Icon name={icon} size={18} />
+                <span>{label}</span>
               </button>
             ))}
           </nav>
-          <div className="settings-content">
+          <div
+            className={`settings-content ${tab === "general" ? "settings-general" : tab === "templates" ? "settings-templates" : "settings-models"}`}
+          >
             {tab === "general" && (
-              <>
-                <ExecutionSettings api={api} onDirtyChange={setDirty} />
-
-                {!!state.skillDiagnostics?.length && (
-                  <details className="settings-advanced">
-                    <summary>{uiText("技能載入問題")}</summary>
-                    {state.skillDiagnostics.map((issue) => (
-                      <p key={issue.path}>
-                        {issue.path}：{issue.message}
-                      </p>
-                    ))}
-                  </details>
-                )}
-              </>
+              <ExecutionSettings
+                api={api}
+                onDirtyChange={setDirty}
+                diagnostics={state.skillDiagnostics}
+              />
             )}
             {tab === "templates" && (
               <TemplateSettings

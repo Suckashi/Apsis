@@ -87,6 +87,15 @@ test("real headless interactions fail an uninvoked IIFE and pass its repaired de
 
 test("verification requires an assertion and rejects paths outside the workspace before launching", async (t) => {
   const root = await fixture(t);
+  assert.throws(() => parseWebSteps([{ action: "reload" }]), /預期結果/);
+  assert.throws(
+    () =>
+      parseWebSteps([
+        { action: "reload", selector: "body" },
+        { action: "expect_visible", selector: "body" },
+      ]),
+    /reload/,
+  );
   assert.throws(
     () => parseWebSteps([{ action: "click", selector: "#calculate" }]),
     /預期結果/,
@@ -112,6 +121,111 @@ test("verification requires an assertion and rejects paths outside the workspace
       /工作區|相對路徑/,
     );
   }
+});
+
+test("style assertions inspect loaded CSS and wait for interactive changes without probes", async (t) => {
+  const root = await fixture(
+    t,
+    '<!doctype html><link rel="stylesheet" href="styles.css"><button id="complete">Complete</button><script>document.querySelector("button").onclick = () => setTimeout(() => document.querySelector("button").classList.add("done"), 200);</script>',
+  );
+  const steps: WebCheckStep[] = [
+    { action: "click", selector: "#complete" },
+    {
+      action: "expect_style",
+      selector: "#complete",
+      property: "color",
+      value: "rgb(17, 17, 17)",
+    },
+  ];
+  await writeFile(join(root, "styles.css"), ".done{color:#8a929c}");
+  const broken = await verifyWeb(
+    root,
+    "task",
+    "wrong-style",
+    "index.html",
+    steps,
+    undefined,
+    { assertionTimeoutMs: 350 },
+  );
+  assert.equal(broken.status, "failed");
+  assert.match(broken.steps[1].error!, /138, 146, 156/);
+  await writeFile(join(root, "styles.css"), ".done{color:#111}");
+  const repaired = await verifyWeb(
+    root,
+    "task",
+    "fixed-style",
+    "index.html",
+    steps,
+  );
+  assert.equal(repaired.status, "passed", JSON.stringify(repaired));
+  assert.equal(repaired.assertions, 1);
+  assert.ok(repaired.files["styles.css"]);
+  assert.throws(
+    () =>
+      parseWebSteps([
+        {
+          action: "expect_style",
+          selector: "button",
+          value: "rgb(17, 17, 17)",
+        },
+      ]),
+    /操作/,
+  );
+  assert.throws(
+    () =>
+      parseWebSteps([
+        {
+          action: "expect_style",
+          selector: "button",
+          property: "color",
+          value: "",
+        },
+      ]),
+    /操作/,
+  );
+});
+
+test("reload verifies actual storage persistence and fails transient state", async (t) => {
+  const root = await fixture(
+    t,
+    `<!doctype html><input id="note"><button id="save">Save</button><script>
+    document.querySelector('#note').value = localStorage.getItem('note') || '';
+    document.querySelector('#save').onclick = () => localStorage.setItem('note', document.querySelector('#note').value);
+  </script>`,
+  );
+  const steps: WebCheckStep[] = [
+    { action: "fill", selector: "#note", value: "Keep after reload" },
+    { action: "click", selector: "#save" },
+    { action: "reload" },
+    { action: "expect_value", selector: "#note", value: "Keep after reload" },
+  ];
+  const saved = await verifyWeb(root, "task", "persisted", "index.html", steps);
+  assert.equal(saved.status, "passed", JSON.stringify(saved));
+  assert.equal(saved.assertions, 1, "reload alone is not an assertion");
+  const fresh = await verifyWeb(root, "task", "fresh", "index.html", [
+    { action: "expect_value", selector: "#note", value: "" },
+  ]);
+  assert.equal(
+    fresh.status,
+    "passed",
+    "each check starts with isolated storage",
+  );
+  await writeFile(
+    join(root, "index.html"),
+    '<!doctype html><input id="note"><button id="save">Save</button>',
+  );
+  const transient = await verifyWeb(
+    root,
+    "task",
+    "transient",
+    "index.html",
+    steps,
+    undefined,
+    { assertionTimeoutMs: 100 },
+  );
+  assert.equal(transient.status, "failed");
+  assert.equal(transient.steps[2].status, "passed");
+  assert.equal(transient.steps[3].status, "failed");
 });
 
 test("JavaScript page errors fail verification even when the visible assertion passes", async (t) => {

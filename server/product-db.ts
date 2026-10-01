@@ -34,6 +34,25 @@ export class ProductDB {
       CREATE INDEX IF NOT EXISTS records_session ON records(kind,json_extract(value,'$.sessionId'));
       CREATE INDEX IF NOT EXISTS records_queue ON records(kind,json_extract(value,'$.botId'),json_extract(value,'$.status'));
       CREATE INDEX IF NOT EXISTS records_run ON records(kind,json_extract(value,'$.runId'));`);
+    // Retire only the removed avatar economy. Keep catalog choices, Bots,
+    // templates, conversations and all other job evidence intact.
+    try {
+      this.transaction(() => {
+        this.db
+          .prepare(
+            "DELETE FROM records WHERE kind IN ('avatar-collection','avatar-reward','avatar-draw')",
+          )
+          .run();
+        this.db
+          .prepare(
+            "UPDATE records SET value=json_remove(value,'$.avatarRewardsEligible') WHERE kind='job' AND json_type(value,'$.avatarRewardsEligible') IS NOT NULL",
+          )
+          .run();
+      });
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
     return this;
   }
   all<T>(kind: string): T[] {

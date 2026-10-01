@@ -2,7 +2,12 @@ import React, { useEffect, useId, useRef, useState } from "react";
 import type { ModelConnection } from "../shared/types.ts";
 import { useSettingsLocale } from "./settings-locale.ts";
 
-export type ModelOption = { value: string; label: string; group?: string };
+export type ModelOption = {
+  value: string;
+  label: string;
+  group?: string;
+  model?: string;
+};
 export function connectionModelOptions(
   connections: ModelConnection[],
 ): ModelOption[] {
@@ -11,6 +16,7 @@ export function connectionModelOptions(
       value: JSON.stringify([c.id, model]),
       label: c.modelSettings?.[model]?.displayName || model,
       group: c.name,
+      model,
     })),
   );
 }
@@ -42,22 +48,32 @@ export function ModelPicker({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    if (open) searchRef.current?.focus();
+    if (open) {
+      searchRef.current?.focus();
+      ref.current
+        ?.querySelector('[aria-selected="true"]')
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
   }, [open]);
   useEffect(() => {
     const outside = (event: PointerEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node))
+      if (ref.current && !ref.current.contains(event.target as Node)) {
         ref.current.open = false;
+        setOpen(false);
+      }
     };
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, []);
   const selected = options.find((o) => o.value === value);
   const filtered = options.filter((o) =>
-    `${o.group || ""} ${o.label}`.toLowerCase().includes(query.toLowerCase()),
+    `${o.group || ""} ${o.label} ${o.model || ""}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
   );
   const close = () => {
     if (ref.current) ref.current.open = false;
+    setOpen(false);
     ref.current?.querySelector("summary")?.focus({ preventScroll: true });
   };
   const choose = async (next: string) => {
@@ -82,7 +98,12 @@ export function ModelPicker({
         setOpen(e.currentTarget.open);
         if (e.currentTarget.open) {
           setQuery("");
-          setActive(0);
+          setActive(
+            Math.max(
+              0,
+              options.findIndex((option) => option.value === value),
+            ),
+          );
           setError("");
         }
       }}
@@ -90,8 +111,10 @@ export function ModelPicker({
         if (
           e.relatedTarget &&
           !e.currentTarget.contains(e.relatedTarget as Node)
-        )
+        ) {
           e.currentTarget.open = false;
+          setOpen(false);
+        }
       }}
       onKeyDown={(e) => {
         if (e.key === "Escape" && ref.current?.open) {
@@ -105,7 +128,9 @@ export function ModelPicker({
         aria-label={label}
         aria-disabled={disabled || busy}
         title={
-          selected ? `${selected.group || ""} · ${selected.label}` : placeholder
+          selected
+            ? `${selected.group || ""} · ${selected.label}${selected.model && selected.model !== selected.label ? ` · ${selected.model}` : ""}`
+            : placeholder
         }
         onClick={(e) => {
           if (disabled || busy) e.preventDefault();
@@ -177,6 +202,7 @@ export function ModelPicker({
             id={id}
             className="model-picker-options"
             role="listbox"
+            tabIndex={-1}
             aria-label={label}
             aria-busy={busy}
           >
@@ -193,13 +219,36 @@ export function ModelPicker({
                   type="button"
                   id={`${id}-${index}`}
                   role="option"
+                  tabIndex={-1}
                   aria-selected={option.value === value}
                   data-active={index === active}
                   disabled={busy}
                   onClick={() => void choose(option.value)}
                 >
-                  <span>{option.label}</span>
-                  {option.value === value && <span aria-hidden="true">✓</span>}
+                  <span className="model-option-label">
+                    <span>{option.label}</span>
+                    {option.model && option.model !== option.label && (
+                      <small className="model-picker-id">{option.model}</small>
+                    )}
+                  </span>
+                  {option.value === value && (
+                    <svg
+                      aria-hidden="true"
+                      focusable="false"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                    >
+                      <path
+                        d="m3 8 3 3 7-7"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
                 </button>
               </React.Fragment>
             ))}

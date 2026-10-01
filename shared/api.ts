@@ -1,4 +1,3 @@
-import type { AvatarCollection } from "./bot-avatars.ts";
 import type {
   Approval,
   Artifact,
@@ -22,8 +21,21 @@ import type {
   Skill,
   TaskRun,
 } from "./types.ts";
+import type { DocumentNode } from "./document-preview.ts";
 
 /** Public HTTP contracts. Browser code never imports backend service types. */
+export type ArtifactPreview =
+  | {
+      kind: "text" | "markdown" | "html" | "document";
+      content: string;
+      truncated: boolean;
+      previewUrl?: string;
+      document?: DocumentNode[];
+    }
+  | { kind: "image" }
+  | { kind: "pdf" }
+  | { kind: "download" };
+
 export interface BotSummary extends Bot {
   chatRunning: boolean;
   status: "waiting" | "working" | "error" | "idle";
@@ -37,7 +49,6 @@ export type ConnectorView = Pick<
 > & { credentialConfigured: boolean };
 export interface Snapshot {
   projects: Project[];
-  avatarCollection: AvatarCollection;
   bots: BotSummary[];
   connections: ModelConnection[];
   defaultModel: ConnectionSelection | null;
@@ -95,7 +106,10 @@ export type BotPreferencesRequest = Partial<
 >;
 export type BotCreateRequest = BotPreferencesRequest & { templateId?: string };
 export type BotUpdateRequest = BotPreferencesRequest &
-  Partial<Pick<Bot, "pinned" | "hidden">> & { read?: boolean };
+  Partial<Pick<Bot, "pinned" | "hidden">> & {
+    read?: boolean;
+    readMessageId?: string;
+  };
 export type TemplateRequest = BotPreferencesRequest & { name: string };
 export type RoutineRequest = Pick<Routine, "name" | "prompt" | "cron"> &
   Partial<Pick<Routine, "timezone" | "enabled" | "projectId" | "branch">>;

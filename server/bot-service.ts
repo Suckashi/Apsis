@@ -18,7 +18,7 @@ import { ProductDB } from "./product-db.ts";
 import { BotBrowser } from "./bot-browser.ts";
 
 import { McpConfig } from "./mcp-config.ts";
-import { AvatarCollectionService } from "./avatar-collection.ts";
+import { isBotAvatar, type BotAvatarId } from "../shared/bot-avatars.ts";
 
 import { validatePermissionRules } from "./settings.ts";
 
@@ -29,8 +29,12 @@ import type { ExecutionState } from "./execution-state.ts";
 import { now, fail, string } from "./product-support.ts";
 import { transitionJob } from "./task-lifecycle.ts";
 
+function validateAvatar(value: unknown): BotAvatarId {
+  if (!isBotAvatar(value)) return fail("請選擇有效的 Bot 圖示。");
+  return value;
+}
+
 interface Dependencies {
-  avatarCollection: AvatarCollectionService;
   browser: BotBrowser;
   connections: Connections;
   connectors: McpConfig;
@@ -95,9 +99,7 @@ export class BotService {
             ? input.description
             : fail("描述過長。"),
       avatar:
-        input.avatar === undefined
-          ? "orbit"
-          : this.deps.avatarCollection.requireOwned(input.avatar),
+        input.avatar === undefined ? "orbit" : validateAvatar(input.avatar),
       ...selection,
       connectorIds: preferences.connectorIds || [],
       permissionMode: preferences.permissionMode || "workspace",
@@ -200,9 +202,7 @@ export class BotService {
           ? input.description
           : fail("描述過長。");
     const avatar =
-      input.avatar === undefined
-        ? "orbit"
-        : this.deps.avatarCollection.requireOwned(input.avatar);
+      input.avatar === undefined ? "orbit" : validateAvatar(input.avatar);
     const override = input.connectionId
       ? this.deps.connections.selection(input.connectionId, input.model)
       : undefined;
@@ -240,8 +240,7 @@ export class BotService {
       botId: bot.id,
     }));
     if (input.name !== undefined) bot.name = string(input.name, 80);
-    if (input.avatar !== undefined)
-      bot.avatar = this.deps.avatarCollection.requireOwned(input.avatar);
+    if (input.avatar !== undefined) bot.avatar = validateAvatar(input.avatar);
     if (input.description !== undefined)
       bot.description =
         typeof input.description === "string" &&
@@ -251,6 +250,15 @@ export class BotService {
     for (const key of ["pinned", "hidden"] as const)
       if (typeof input[key] === "boolean") bot[key] = input[key];
     if (input.read === true) bot.readAt = now();
+    if (input.readMessageId !== undefined) {
+      const message = this.deps.tasks.store.conversations.message(
+        bot.sessionId,
+        input.readMessageId,
+      );
+      if (!message || message.role !== "assistant" || !message.createdAt)
+        return fail("找不到可確認已讀的回覆。", 404);
+      if (message.createdAt > bot.readAt) bot.readAt = message.createdAt;
+    }
     if (input.connectionId !== undefined) {
       if (this.deps.execution.active.has(id))
         fail("請先停止目前話題再更換模型。", 409);
