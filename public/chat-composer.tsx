@@ -196,6 +196,9 @@ export function ChatComposer({
           ref={input}
           disabled={busy}
           aria-label={uiText("傳送訊息")}
+          title={
+            !smallScreen ? uiText("Enter 傳送 · Shift + Enter 換行") : undefined
+          }
           placeholder={
             busy ? uiText("傳送中…") : uiText("傳訊息給 {0}…", [botName])
           }

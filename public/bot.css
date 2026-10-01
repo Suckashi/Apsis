@@ -6064,6 +6064,49 @@ label textarea::placeholder {
   color: var(--muted);
   font-size: 0.8125rem;
 }
+.execution-attention {
+  display: none;
+}
+/* Desktop keeps one current update and one disclosure; evidence remains inside. */
+@media (min-width: 901px) {
+  .execution-evidence > .execution-recent,
+  .execution-tools > summary .execution-plan-current,
+  .execution-tools > summary .execution-collaboration-count {
+    display: none;
+  }
+  .execution-attention {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0;
+    color: var(--muted);
+    font-size: 0.8125rem;
+  }
+  .composer-wrap > .composer-note {
+    display: none;
+  }
+  .composer-wrap {
+    padding-bottom: 20px;
+  }
+  .composer-tools .approval-mode-control > details > summary {
+    width: 44px;
+    padding: 8px;
+    justify-content: center;
+  }
+  .composer-tools .approval-mode-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .composer-tools .approval-mode-control > details > summary > svg:last-child {
+    display: none;
+  }
+}
 .execution-recent li {
   display: flex;
   align-items: center;

@@ -570,6 +570,17 @@ export function RunHistory({
         </p>
       )}
       {live &&
+        operations.some(
+          (o) => o.status === "failed" || o.status === "unknown",
+        ) && (
+          <p className="execution-attention">
+            <ActivityMark state="interrupted" />
+            {operations.some((o) => o.status === "unknown")
+              ? t("有操作結果不明")
+              : t("有操作失敗")}
+          </p>
+        )}
+      {live &&
         summary.progress?.approvalBotId &&
         summary.progress.approvalBotId !== botId && (
           <button

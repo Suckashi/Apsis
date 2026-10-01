@@ -214,11 +214,14 @@ try {
   await live
     .locator(".execution-collaboration-count")
     .getByText("1 個子代理正在協作", { exact: true })
-    .waitFor();
-  await live.locator(".execution-recent li").nth(1).waitFor();
+    .waitFor({ state: "attached" });
+  await live
+    .locator(".execution-recent li")
+    .nth(1)
+    .waitFor({ state: "attached" });
   assert.equal(await live.locator(".execution-recent li").count(), 2);
   assert.match(
-    await live.locator(".execution-recent").innerText(),
+    (await live.locator(".execution-recent").textContent()) || "",
     /寫入暫存檔 snake.html[\s\S]*失敗/,
   );
   assert.equal(
@@ -229,6 +232,8 @@ try {
     0,
   );
   const rosterCount = await page.locator("button.bot-row").count();
+  await expect(live.locator(".execution-recent")).toBeHidden();
+  await expect(live.locator(".execution-attention")).toHaveText("有操作失敗");
   assert.equal(await live.locator(":scope > details").count(), 1);
   for (const name of ["execution-subagents", "execution-tools"])
     assert.equal(await live.locator(`.${name}`).getAttribute("open"), null);
@@ -243,10 +248,23 @@ try {
   const planSummary = live.locator(".execution-tools > summary");
   assert.match(await planSummary.innerText(), /1\/3 項完成/);
   assert.equal(
-    await live.locator(".execution-plan-current").innerText(),
+    await live.locator(".execution-plan-current").textContent(),
     "補上測試",
   );
   assert.equal(await live.locator(".execution-plan-list").isVisible(), false);
+  await expect(live.locator(".execution-plan-current")).toBeHidden();
+  await expect(live.locator(".execution-collaboration-count")).toBeHidden();
+  const approvalMode = page.locator(
+    ".composer-tools .approval-mode-control > details > summary",
+  );
+  await expect(approvalMode).toHaveAccessibleName("一般核准");
+  await expect(approvalMode).toHaveAttribute("title", "一般核准");
+  await approvalMode.press("Enter");
+  await expect(
+    page.getByRole("radiogroup", { name: "對話核准模式" }),
+  ).toBeVisible();
+  await approvalMode.press("Escape");
+  await expect(approvalMode).toBeFocused();
   await page.screenshot({ path: join(output, "execution-collapsed.png") });
   assert.equal(await approval.locator("xpath=ancestor::details").count(), 0);
   await approval.getByRole("button", { name: "核准並繼續" }).click();
@@ -354,7 +372,7 @@ try {
     await planSummary.click();
     assert.equal(
       await live.locator(".execution-plan-current").isVisible(),
-      true,
+      size.width < 901,
     );
     await page.screenshot({
       path: join(output, `plan-collapsed-${size.width}.png`),
@@ -529,7 +547,7 @@ try {
   await history
     .locator(".execution-collaboration-count")
     .getByText("1 個子代理完成", { exact: true })
-    .waitFor();
+    .waitFor({ state: "attached" });
   assert.match(
     await history.locator(".execution-plan-count").innerText(),
     /2\/3 項完成/,
@@ -798,7 +816,7 @@ try {
     ),
   );
   console.log(
-    `PASS: single work disclosure, collapsed progress updates and preserved expansion, visible recent operations and real plan count, nested collaboration/tools, finished summary, interrupted partial response, original-prompt retry, approval, persistence/reload, final answer first, keyboard/${desktopOnly ? "desktop" : "mobile"}, no browser errors`,
+    `PASS: single work disclosure, collapsed desktop evidence with visible failure notice, preserved expansion and real plan count, nested collaboration/tools, finished summary, interrupted partial response, original-prompt retry, keyboard approval picker, persistence/reload, final answer first, keyboard/${desktopOnly ? "desktop" : "mobile"}, no browser errors`,
   );
 } finally {
   startTools();

@@ -7,12 +7,14 @@ export function ComposerPopover({
   className = "",
   detailsRef,
   closeOnSelect = false,
+  title,
 }: {
   label: React.ReactNode;
   children: React.ReactNode;
   className?: string;
   detailsRef?: React.RefObject<HTMLDetailsElement | null>;
   closeOnSelect?: boolean;
+  title?: string;
 }) {
   const internalRef = useRef<HTMLDetailsElement>(null);
   const ref = detailsRef ?? internalRef;
@@ -45,7 +47,7 @@ export function ComposerPopover({
           event.currentTarget.open = false;
       }}
     >
-      <summary>{label}</summary>
+      <summary title={title}>{label}</summary>
       <div
         className="composer-popover-content"
         onClick={(event) => {

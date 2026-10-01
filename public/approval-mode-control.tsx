@@ -34,6 +34,15 @@ export function ApprovalModeControl({
     <div className="approval-mode-control" data-mode={settings?.approvalMode}>
       <ComposerPopover
         detailsRef={popover}
+        title={
+          settings
+            ? uiText(
+                approvalModes.find(
+                  (mode) => mode.value === settings.approvalMode,
+                )!.label,
+              )
+            : uiText("載入中…")
+        }
         className={settings ? `mode-${settings.approvalMode}` : ""}
         label={
           <>
