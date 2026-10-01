@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -119,8 +126,14 @@ test(
     const response = await fetch(base + "/api/status");
     assert.equal(response.status, 200);
     const status = await response.json();
-    assert.equal(status.dataDir, join(dir, ".apsis-v4"));
-    assert.equal(status.workspace, join(dir, ".apsis-v4", "workspace"));
+    assert.equal(
+      await realpath(status.dataDir),
+      await realpath(join(dir, ".apsis-v4")),
+    );
+    assert.equal(
+      await realpath(status.workspace),
+      await realpath(join(dir, ".apsis-v4", "workspace")),
+    );
     const bootstrap = await fetch(base + "/api/v2/bootstrap", {
       method: "POST",
       headers: { "X-Apsis-Client": "1" },
