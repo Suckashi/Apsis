@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AddressInfo } from "node:net";
-import type { Browser, Page, Locator } from "playwright";
+import type { Browser, BrowserContext, Page, Locator } from "playwright";
 import { expect } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
 import { createApp } from "../server/app.ts";
@@ -217,7 +217,7 @@ try {
       { locale: config.locale as "zh-Hant" | "en" },
       app.product.settings.read().revision,
     );
-    const context = await browser.newContext({
+    const context: BrowserContext = await browser.newContext({
       viewport: { width: config.width, height: config.height },
       reducedMotion: "reduce",
       permissions: ["clipboard-read", "clipboard-write"],
@@ -352,7 +352,7 @@ try {
     { locale: "zh-Hant" },
     app.product.settings.read().revision,
   );
-  const context = await browser.newContext({
+  const context: BrowserContext = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     reducedMotion: "reduce",
   });
