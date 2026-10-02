@@ -16,7 +16,7 @@ const shutdown = () => {
       process.exitCode = 1;
     })
     .finally(() => {
-      if (process.connected) process.disconnect();
+      if (process.connected) process.disconnect?.();
     });
 };
 process.once("SIGINT", shutdown);
