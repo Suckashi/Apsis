@@ -72,7 +72,7 @@
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "langchain": "1.5.12",
-    "mammoth": "^1.12.3",
+    "mammoth": "^1.13.0",
     "markdown-it": "15.0.2",
     "pdfjs-dist": "^6.3.289",
     "playwright": "^1.63.0",
