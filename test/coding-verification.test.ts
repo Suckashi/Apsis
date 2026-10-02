@@ -299,7 +299,7 @@ test("reload verifies actual storage persistence and fails transient state", asy
   );
   await writeFile(
     join(root, "index.html"),
-    '<!doctype html><input id="note"><button id="save">Save</button>',
+    '<!doctype html><input id="note"><button id="save" disabled>Save</button><script>document.querySelector("#note").addEventListener("input", () => setTimeout(() => document.querySelector("#save").disabled = false, 300))</script>',
   );
   const transient = await verifyWeb(
     root,
