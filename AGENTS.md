@@ -4,6 +4,7 @@ Apsis is a local-first Bot workspace powered by Deep Agents. Use the repository'
 
 ## Boundaries
 
+- Make repository changes on a focused branch and submit a PR; do not push directly to `main`, force-push it, or bypass its protection. Before submitting or merging, read `CONTRIBUTING.md` under "Submit a pull request" and verify the required CI results.
 - Use Deep Agents' native `task` for temporary internal subagents and `delegate_task` for persistent Bot collaboration. Do not build a parallel orchestration path. See `CONTRIBUTING.md` under "Code map and conventions" and `docs/architecture.md` under "Boundaries".
 - Host commands must use Apsis's guarded Shell tool. Write tools must honor permission checks and operation journaling. Before changing tool authorization or execution, read `docs/architecture.md` under "Permissions and verification" and `SECURITY.md` under "Application boundary".
 - Do not commit API keys, `.env`, browser profiles, conversations, local data directories, or private workspace files. Use synthetic data in fixtures and screenshots. See `CONTRIBUTING.md` under "Code map and conventions".
