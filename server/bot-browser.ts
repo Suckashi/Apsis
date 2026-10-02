@@ -73,6 +73,29 @@ export class BotBrowser {
     }
     return page;
   }
+  async target(sessionId: string, input: unknown) {
+    const args = input as { action?: string; selector?: string } | null;
+    const page = this.externalPages.get(sessionId) || this.pages.get(sessionId);
+    if (!page || page.isClosed()) return { sessionId, page: null };
+    const target = args?.selector
+      ? await page.locator(args.selector).evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            tag: node.tagName,
+            id: node.id,
+            name: node.getAttribute("name"),
+            type: node.getAttribute("type"),
+            href: node.getAttribute("href"),
+            action: node.closest("form")?.getAttribute("action"),
+            label: (
+              node.getAttribute("aria-label") ||
+              node.textContent ||
+              ""
+            ).slice(0, 240),
+          })),
+        )
+      : undefined;
+    return { sessionId, url: page.url(), target };
+  }
   private readonly actions = new Map<string, Promise<unknown>>();
   act(botId: string, input: Record<string, string>, external = false) {
     const previous = this.actions.get(botId) || Promise.resolve();

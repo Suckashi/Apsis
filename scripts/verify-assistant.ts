@@ -82,6 +82,53 @@ try {
     "Completed: B main chat",
   );
   await expect(card.locator('[data-presence="running"]')).toBeVisible();
+  const activeJob = app.product.db.jobs
+    .list()
+    .find((j) => j.prompt === "A long background work")!;
+  const activeRun = app.tasks.runs.records.get(activeJob.runId!)!;
+  const startedAt = activeRun.createdAt;
+  activeRun.createdAt = new Date(Date.now() - 90000).toISOString();
+  app.product.notify(bot.id, activeJob.id);
+  await expect(card.locator('[data-presence="stale"]')).toBeVisible();
+  assert.equal(
+    await card
+      .locator(".presence-avatar")
+      .evaluate((e) => getComputedStyle(e).animationName),
+    "none",
+  );
+  await page.screenshot({
+    path: join(output, "stale-progress.png"),
+    fullPage: true,
+  });
+  activeRun.createdAt = startedAt;
+  app.product.notify(bot.id, activeJob.id);
+  await expect(card.locator('[data-presence="running"]')).toBeVisible();
+  await Promise.all([
+    app.product.browser.act(activeJob.sessionId!, {
+      action: "navigate",
+      url: base + "#background",
+      selector: "",
+      text: "",
+    }),
+    app.product.browser.act(bot.sessionId, {
+      action: "navigate",
+      url: base + "#chat",
+      selector: "",
+      text: "",
+    }),
+  ]);
+  assert.notEqual(
+    app.product.browser.pages.get(activeJob.sessionId!),
+    app.product.browser.pages.get(bot.sessionId),
+  );
+  assert.equal(
+    app.product.browser.pages.get(activeJob.sessionId!)!.url(),
+    base + "/#background",
+  );
+  assert.equal(
+    app.product.browser.pages.get(bot.sessionId)!.url(),
+    base + "/#chat",
+  );
   await page.screenshot({
     path: join(output, "desktop-working.png"),
     fullPage: true,

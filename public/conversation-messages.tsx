@@ -113,7 +113,12 @@ export function ConversationMessages({
   const activeSummary = detail?.runSummaries.find(
     (r) => r.id === detail.session.activeRunId && r.status === "running",
   );
-  const pending = detail?.approvals.filter((a) => a.status === "pending") || [];
+  const pending =
+    detail?.approvals.filter(
+      (a) =>
+        a.status === "pending" &&
+        (!a.sessionId || a.sessionId === detail.bot.sessionId),
+    ) || [];
   const readingSize = React.useRef({
     height: 0,
     atStart: false,
@@ -605,6 +610,10 @@ export function ConversationMessages({
             botId={detail.bot.id}
             summaries={detail.runSummaries.filter(
               (r) =>
+                detail.jobs.some(
+                  (j) =>
+                    j.runId === r.id && j.sessionId === detail.bot.sessionId,
+                ) &&
                 r.status !== "running" &&
                 !detail.session.messages.some(
                   (m) => m.role === "assistant" && m.runId === r.id,

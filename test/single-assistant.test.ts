@@ -92,6 +92,16 @@ test("background A has independent session, model snapshot, steering, approval a
   assert.equal(approval.sessionId, a.sessionId);
   assert.equal(approval.jobId, a.id);
   assert.equal(approval.rememberAllowed, false);
+  assert.ok(
+    f.product.db.events(0).some((event) => {
+      const data = JSON.parse(String(event.value));
+      return (
+        data.jobId === a.id &&
+        data.sessionId === a.sessionId &&
+        data.runId === approval.runId
+      );
+    }),
+  );
   const before = options.get("A")!.agent!.model;
   await f.product.bots.update(f.bot.id, { name: "Personal assistant" });
   const b = await f.post(`/bots/${f.bot.id}/messages`, {
@@ -197,6 +207,8 @@ test("critical and unknown effects cannot bypass via modes, grants, allow rules 
     { tool: "browser", action: "click" },
     { tool: "browser", action: "navigate" },
     { tool: "mcp_call" },
+    { tool: "fetch_url" },
+    { tool: "verify_web" },
     { tool: "unknown_tool" },
   ];
   for (const request of operations)
@@ -419,4 +431,69 @@ test("background cap bounds independent jobs, settings/model snapshots stay fixe
     f.tasks.runs.records.get(f.product.db.jobs.get(a.id)!.runId!)?.jobId,
     a.id,
   );
+});
+
+test("a changed browser target requires fresh consent inside the execution boundary", async (t) => {
+  let effects = 0;
+  const f = await fixture(async (o) => {
+    const args = { action: "click", selector: "#submit", url: "", text: "" };
+    const receipt = await o.authorize?.("browser", args, o.signal);
+    await o.executeAuthorizedTool?.(
+      "browser",
+      async () => {
+        await o.checkToolPermission?.(
+          "browser",
+          args,
+          o.signal,
+          receipt || undefined,
+        );
+        effects++;
+      },
+      o.signal,
+    );
+    return { text: "done" };
+  });
+  t.after(f.cleanup);
+  let targetLabel = "Save draft";
+  f.product.browser.target = async (sessionId) => ({
+    sessionId,
+    url: "https://fixture.invalid",
+    target: [
+      {
+        tag: "BUTTON",
+        id: "submit",
+        name: null,
+        type: null,
+        href: null,
+        action: "/submit",
+        label: targetLabel,
+      },
+    ],
+  });
+  const job = await f.product.jobs.submit(f.bot.id, {
+    requestId: "browser-target",
+    prompt: "Inspect target",
+    contextKind: "routine",
+  });
+  await until(() =>
+    f.product.db.approvals.list().some((a) => a.status === "pending"),
+  );
+  const first = f.product.db.approvals
+    .list()
+    .find((a) => a.status === "pending")!;
+  targetLabel = "Send externally";
+  f.product.approvals.decide(first.id, { approved: true });
+  await until(() =>
+    f.product.db.approvals
+      .list()
+      .some((a) => a.status === "pending" && a.id !== first.id),
+  );
+  assert.equal(effects, 0);
+  const second = f.product.db.approvals
+    .list()
+    .find((a) => a.status === "pending")!;
+  assert.match(JSON.stringify(second.args), /Send externally/);
+  f.product.approvals.decide(second.id, { approved: false });
+  await until(() => f.product.db.jobs.get(job.id)?.status === "failed");
+  assert.equal(effects, 0);
 });

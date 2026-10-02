@@ -320,6 +320,13 @@ export class ProductService {
         : undefined;
       const settings =
         (job && this.execution.jobSettings.get(job.id)) || this.settings.read();
+      const authorizationArgs = async (name: string, args: unknown) =>
+        name === "browser"
+          ? {
+              ...(args as Record<string, unknown>),
+              browserTarget: await this.browser.target(session.id, args),
+            }
+          : args;
       return {
         jobId: job?.id,
         ...buildRunConfig(bot, this.connections, this.connectors.all(), job),
@@ -357,9 +364,16 @@ export class ProductService {
         maxTurns: settings.maxTurns,
         runtimeSettings: settings,
         extraTools: this.toolRegistry.tools(bot, runId),
-        authorize: (name, args, signal) =>
-          this.approvals.authorize(bot.id, runId, name, args, signal),
+        authorize: async (name, args, signal) =>
+          this.approvals.authorize(
+            bot.id,
+            runId,
+            name,
+            await authorizationArgs(name, args),
+            signal,
+          ),
         checkToolPermission: async (name, args, signal, receipt) => {
+          args = await authorizationArgs(name, args);
           if (
             !receipt ||
             receipt.fingerprint !==
@@ -406,23 +420,14 @@ export class ProductService {
   }
   notify(botId?: string, jobId?: string) {
     const bot = botId ? this.db.bots.get(botId) : undefined;
-    const liveRunId = bot && this.tasks.running.get(bot.sessionId)?.runId;
-    const job = jobId
-      ? this.db.jobs.get(jobId)
-      : liveRunId
-        ? this.db.jobs.list({ runId: liveRunId })[0]
-        : undefined;
+    const job = jobId ? this.db.jobs.get(jobId) : undefined;
     const data = {
       botId,
       at: now(),
-      sessionId: job?.sessionId || bot?.sessionId,
+      sessionId: job?.sessionId,
       jobId: job?.id,
       runId: job?.runId,
-      workContextId:
-        job?.workContextId ||
-        (bot && !bot.deletedAt
-          ? this.tasks.store.conversations.activeId(bot.sessionId)
-          : undefined),
+      workContextId: job?.workContextId,
       locationId: job?.location?.id,
     };
     const id = this.db.event(data);

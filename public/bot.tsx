@@ -349,7 +349,12 @@ function App() {
       ) || [];
   const bot = state?.bots.find((b) => b.id === selected);
   const running = !!detail?.session.running;
-  const pending = detail?.approvals.filter((a) => a.status === "pending") || [];
+  const pending =
+    detail?.approvals.filter(
+      (a) =>
+        a.status === "pending" &&
+        (!a.sessionId || a.sessionId === detail.bot.sessionId),
+    ) || [];
   const summaries = new Map(detail?.runSummaries.map((r) => [r.id, r]));
   const activeSummary = detail?.runSummaries.find(
     (r) => r.id === detail.session.activeRunId && r.status === "running",
@@ -544,6 +549,18 @@ function App() {
             progress={detail.currentProgress}
             connected={eventsConnected && !connectionLost && !networkOffline}
           />
+        )}
+        {detail?.approvals.some(
+          (a) => a.status === "pending" && a.sessionId !== detail.bot.sessionId,
+        ) && (
+          <button
+            className="background-attention"
+            onClick={() => {
+              if (!listVisible) toggleList();
+            }}
+          >
+            {uiText("背景工作需要你的核准；你仍可繼續聊天。")}
+          </button>
         )}
         {selected && state && (
           <h1 className="visually-hidden">

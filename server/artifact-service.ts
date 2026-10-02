@@ -162,10 +162,13 @@ export class ArtifactService {
           workContextId: job.workContextId,
           deliveredFrom: bot.id,
         });
-        this.deps.notify(job.botId);
+        this.deps.notify(job.botId, job.id);
       }
     }
-    this.deps.notify(bot.id);
+    this.deps.notify(
+      bot.id,
+      runId ? this.deps.db.jobs.list({ runId })[0]?.id : undefined,
+    );
     return artifact;
   }
   async readDocument(path: string, workspace = this.deps.tasks.workspace) {

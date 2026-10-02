@@ -78,7 +78,7 @@ export class ProductTools {
             signal,
           );
           this.deps.db.put("web-verification", receipt);
-          this.deps.notify(bot.id);
+          this.deps.notify(bot.id, this.deps.db.jobs.list({ runId })[0]?.id);
           if (receipt.status === "failed") {
             const failedIndex = receipt.steps.findIndex(
               (step) => step.status === "failed",
@@ -174,7 +174,7 @@ export class ProductTools {
             status: "draft",
             createdAt: now(),
           });
-          this.deps.notify(bot.id);
+          this.deps.notify(bot.id, this.deps.db.jobs.list({ runId })[0]?.id);
           return draft;
         },
       ),

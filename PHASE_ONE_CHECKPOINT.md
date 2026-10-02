@@ -1,26 +1,25 @@
-# Single-assistant phase-one checkpoint
+# Single-assistant phase-one handoff
 
-Branch: `feat/single-assistant-phase-one`, based on main `1c779409123e9def6604230d8e70c91e1d33e637`.
+Branch: `feat/single-assistant-phase-one`; base main `1c779409123e9def6604230d8e70c91e1d33e637`.
+Draft PR: https://github.com/Suckashi/Apsis/pull/20
 
-Authorized: implement, test, push and open a draft PR. Do not merge, deploy, release, change OS security settings, erase old user data, use paid inference or duplicate main-CI maintenance. User additionally requested selected-avatar working animations with honest lifecycle/reconnect states and reduced-motion support.
+Authorized: implementation, tests, feature-branch push and draft PR. **Do not merge, deploy, release, change OS security settings, delete existing user data or use paid inference.** Main-CI maintenance is a separate task.
 
-Implemented: independent persistent work sessions and work cards; main chat remains usable; job/session/run targeting for steering, stop, approvals and SSE; per-session browser pages; serialized shared workspaces; bounded background capacity with a reserved chat slot; exact consent fingerprints and mandatory critical/unknown-action checks; once-only persisted result messages; schema-5 namespace preserving older stores; selected-avatar progress motion; roster/template/delegation removal from the active UI. Native Deep Agents remains the only model runtime. Details and limitations: `docs/single-assistant.md`.
+Implemented design and limits: [single-assistant.md](docs/single-assistant.md). One assistant/main chat; independent background sessions; explicit job/session/run controls and SSE; scoped browser pages; captured model settings; bounded capacity with a reserved chat slot; serialized conflicting workspace and shell/browser access; mandatory critical/unknown-effect consent; target rechecks; once-only persisted completion; schema-5 namespace leaving old data intact; original-avatar lifecycle motion including paused approval, stale progress, reconnect and reduced motion. Legacy roster/template/manual delegation surfaces are removed from the active interface.
 
-Verified at this checkpoint:
+## Verified evidence
 
-- Actual shell commands work after the reported executor disconnect. Working directory `/workspace/Apsis`.
-- Full `npm test`: 307 tests passed before the latest two concurrency tests and final lock/UI/documentation refinements. Log `/tmp/apsis-tests-final.log`.
-- `node --test test/single-assistant.test.ts`: 7 passed, including the new capacity/contention tests. Log `/tmp/apsis-single.log`.
-- Build passed before final documentation/lock refinements. Logs `/tmp/apsis-build.log`, `/tmp/apsis-check.log`.
-- `npm run check:docs` passed after documentation edits. Log `/tmp/apsis-docs.log`.
-- `scripts/verify-assistant.ts` passed actual desktop/mobile fixture flows. Screenshots in `artifacts/single-assistant/`; desktop/mobile images inspected. Includes chat B during A, selected avatar, approval waiting, error, disconnect/reconnect, reduced motion, stop and reload. Last run preceded final settings refinements.
-- Settings browser verifier ran: all but two obsolete expectations passed. Those expectations (disabled mandatory guard and two remaining settings tabs) have been corrected; rerun is pending.
+- The executor was reachable by successful commands after the reported disconnect; this work is preserved in committed increments.
+- `npm run check:docs`, `npm run build`: passed.
+- Last full `npm test`: **310 passed**, 0 failed. `/tmp/apsis-tests-final.log`.
+- Final SSE routing refinement: **28 focused tests passed** in `test/single-assistant.test.ts`, `test/bot-product.test.ts`, `test/steering-delivery.test.ts`. `/tmp/apsis-routing-final.log`. Final full rerun/CI follows the last commit.
+- Assistant desktop/mobile fixture browser: passed, including chat B during A, scoped stop, selected-avatar states, waiting approval, failure, disconnect/reconnect, reduced motion, stale-progress pause, distinct session-owned browser pages and reload. `/tmp/apsis-visual.log`.
+- Settings browser: **23 checks passed**, no unexpected browser errors or external requests. `artifacts/settings-verification/report.json`.
+- Synthetic screenshots: `docs/assets/single-assistant/`. Desktop, mobile, approval and stale states were visually inspected.
+- No paid inference or live-model reliability claims. Local Node 24.19; CI checks Windows/Ubuntu Node 22.19. macOS unverified.
 
-Next steps:
+## Continuation if interrupted
 
-1. Format changed files and rerun docs/build/full unit suite (expect 309 tests), assistant browser and settings browser. Use `PLAYWRIGHT_BROWSERS_PATH=/tmp/apsis-browsers`; npm cache `/tmp/apsis-npm-cache` if needed. Dependencies are installed. Node is 24.19 locally; CI baseline remains Windows/Ubuntu Node 22.19.
-2. Strengthen browser evidence for stale progress and owned pages if needed; current fixture is deterministic, not real-model validation. No credentials or paid model calls were used.
-3. Review final diff, include synthetic screenshots, commit, push feature branch and open DRAFT PR. Check branch CI; do not merge.
-4. Report the exact PR URL, checks and limits. Background PR tracking stores context correctly but the automatic follow-up poller currently follows only the main context; this is documented. No universal native-app control or OS sandbox is claimed.
+Check `git status`, the current draft head, and `gh pr checks 20`. Complete any failing checks on this branch; do not merge. Use `PLAYWRIGHT_BROWSERS_PATH=/tmp/apsis-browsers` locally and npm cache `/tmp/apsis-npm-cache` if needed. Dependencies are installed. Primary checks: docs, build, unit suite, `scripts/verify-assistant.ts`, `scripts/verify-settings.ts`.
 
-Potential review concerns: retained internal Bot naming/helpers are single-profile service implementation details; removed legacy public UX tests were replaced with single-assistant acceptance checks while low-level permission, journal, native-subagent and RunSlots safety tests remain. Shell effects remain conservatively classified. Browser URL/revision checks do not freeze remote DOM or prove remote semantics. Full-PC host scope is OS-account reach, not a security sandbox.
+The design explicitly documents host-account/shell limits, shared browser account state, dynamic remote DOM, conservative effect classification and the existing main-context-only PR-follow-up poller. Internal Bot field names persist as implementation details, not a data migration/compatibility layer. Reviewers should examine these boundaries before any future merge. No existing local user data was erased.

@@ -6347,3 +6347,12 @@ label textarea::placeholder {
     transform: none;
   }
 }
+.background-attention {
+  flex-shrink: 0;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border: 1px solid #c18b30;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13px;
+}

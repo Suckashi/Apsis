@@ -260,8 +260,6 @@ export class BotService {
       if (message.createdAt > bot.readAt) bot.readAt = message.createdAt;
     }
     if (input.connectionId !== undefined) {
-      if (this.deps.execution.active.has(id))
-        fail("請先停止目前話題再更換模型。", 409);
       if (input.connectionId === "") {
         delete bot.connectionId;
         delete bot.model;

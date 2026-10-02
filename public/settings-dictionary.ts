@@ -2,6 +2,8 @@ import { getSettingsLocale } from "./settings-locale.ts";
 
 // Source messages are stable dictionary keys. User content is never translated.
 export const english: Record<string, string> = {
+  "背景工作需要你的核准；你仍可繼續聊天。":
+    "Background work needs your approval. You can keep chatting.",
   "管理助理使用的模型連線。": "Manage model connections for your assistant.",
   "記住的核准只適用於原執行，不包含重大或未知影響。":
     "Remembered approval applies only to the original run, excluding critical or unknown effects.",

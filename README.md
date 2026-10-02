@@ -10,7 +10,7 @@ Chat while work runs, review expandable work cards, and steer or stop a specific
 
 The development branch uses a new schema-5 namespace and mandatory approval for critical or unknown effects, including in auto mode. See the [single-assistant design and limits](docs/single-assistant.md). Tagged releases below predate this redesign.
 
-![Apsis conversation with a completed report and downloadable artifact](docs/assets/conversation.png)
+![Apsis conversation with a completed report and downloadable artifact](docs/assets/single-assistant/desktop.png)
 
 _Actual desktop UI captured with isolated demonstration data and a deterministic model fixture; this is not a live model benchmark._
 

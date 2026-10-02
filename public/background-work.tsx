@@ -68,6 +68,7 @@ export function BackgroundWork({
             key={job.id}
             job={job}
             act={act}
+            artifacts={detail.artifacts.filter((a) => a.runId === job.runId)}
             presence={
               <AssistantPresence
                 avatar={detail.bot.avatar}
@@ -84,14 +85,20 @@ export function BackgroundWork({
           />
         ))}
       {detail.approvals
-        .filter((a) => a.status === "pending")
+        .filter(
+          (a) => a.status === "pending" && a.sessionId !== detail.bot.sessionId,
+        )
         .map((approval) => (
           <details key={approval.id} open className="work-approval">
             <summary>
               {uiText("等待你的核准")} · {approval.tool}
             </summary>
             <p>{approval.impact}</p>
-            <small>{approval.jobId}</small>
+            <p>
+              {detail.jobs
+                .find((j) => j.id === approval.jobId)
+                ?.prompt.slice(0, 100)}
+            </p>
             <pre>{JSON.stringify(approval.args, null, 2)}</pre>
             <button
               onClick={() =>
@@ -120,7 +127,9 @@ function WorkCard({
   job,
   act,
   presence,
+  artifacts,
 }: {
+  artifacts: import("../shared/product.ts").Artifact[];
   presence: import("react").ReactNode;
   job: Job;
   act: (fn: () => Promise<unknown>) => Promise<void>;
@@ -136,6 +145,13 @@ function WorkCard({
         {presence}
       </summary>
       {job.result && <Markdown text={job.result} />}
+      {artifacts.map((a) => (
+        <p key={a.id}>
+          <a href={`/api/v2/artifacts/${a.id}`} download>
+            {a.name}
+          </a>
+        </p>
+      ))}
       {job.error && <p role="status">{job.error}</p>}
       {active && (
         <button

@@ -277,7 +277,7 @@ export class MessageService {
         message,
         workContextId,
       );
-      this.deps.notify(id);
+      this.deps.notify(id, this.deps.db.jobs.list({ runId })[0]?.id);
       try {
         if (
           this.deps.execution.steers.get(steerKey) !== steer ||
@@ -287,11 +287,11 @@ export class MessageService {
           fail("目前回合已結束，補充指示尚未採用。", 409);
         await steer!(prompt, async () => {
           await this.updateSteeringDelivery(sessionId, messageId, "applied");
-          this.deps.notify(id);
+          this.deps.notify(id, this.deps.db.jobs.list({ runId })[0]?.id);
         });
       } catch (error) {
         await this.updateSteeringDelivery(sessionId, messageId, "not-applied");
-        this.deps.notify(id);
+        this.deps.notify(id, this.deps.db.jobs.list({ runId })[0]?.id);
         throw error;
       }
       return this.deps.tasks.store.conversations.message(sessionId, messageId)!;

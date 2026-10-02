@@ -327,7 +327,7 @@ export class ApprovalService {
       const abort = () => {
         this.deps.execution.pending.delete(approval.id);
         this.deps.db.approvals.put({ ...approval, status: "expired" });
-        this.deps.notify(botId);
+        this.deps.notify(botId, ownerJob?.id);
         reject(new Error("核准等待已取消。"));
       };
       this.deps.execution.pending.set(approval.id, (value) => {
@@ -335,7 +335,7 @@ export class ApprovalService {
         resolve(value);
       });
       signal?.addEventListener("abort", abort, { once: true });
-      this.deps.notify(botId);
+      this.deps.notify(botId, ownerJob?.id);
       if (signal?.aborted) abort();
     }).finally(resume);
     if (!approved)
@@ -387,6 +387,6 @@ export class ApprovalService {
       });
     this.deps.execution.pending.get(id)!(approved);
     this.deps.execution.pending.delete(id);
-    this.deps.notify(approval.botId);
+    this.deps.notify(approval.botId, approval.jobId);
   }
 }

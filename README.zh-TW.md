@@ -10,7 +10,7 @@
 
 開發分支使用新的 schema 5 資料目錄；重大或未知影響的操作，即使在自動模式也需要當次核准。詳見[單一助理設計與限制](docs/single-assistant.md)。以下標記版本早於本次改版。
 
-![Apsis 對話畫面，包含完成的報告與可下載成果](docs/assets/conversation.png)
+![Apsis 對話畫面，包含完成的報告與可下載成果](docs/assets/single-assistant/desktop.png)
 
 _實際桌面介面，以隔離示範資料和固定模型替身拍攝；這不是外部模型的能力評測。_
 

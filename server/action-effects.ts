@@ -28,11 +28,7 @@ export function classifyAction(
     const command = String(args.command || "").trim();
     // Small exact safe forms only. Scripts, interpreters, substitutions, redirects,
     // arbitrary executable names and compound commands are deliberately unknown.
-    if (
-      /^(?:pwd|git status(?: --short)?|git diff(?: --stat)?|git log -[1-9][0-9]?(?: --oneline)?|ls(?: -la?)?)$/.test(
-        command,
-      )
-    )
+    if (/^(?:pwd|ls(?: -la?)?)$/.test(command))
       return effect("read", "Inspect the current working folder");
     if (
       /\b(?:rm|rmdir|del|Remove-Item|chmod|chown|sudo|su|reg|systemctl|crontab|curl|wget|eval|exec|powershell|bash|sh|npm|npx|pip|python|node)\b|\bgit\s+(?:push|reset|clean)|[>]/i.test(
@@ -48,6 +44,16 @@ export function classifyAction(
       "Host command effects cannot be established; inspect exact command and working folder",
     );
   }
+  if (tool === "fetch_url")
+    return effect(
+      "unknown",
+      "An arbitrary URL can trigger external effects; inspect the exact URL before requesting it",
+    );
+  if (tool === "verify_web")
+    return effect(
+      "critical",
+      "Execute workspace HTML and JavaScript in a disposable browser with external networking blocked",
+    );
   if (tool === "mcp_call")
     return effect(
       "unknown",
