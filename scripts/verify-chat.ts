@@ -615,6 +615,9 @@ try {
   await page.screenshot({ path: join(output, "desktop-connectors.png") });
   if (!desktopOnly) {
     await page.setViewportSize({ width: 390, height: 844 });
+    // setViewportSize does not wait for the media-query event and React commit.
+    await expect(page.locator(".mobile-compose-options")).toBeVisible();
+    await expect(input()).not.toHaveAttribute("title");
     await expect(input()).toBeVisible();
     const mobileReplies = page.locator(
       ".message.assistant > .message-body > .markdown",
