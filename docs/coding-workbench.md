@@ -12,6 +12,7 @@ Apsis 只有 Bot 持續聊天。一般問題、文件、規劃與程式修改共
 - 檔案側面板提供預覽、下載與引用；變更面板顯示目前話題 Git 起始 commit 的差異、網頁驗證紀錄及 PR 連結。
 - verify_web 在目前工作資料夾執行，證據歸屬 context。track_pull_request 驗證真實 PR URL，最多跟進三次；切換新話題後不再自動跟進舊話題。
 - `verify_web` 的 `expect_hidden` 檢查元素已隱藏或移除；`expect_checked` 檢查 checkbox／radio 已勾選，`value: "false"` 則檢查未勾選。可在同一次檢查中 `reload` 後再次斷言，驗證保存狀態。錯誤回報指明失敗步驟；重試限制依同一路徑、失敗類別與實際步驟計數，成功執行相同檢查才清除其失敗次數。`expect_style` 比對瀏覽器的計算後 CSS 值，尺寸可能是像素而非原樣式中的百分比。
+- `publish_file` 的 `assets` 只用於 HTML／HTM 入口的多檔網頁包；Markdown 等單檔成果省略 `assets` 即可建立可預覽、下載的成果卡。若帶入不適用的 `assets`，錯誤會提示以相同 `path`、`name` 省略參數重試。
 - Shell 分別解碼標準輸出與錯誤輸出的 UTF-8 位元組，避免跨區塊的中文字破損；Python 的管線輸出固定為 UTF-8。若程式自行輸出其他編碼，須由指令先轉成 UTF-8。
 - 排程仍使用獨立背景。指定專案的排程每次建立隔離 worktree，結果回到 Bot 聊天。跨 Bot 派工保留權限限制與獨立背景。
 

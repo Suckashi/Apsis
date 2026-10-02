@@ -49,6 +49,7 @@ Success means you can see the file, download the published artifact, expand the 
 Native Deep Agents `task` subagents handle internal research and analysis within a run. `list_bots` / `delegate_task` assign persistent work to another Bot with its own identity and history. Native `execute` is disabled; host commands use Apsis's guarded Shell tool. See [architecture](docs/architecture.md).
 
 For static web apps, `verify_web` checks real browser interactions, including hidden items, checkbox state and state after reload. Its retry limit tracks the failed check, so a different check does not prematurely end the Bot's work.
+`publish_file` bundles local assets only for an HTML entry. Omit `assets` to publish a Markdown or other single file as its own result card.
 
 ## Data and execution
 
