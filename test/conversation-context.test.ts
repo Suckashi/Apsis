@@ -461,6 +461,8 @@ test("real Deep Agents compacts three times, suppresses summary streams and resu
     for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw);
     requests.push(body);
+    // Do not reuse idle sockets across the checkpoint/restart work below.
+    res.setHeader("Connection", "close");
     const isSummary = !body.tools?.length;
     if (isSummary) summaries++;
     const content = isSummary
@@ -534,7 +536,8 @@ test("real Deep Agents compacts three times, suppresses summary streams and resu
         MODEL_ID: "fixture",
         COMPATIBLE_BASE_URL: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`,
       },
-      signal: AbortSignal.timeout(15000),
+      // Match the cold Deep Agents fixture budget under parallel Windows CI.
+      signal: AbortSignal.timeout(30000),
       source: { sessionId: "owner", runId: "run" + cycle },
       registerSteer: (fn) => {
         steer = fn;
