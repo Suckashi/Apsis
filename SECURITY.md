@@ -14,10 +14,12 @@ The maintainer will assess the report, discuss reproduction privately, and coord
 
 - Apsis is a local, single-owner application. The normal server binds to `127.0.0.1`; it is not a multi-tenant hosted service. The server validates Host/Origin and mutation request headers.
 - Approval modes, readonly settings and path rules gate tools. **Shell executes on the host and is not an operating-system sandbox.** Native Deep Agents `execute` is disabled; native `task` children use guarded tools and inherited authorization.
-- MCP connectors and browser tools can contact external systems with the credentials available to them. The dedicated browser profile can contain reusable login state and is shared by Bot tabs.
+- MCP connectors and browser tools can contact external systems with the credentials available to them. The dedicated browser profile can contain reusable login state and is shared by session-owned tabs.
 - API keys stay server-side. Settings can hold credentials or refer to environment variables; configuration and stored browser state are not encrypted by Apsis. Use host permissions to protect the data directory, `.env`, external workspaces and backups.
 - Configured providers receive the task context needed for model requests. Files, web pages, tool output and model instructions remain untrusted input. Local storage does not mean every request stays on your machine.
 - Stopping a task does not roll back completed side effects. Restart recovery marks unfinished work interrupted or uncertain and does not automatically replay external operations.
 - Optional sharing has its own password/session boundary. Anyone granted access to a shared workspace may see sensitive content or invoke its available capabilities; use it only for trusted access. Do not expose the normal local server directly to a network.
 
-See [approval modes](docs/approval-modes.md) for exact behavior and [architecture](docs/architecture.md) for storage and runtime boundaries. Treat a bypass of documented authorization, cross-Bot isolation, credential redaction or share authentication as a security report. A permitted host command accessing host files is part of the declared Shell boundary.
+See [approval modes](docs/approval-modes.md) for exact behavior and [architecture](docs/architecture.md) for storage and runtime boundaries. Treat a bypass of documented authorization, cross-session isolation, credential redaction or share authentication as a security report. A permitted host command accessing host files is part of the declared Shell boundary.
+
+Critical and unknown effects require fresh approval in every mode, before allow rules and remembered grants. Whole-PC scope describes OS-account reach, not unrestricted permission or native desktop automation. See [the development approval boundary and limitations](docs/single-assistant.md#mandatory-approval).

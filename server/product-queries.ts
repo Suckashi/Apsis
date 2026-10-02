@@ -64,7 +64,11 @@ export class ProductQueries {
             ...bot,
             chatRunning:
               session.running ||
-              jobs.some((j) => ["running", "queued"].includes(j.status)),
+              jobs.some(
+                (j) =>
+                  j.sessionId === bot.sessionId &&
+                  ["running", "queued"].includes(j.status),
+              ),
             status: approval
               ? "waiting"
               : session.running ||
@@ -106,7 +110,13 @@ export class ProductQueries {
   runRecord(id: string, runId: string): RunRecord {
     const bot = this.deps.bot(id);
     const run = this.deps.tasks.runs.records.get(runId);
-    if (!run || run.sessionId !== bot.sessionId)
+    if (
+      !run ||
+      (run.sessionId !== bot.sessionId &&
+        !this.deps.db.jobs
+          .list({ botId: id })
+          .some((j) => j.sessionId === run.sessionId && j.runId === runId))
+    )
       return fail("找不到任務紀錄。", 404);
     return this.presentation(id).records(run);
   }
@@ -176,7 +186,12 @@ export class ProductQueries {
         ),
       ),
       runs: [...this.deps.tasks.runs.records.values()]
-        .filter((r) => includeRecords && r.sessionId === bot.sessionId)
+        .filter(
+          (r) =>
+            includeRecords &&
+            (r.sessionId === bot.sessionId ||
+              jobs.some((j) => j.runId === r.id)),
+        )
         .slice(-30),
       browserUrl: this.deps.browser.pages.get(id)?.url(),
       computerOwner: this.deps.browser.owner,

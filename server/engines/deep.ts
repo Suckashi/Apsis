@@ -133,6 +133,20 @@ export async function runDeep(options: RunOptions) {
   const contextId = options.session.workContextId;
   const runId = options.source?.runId || randomUUID();
   const persistent = history && contextId;
+  const previous = restoreCheckpoint(options.session.engineState);
+  const backgroundResults = persistent
+    ? history.backgroundResults(
+        options.session.id,
+        contextId,
+        previous?.backgroundResultsThrough ?? 0,
+      )
+    : [];
+  // Snapshot only this invocation's inbox. A result arriving during execution
+  // remains pending for the next turn, even if this run saves a later checkpoint.
+  const backgroundResultsThrough =
+    backgroundResults.at(-1)?.sequence ?? previous?.backgroundResultsThrough;
+  const saveState = (value: DeepValue) =>
+    checkpoint({ ...value, backgroundResultsThrough });
   let disk: FilesystemBackend | undefined;
   if (persistent) {
     const rootDir = history.scratchRoot(options.session.id, contextId);
@@ -458,7 +472,7 @@ export async function runDeep(options: RunOptions) {
         runId,
         mapChatMessagesToStoredMessages(state.messages),
       );
-      const saved = checkpoint(state);
+      const saved = saveState(state);
       if (saved) history.saveCheckpoint(options.session.id, contextId, saved);
     },
   );
@@ -471,7 +485,7 @@ export async function runDeep(options: RunOptions) {
     failureGuard,
   );
   const nativeInstructions =
-    "Use task for internal exploration, research, tests, review and parallel analysis. Use list_bots/delegate_task only for a persistent assignment to another Apsis Bot with its own identity/history. Deep Agents filesystem is private scratch; project files require workspace_* tools. Host execution requires the guarded shell tool. Report public progress and findings, never private reasoning.";
+    "Use task for internal exploration, research, tests, review and parallel analysis. Use start_background_work for persistent independent work with its own session and workspace. The user sees one personal assistant. Deep Agents filesystem is private scratch; project files require workspace_* tools. Host execution requires the guarded shell tool. Report public progress and findings, never private reasoning.";
   const agent = createDeepAgent({
     subagents: [
       {
@@ -525,12 +539,12 @@ export async function runDeep(options: RunOptions) {
       ) +
       "\nDeep Agents filesystem tools use private virtual scratch files, NOT the user's workspace. workspace_* tools access real workspace files; use workspace_write_file with a workspace-relative path (for example snake/index.html) when creating code, games, documents, or other user deliverables. Virtual scratch paths use forward slashes such as /notes.txt, never host paths or drive letters. If a tool returns an error, correct the arguments and continue; inspect the state before retrying any action that may already have executed. The separately granted shell tool executes on the host. Never claim scratch writes modified the workspace. Before your first tool call, briefly tell the user what you are about to check or do. After a meaningful result or a change of plan, give one short factual progress update before the next tool call. Describe observable actions and findings, not private reasoning. Avoid narrating every trivial tool call. End with a concise result and verification summary. Long-term memory is managed only by Apsis remember/update_memory tools.",
   });
-  const previous = restoreCheckpoint(options.session.engineState);
   const previousMessages = previous
     ? previous.messages
     : options.session.messages
         .filter(
           (message) =>
+            (!persistent || !message.id.startsWith("work-result-")) &&
             message.status === "complete" &&
             (!message.delivery || message.delivery.state === "applied"),
         )
@@ -540,13 +554,20 @@ export async function runDeep(options: RunOptions) {
             : new AIMessage(message.content),
         );
   let input = {
-    messages: [...previousMessages, new HumanMessage(options.prompt)],
+    messages: [
+      ...previousMessages,
+      ...backgroundResults.map(
+        (message) =>
+          new AIMessage({ id: message.id, content: message.content }),
+      ),
+      new HumanMessage(options.prompt),
+    ],
 
     ...(previous?.todos ? { todos: previous.todos } : {}),
   };
   let final: DeepValue | undefined;
   let text = "";
-  const initialIds = new Set(previousMessages.map((m) => m.id).filter(Boolean));
+  const initialIds = new Set(input.messages.map((m) => m.id).filter(Boolean));
   const usageById = new Map<
     string,
     { input_tokens: number; output_tokens: number }
@@ -665,7 +686,7 @@ export async function runDeep(options: RunOptions) {
               runId,
               mapChatMessagesToStoredMessages(persisted.messages),
             );
-            const safe = checkpoint(persisted);
+            const safe = saveState(persisted);
             const last = final.messages.at(-1);
             if (
               safe &&
@@ -787,6 +808,6 @@ export async function runDeep(options: RunOptions) {
   return {
     text,
     ...(hasUsage ? { usage } : {}),
-    engineState: checkpoint(final),
+    engineState: saveState(final),
   };
 }

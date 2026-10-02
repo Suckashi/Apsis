@@ -1,6 +1,6 @@
 import { join, resolve } from "node:path";
 
-export const DEFAULT_DATA_DIR = ".apsis-v4";
+export const DEFAULT_DATA_DIR = ".apsis-v5";
 
 export interface DirectoryOptions {
   dataDir?: string;

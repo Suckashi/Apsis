@@ -2,6 +2,33 @@ import { getSettingsLocale } from "./settings-locale.ts";
 
 // Source messages are stable dictionary keys. User content is never translated.
 export const english: Record<string, string> = {
+  "工作位置：": "Work location: ",
+  "背景工作需要你的核准；你仍可繼續聊天。":
+    "Background work needs your approval. You can keep chatting.",
+  "管理助理使用的模型連線。": "Manage model connections for your assistant.",
+  "記住的核准只適用於原執行，不包含重大或未知影響。":
+    "Remembered approval applies only to the original run, excluding critical or unknown effects.",
+  "限原執行，不含重大操作": "Original run only; critical actions excluded",
+  已停止: "Stopped",
+  排隊中: "Queued",
+  "連線中斷，工作狀態尚未確認": "Connection lost; work state is unconfirmed",
+  "尚無新進度，等待更新": "No recent progress; waiting for an update",
+  工作已中斷: "Work interrupted",
+  準備好了: "Ready when you are",
+  "一位助理，一段持續的對話。": "One assistant. One ongoing conversation.",
+  背景工作: "Background work",
+  交辦獨立工作: "Give your assistant independent work",
+  開始背景工作: "Start background work",
+  "工作會在這裡更新，你可以繼續聊天。":
+    "Work updates appear here. You can keep chatting.",
+  停止這項工作: "Stop this work",
+  補充這項工作: "Steer this work",
+  執行細節: "Execution details",
+  載入紀錄: "Load record",
+  核准一次: "Approve once",
+  自動處理一般操作: "Automate ordinary actions",
+  "重大或未知影響的操作一律需要當次核准。":
+    "Critical or unknown effects always require fresh approval.",
   暫時無法讀取網頁檢查紀錄: "Could not load the web check record",
   尚未進行網頁操作驗證: "No web interaction check yet",
   "檔案已變更，網頁需要重新驗證":

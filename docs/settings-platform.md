@@ -1,11 +1,13 @@
 # Settings platform
 
+> Development redesign: see [single-assistant behavior and limits](single-assistant.md). Roster, role-template and manual Bot-delegation instructions below describe the earlier product and are not available in this phase. Use a new schema-5 directory; preserve older data.
+
 ## Current runtime and format
 
 Deep Agents is the only runtime. Supported providers are OpenAI, Anthropic,
 Ollama and OpenAI-compatible APIs. There are no Codex bridges, provider aliases
-or automatic data migrations. Local knowledge uses schema 4; older stores are
-rejected before any database is opened. This version defaults to `.apsis-v4/`;
+or automatic data migrations. Local knowledge uses schema 5; older stores are
+rejected before any database is opened. This version defaults to `.apsis-v5/`;
 `APSIS_DATA_DIR` can select a custom location. Existing `.apsis/` data is not
 deleted or converted.
 
@@ -19,8 +21,8 @@ once at startup, then keeps an immutable snapshot for that run.
 (the SHA-256 of `settings.toml`). `PATCH /api/v2/settings` requires that revision
 and a partial update. Writes preserve TOML comments and use a file lock, a backup,
 and an atomic replacement; stale writes return 409 without replacing user edits.
-General settings and providers/models now share `.apsis-v4/settings.toml`; HTTP MCP
-declarations live in `.apsis-v4/mcp.json`. New stores create these files directly. Retired SQLite settings/connectors and
+General settings and providers/models now share `.apsis-v5/settings.toml`; HTTP MCP
+declarations live in `.apsis-v5/mcp.json`. New stores create these files directly. Retired SQLite settings/connectors and
 connection JSON files are not read. See [configuration files](config-files-design.md) for the implemented
 format, backups and editing behavior.
 
@@ -61,7 +63,7 @@ on all platforms and is not an OS sandbox; path rules do not constrain shell cod
 See [approval modes and Bash](approval-modes.md) for the full ordering.
 
 All Bots automatically receive shared skills from `<dataDir>/skills` (normally
-`.apsis-v4/skills`) and `~/.agents/skills`. Each skill is a directory with `SKILL.md`;
+`.apsis-v5/skills`) and `~/.agents/skills`. Each skill is a directory with `SKILL.md`;
 YAML `name` and `description` are optional. Apsis-local skills win name collisions.
 Discovery refreshes on list/context reads without a watcher. Invalid skills are
 skipped and reported in Execution & language. Full content and relative text
@@ -75,7 +77,7 @@ as `SKILL.md` directories; there is no Bot/template `skillIds` selection.
 for a different body with an existing name. Global skills are never written by
 these APIs.
 
-Bots still select MCP connectors explicitly. Configure them in `.apsis-v4/mcp.json`;
+Bots still select MCP connectors explicitly. Configure them in `.apsis-v5/mcp.json`;
 the setup page is hidden, but connector APIs and per-Bot selection remain.
 The sidebar contains Execution & language, Model connections, and Bot templates.
 Remembered approvals live under Advanced permissions; the three modes and policy

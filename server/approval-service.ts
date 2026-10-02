@@ -1,6 +1,8 @@
+import { classifyAction } from "./action-effects.ts";
 import { randomUUID, createHash } from "node:crypto";
 
-import { resolve } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { Workspace } from "./workspace.ts";
 
 import type { TaskService } from "./tasks.ts";
 
@@ -29,12 +31,29 @@ interface Dependencies {
   settings: SettingsService;
   tasks: TaskService;
   workLocation: (bot: Bot, runId?: string) => WorkLocation;
+  browserTarget?: (sessionId: string) => unknown;
 }
 
 export class ApprovalService {
   private readonly deps: Dependencies;
   constructor(deps: Dependencies) {
     this.deps = deps;
+  }
+  private fileTarget(root: string, input: string) {
+    const target = Workspace.target(root, input);
+    try {
+      const stat = lstatSync(target);
+      return {
+        path: realpathSync(target),
+        ino: stat.ino,
+        size: stat.size,
+        modified: stat.mtimeMs,
+      };
+    } catch (error) {
+      // Only a genuinely absent target may receive new-file treatment.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return { path: target, missing: true };
+    }
   }
   permissionContext(botId: string, runId: string) {
     const jobs = this.deps.db.jobs.list();
@@ -61,10 +80,8 @@ export class ApprovalService {
       job?.location?.path ||
       root?.location?.path ||
       (root?.workContextId
-        ? this.deps.tasks.locations.ensure(
-            this.deps.bot(root.botId).sessionId,
-            root.workContextId,
-          ).path
+        ? this.deps.tasks.locations.ensure(root.sessionId!, root.workContextId)
+            .path
         : this.deps.workLocation(this.deps.bot(botId), runId).path);
     const scopeKey = root
       ? JSON.stringify([root.botId, root.workContextId || root.id])
@@ -88,7 +105,7 @@ export class ApprovalService {
     const confirmKnowledge =
       !!job?.workContextId &&
       !!this.deps.tasks.store.conversations.context(
-        this.deps.bot(botId).sessionId,
+        job.sessionId!,
         job.workContextId,
       ).git &&
       !!job.location?.projectId &&
@@ -134,10 +151,25 @@ export class ApprovalService {
           entry.key === key &&
           context.owners.some((owner) => owner.id === entry.ownerBotId),
       );
+    let targetExists: boolean | undefined;
+    if (path && tool !== "shell") {
+      try {
+        targetExists =
+          this.fileTarget(context.workspace, path).missing !== true;
+      } catch {
+        return {
+          effect: "deny",
+          reason: "invalid-path",
+          explicitAsk: false,
+          matchedRuleIds: [],
+        } as PolicyDecision;
+      }
+    }
     const decision = evaluatePolicy(
       rules,
       {
         tool,
+        args: a,
         botId,
         botIds: context.owners.map((owner) => owner.id),
         path,
@@ -153,6 +185,7 @@ export class ApprovalService {
         approvalMode: settings.approvalMode,
         dangerousCommandGuard: settings.dangerousCommandGuard,
         remembered,
+        targetExists,
         ...filePolicyContext(
           context.workspace,
           tool === "shell" ? undefined : path,
@@ -189,6 +222,7 @@ export class ApprovalService {
             .digest("hex")
         : undefined;
     return JSON.stringify({
+      runId,
       scope: context.scopeKey,
       workspace: context.workspace,
       tool,
@@ -229,6 +263,16 @@ export class ApprovalService {
             )
             .map((entry) => entry.id)
             .sort(),
+          target: (() => {
+            if (tool === "browser") {
+              const job = this.deps.db.jobs.list({ runId })[0];
+              return this.deps.browserTarget?.(
+                job?.sessionId || this.deps.bot(botId).sessionId,
+              );
+            }
+            if (!a?.path) return undefined;
+            return this.fileTarget(context.workspace, a.path);
+          })(),
           paths: filePolicyContext(
             context.workspace,
             tool === "shell" ? undefined : a?.path,
@@ -258,7 +302,11 @@ export class ApprovalService {
     };
     if (policy.effect === "allow") return receipt;
     signal?.throwIfAborted();
+    const ownerJob = this.deps.db.jobs.list({ runId })[0];
     const approval: Approval = {
+      impact: classifyAction(tool, args as Record<string, unknown>).impact,
+      jobId: ownerJob?.id,
+      sessionId: ownerJob?.sessionId,
       workContextId: this.deps.tasks.runs.records.get(runId)?.workContextId,
       location: this.deps.workLocation(this.deps.bot(botId), runId),
       reason: policy.reason,
@@ -266,7 +314,12 @@ export class ApprovalService {
       matchedRuleIds: policy.matchedRuleIds,
       rememberAllowed:
         !["remember", "update_memory", "manage_memory"].includes(tool) &&
-        !["dangerous-command", "unanalyzable-command"].includes(policy.reason),
+        ![
+          "dangerous-command",
+          "unanalyzable-command",
+          "critical-action",
+          "unknown-effect",
+        ].includes(policy.reason),
       fingerprint,
       id: randomUUID(),
       botId,
@@ -291,7 +344,7 @@ export class ApprovalService {
       const abort = () => {
         this.deps.execution.pending.delete(approval.id);
         this.deps.db.approvals.put({ ...approval, status: "expired" });
-        this.deps.notify(botId);
+        this.deps.notify(botId, ownerJob?.id);
         reject(new Error("核准等待已取消。"));
       };
       this.deps.execution.pending.set(approval.id, (value) => {
@@ -299,7 +352,7 @@ export class ApprovalService {
         resolve(value);
       });
       signal?.addEventListener("abort", abort, { once: true });
-      this.deps.notify(botId);
+      this.deps.notify(botId, ownerJob?.id);
       if (signal?.aborted) abort();
     }).finally(resume);
     if (!approved)
@@ -351,6 +404,6 @@ export class ApprovalService {
       });
     this.deps.execution.pending.get(id)!(approved);
     this.deps.execution.pending.delete(id);
-    this.deps.notify(approval.botId);
+    this.deps.notify(approval.botId, approval.jobId);
   }
 }

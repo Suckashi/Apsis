@@ -7,9 +7,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runDeep } from "../server/engines/deep.ts";
+import { ConversationStore } from "../server/conversations.ts";
 import { Store } from "../server/store.ts";
 import { Workspace } from "../server/workspace.ts";
-import { restoreCheckpoint } from "../server/context-checkpoint.ts";
+import { checkpoint, restoreCheckpoint } from "../server/context-checkpoint.ts";
 import type { RunOptions, SteerHandler } from "../server/runtime.ts";
 import { steeringMiddleware } from "../server/steering-middleware.ts";
 import { HumanMessage } from "@langchain/core/messages";
@@ -260,4 +261,90 @@ test("provider retries consume the same finite model budget", async (t) => {
   t.after(f.close);
   await assert.rejects(f.run({ maxTurns: 2 }), /已達本次 2 次模型回合上限/);
   assert.equal(f.requests.length, 2);
+});
+
+test("checkpointed main turns consume durable background results once across paging, restart and compaction", async (t) => {
+  const f = await fixture((res, n, body) => {
+    const content = JSON.stringify(body.messages);
+    if (n === 2) {
+      assert.equal(content.split("BACKGROUND_PROOF_42").length - 1, 1);
+      // A completion after the input snapshot must not be acknowledged by this run.
+      f.store.conversations.append("fixture", {
+        id: "work-result-later",
+        role: "assistant",
+        status: "complete",
+        content: "LATER_PROOF_73",
+      });
+    }
+    if (n === 3) {
+      assert.equal(content.split("LATER_PROOF_73").length - 1, 1);
+      assert.equal(
+        content.includes("BACKGROUND_PROOF_42"),
+        false,
+        "compacted results are not reinserted",
+      );
+    }
+    if (n === 4) assert.equal(content.split("LATER_PROOF_73").length - 1, 1);
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    const answer =
+      n === 2 && content.includes("BACKGROUND_PROOF_42")
+        ? "The completed work found 42."
+        : "finished";
+    res.end(
+      `data: ${JSON.stringify({ id: `answer-${n}`, object: "chat.completion.chunk", model: "fixture", choices: [{ index: 0, delta: { role: "assistant", content: answer }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+    );
+  });
+  t.after(f.close);
+  const history = f.store.conversations;
+  const context = history.activeId("fixture");
+  const first = await f.run({ prompt: "Remember our ongoing conversation." });
+  assert.ok(first.engineState);
+  history.saveCheckpoint("fixture", context, first.engineState);
+  const completion = {
+    id: "work-result-completed",
+    role: "assistant" as const,
+    status: "complete" as const,
+    content: "BACKGROUND_PROOF_42",
+  };
+  history.append("fixture", completion);
+  history.append("fixture", completion); // Report retry/crash window.
+  for (let i = 0; i < 60; i++)
+    history.append("fixture", {
+      id: `paging-${i}`,
+      role: "assistant",
+      status: "complete",
+      content: "Other transcript entry",
+    });
+  assert.equal(
+    history.load("fixture").messages.some((m) => m.id === completion.id),
+    false,
+  );
+  history.db.close();
+  f.store.conversations = new ConversationStore(f.store.directory);
+  const second = await f.run({
+    prompt: "What did the completed background work find?",
+  });
+  assert.equal(second.text, "The completed work found 42.");
+  assert.ok(second.engineState?.backgroundResultsThrough);
+  // A compacted checkpoint retains the receipt even when the original message disappears.
+  f.store.conversations.saveCheckpoint(
+    "fixture",
+    context,
+    checkpoint({
+      messages: [
+        new HumanMessage("Summary of prior conversation and completed work"),
+      ],
+      backgroundResultsThrough: second.engineState!.backgroundResultsThrough,
+    })!,
+  );
+  const third = await f.run({ prompt: "What completed since then?" });
+  f.store.conversations.saveCheckpoint("fixture", context, third.engineState!);
+  f.store.conversations.db.close();
+  f.store.conversations = new ConversationStore(f.store.directory);
+  await f.run({ prompt: "Continue." });
+  assert.equal(
+    f.requests.length,
+    4,
+    "only text turns, no history tool or external action replay",
+  );
 });

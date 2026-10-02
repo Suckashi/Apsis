@@ -166,9 +166,9 @@ try {
   await exited;
   assert.equal(server.exitCode, 0, serverOutput);
   const saved = JSON.parse(
-    await readFile(join(temporary, ".apsis-v4", "state.json"), "utf8"),
+    await readFile(join(temporary, ".apsis-v5", "state.json"), "utf8"),
   );
-  assert.equal(saved.schemaVersion, 4);
+  assert.equal(saved.schemaVersion, 5);
   console.log(
     `Source release OK: ${distributed.version}; clean archive, npm ci, docs, build, local UI/API, fresh store and graceful shutdown.`,
   );

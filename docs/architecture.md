@@ -1,9 +1,9 @@
 # Apsis architecture
 
 Apsis is a single-owner, single-process Node.js application. Deep Agents is the
-only runtime; a Bot selects its provider and model. This version uses schema 4
+only runtime; the single assistant profile selects its provider and model. This version uses schema 5
 and supports only the current data model. Older stores are rejected before
-opening databases, with their original files preserved. Startup defaults to a new `.apsis-v4/` directory, leaving older `.apsis/` stores
+opening databases, with their original files preserved. Startup defaults to a new `.apsis-v5/` directory, leaving older `.apsis/` stores
 untouched. No automatic import is performed. `server/app-directories.ts` defines
 one directory policy for the app, sharing and live model checks. `APSIS_DATA_DIR`
 selects a custom location; the workspace defaults to `<dataDir>/workspace`.
@@ -46,8 +46,7 @@ context-scoped scratch backend. Native `task` creates ephemeral subagents for
 internal exploration and analysis. Children inherit guarded tools and permission
 context, and `deep-observation.ts` persists their public activity in the run
 timeline; private reasoning is not exposed. Native `execute` is disabled. Host
-execution uses Apsis Shell authorization and journaling; `delegate_task` assigns
-persistent work to another Bot with its own identity and independent context.
+execution uses Apsis Shell authorization and journaling; `start_background_work` submits persistent independent work with its own execution session and workspace.
 
 ## Browser boundary
 
@@ -67,7 +66,7 @@ artifact cards and Markdown/icons are separate components.
 
 ## Execution
 
-A Bot executes one queued job at a time. Different Bots may run concurrently.
+The main conversation runs one job at a time. Each background job has its own execution session; a shared background pool limits concurrency while main chat retains admission.
 Messages during active chat become steering at the next invocation boundary;
 otherwise they enter the queue. Receipts distinguish received, applied and
 not-applied instructions. Retrying an HTTP request does not duplicate a message.
@@ -105,7 +104,7 @@ explicit `deepagents@1.14.0` engine tag. Raw history remains separate.
 | ---------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `product.sqlite`                   | Bots, templates, jobs, approvals, artifacts, routines, receipts and events                      |
 | `conversations.sqlite`             | Session metadata, paged messages, FTS history, WorkContexts, checkpoints and compaction records |
-| `state.json` (schema 4)            | Projects, memories and private skills; serialized atomic knowledge mutations                    |
+| `state.json` (schema 5)            | Projects, memories and private skills; serialized atomic knowledge mutations                    |
 | `settings.toml` / `mcp.json`       | Current model/runtime/UI configuration and HTTP MCP declarations                                |
 | `skills/` plus `~/.agents/skills/` | Shared `SKILL.md` directories, discovered on demand                                             |
 | `runs/` / `context-files/`         | Operation journals, private scratch and offloaded context                                       |
@@ -132,8 +131,7 @@ demand. Documents and tool output remain untrusted task data. Relative file
 paths and symlinks are checked separately from shell policy. Shell runs on the
 host and is not an operating-system sandbox.
 
-Templates copy role, avatar, model, connectors and permission rules, excluding
-credentials, conversations, memories and runtime state. The locale controls UI
+The single assistant retains avatar, model, connectors and permission rules. Role templates and roster creation are not part of the active experience. The locale controls UI
 text without translating source messages or evidence.
 
 Run `npm run check`, `npm test` and `npm run build`. Browser scripts verify chat,
@@ -141,3 +139,5 @@ Bot delegation, settings, context, files and mobile composer flows using isolate
 stores and deterministic model fixtures. They do not certify live provider
 credentials. See [settings](settings-platform.md), [context and memory](conversation-context.md),
 and [chat work](coding-workbench.md) for detailed behavior.
+
+The [single-assistant design](single-assistant.md) specifies mandatory critical-action checks, job/session ownership, capacity, browser isolation, delivery deduplication and current limits.

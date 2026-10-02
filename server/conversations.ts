@@ -209,6 +209,19 @@ export class ConversationStore {
         JSON.stringify(value),
       );
   }
+  /** Durable completion inbox; independent of the UI's paged transcript. */
+  backgroundResults(sessionId: string, contextId: string, after: number) {
+    this.context(sessionId, contextId);
+    return this.db
+      .prepare(
+        "SELECT seq,value FROM messages WHERE session_id=? AND context_id=? AND channel='chat' AND id GLOB 'work-result-*' AND json_extract(value,'$.status')='complete' AND seq>? ORDER BY seq",
+      )
+      .all(sessionId, contextId, after)
+      .map((row) => ({
+        ...decode<ChatMessage>(row)!,
+        sequence: Number(row.seq),
+      }));
+  }
   updateDelivery(
     sessionId: string,
     messageId: string,

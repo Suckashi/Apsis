@@ -22,5 +22,25 @@ export class ExecutionState {
     string,
     { prompt: string; request: Promise<ChatMessage> }
   >();
+  private readonly resources = new Set<string>();
+  async withResource<T>(
+    key: string,
+    operation: () => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    while (this.resources.has(key)) {
+      signal?.throwIfAborted();
+      if (this.closed) throw new Error("Execution is closed");
+      await new Promise((done) => setTimeout(done, 25));
+    }
+    signal?.throwIfAborted();
+    if (this.closed) throw new Error("Execution is closed");
+    this.resources.add(key);
+    try {
+      return await operation();
+    } finally {
+      this.resources.delete(key);
+    }
+  }
   closed = false;
 }

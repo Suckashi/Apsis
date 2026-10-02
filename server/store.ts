@@ -41,7 +41,7 @@ export class Store {
       );
       if (!parsed.success)
         throw new Error(
-          "不支援的本機資料格式；此版本只接受 schema 4，不會遷移或覆寫舊資料。",
+          "不支援的本機資料格式；此版本只接受 schema 5，不會遷移或覆寫舊資料。",
         );
       knowledge = parsed.data;
       await access(join(this.directory, "conversations.sqlite")).catch(() => {
@@ -62,7 +62,7 @@ export class Store {
           throw new Error("知識資料檔遺失，已停止啟動，請還原完整備份。");
       }
       fresh = true;
-      knowledge = { schemaVersion: 4, projects: [], memories: [], skills: [] };
+      knowledge = { schemaVersion: 5, projects: [], memories: [], skills: [] };
     }
     this.conversations = new ConversationStore(this.directory);
     this.state = knowledge;

@@ -35,7 +35,50 @@ export class JobService {
   constructor(deps: Dependencies) {
     this.deps = deps;
   }
-  async submit(
+  private readonly submissions = new Map<
+    string,
+    { fingerprint: string; promise: Promise<Job> }
+  >();
+  submit(
+    id: string,
+    input: Record<string, unknown>,
+    delegation: Pick<
+      Job,
+      | "delegatedBy"
+      | "delegatedByName"
+      | "parentJobId"
+      | "rootJobId"
+      | "delegationPath"
+      | "permissionBotIds"
+    > = {},
+    inheritedLocation?: WorkLocation,
+    contextGit?: import("../shared/coding.ts").ConversationWorkspace["git"],
+  ) {
+    const key = string(input.requestId, 100);
+    const fingerprint = JSON.stringify([
+      id,
+      input,
+      delegation,
+      inheritedLocation,
+      contextGit,
+    ]);
+    const pending = this.submissions.get(key);
+    if (pending) {
+      if (pending.fingerprint !== fingerprint)
+        fail("Request ID already used", 409);
+      return pending.promise;
+    }
+    const promise = this.enqueue(
+      id,
+      input,
+      delegation,
+      inheritedLocation,
+      contextGit,
+    ).finally(() => this.submissions.delete(key));
+    this.submissions.set(key, { fingerprint, promise });
+    return promise;
+  }
+  private async enqueue(
     id: string,
     input: Record<string, unknown>,
     delegation: Pick<
@@ -52,7 +95,7 @@ export class JobService {
   ) {
     if (this.deps.execution.closed) fail("服務正在關閉。", 503);
     const bot = this.deps.writableBot(id);
-    const executionSessionId = bot.sessionId;
+    let executionSessionId = bot.sessionId;
     const prompt = string(input.prompt);
     const requestId = string(input.requestId, 100);
     const existing = this.deps.db.jobs.get(requestId);
@@ -60,6 +103,31 @@ export class JobService {
       if (existing.botId !== id || existing.prompt !== prompt)
         fail("請求 ID 已使用。", 409);
       return existing;
+    }
+    if (delegation.parentJobId) {
+      const parent =
+        this.deps.db.jobs.get(delegation.parentJobId) ||
+        fail("Parent work not found", 409);
+      const settings =
+        this.deps.execution.jobSettings.get(parent.id) ||
+        this.deps.settings.read();
+      let depth = 1,
+        ancestor: Job | undefined = parent;
+      const visited = new Set<string>();
+      while (ancestor?.parentJobId) {
+        if (visited.has(ancestor.id)) fail("Cyclic work ancestry", 409);
+        visited.add(ancestor.id);
+        depth++;
+        ancestor = this.deps.db.jobs.get(ancestor.parentJobId);
+      }
+      if (
+        depth > settings.maxDelegationDepth ||
+        this.deps.db.jobs
+          .list()
+          .filter((j) => j.rootJobId === (parent.rootJobId || parent.id))
+          .length >= settings.maxDelegatedJobs
+      )
+        fail("Background work limit reached", 409);
     }
     this.deps.validateContextModel(bot);
     if (
@@ -105,20 +173,23 @@ export class JobService {
         : input.contextKind === "routine"
           ? "routine"
           : "chat");
+    if (contextKind !== "chat")
+      executionSessionId = (await this.deps.tasks.create({ botId: bot.id })).id;
     const workContextId =
-      retry?.workContextId ??
-      (contextKind === "chat"
-        ? this.deps.tasks.store.conversations.activeId(executionSessionId)
-        : this.deps.tasks.store.conversations.createContext(
-            executionSessionId,
-            contextKind,
-          ).id);
+      (contextKind === "chat" ? retry?.workContextId : undefined) ||
+      this.deps.tasks.store.conversations.activeId(executionSessionId);
+    if (contextKind !== "chat")
+      this.deps.tasks.store.conversations.updateContext(
+        executionSessionId,
+        workContextId,
+        { kind: contextKind },
+      );
     this.deps.tasks.store.conversations.context(
       executionSessionId,
       workContextId,
     );
     const carried = retry?.location || inheritedLocation;
-    if (carried && !retry)
+    if (carried && (!retry || contextKind !== "chat"))
       this.deps.tasks.locations.bind(
         executionSessionId,
         workContextId,
@@ -183,6 +254,7 @@ export class JobService {
     }
     if (this.deps.execution.closed) fail("服務正在關閉。", 503);
     const job: Job = {
+      sessionId: executionSessionId,
       location,
       fileReferences,
       workContextId,
@@ -198,146 +270,70 @@ export class JobService {
     };
     this.deps.db.jobs.put(job);
     this.deps.notify(id, job.id);
-    void this.drain(bot).catch(console.error);
+    void this.drain(bot, executionSessionId).catch(console.error);
     return job;
   }
-  async delegate(
-    source: Bot,
-    runId: string,
-    callId: string,
-    input: Record<string, unknown>,
-    signal?: AbortSignal,
-  ) {
-    signal?.throwIfAborted();
-    this.deps.writableBot(source.id);
-    const target = this.deps.writableBot(string(input.botId, 100));
-    const prompt = string(input.prompt, 12000);
-    if (target.hidden) fail("這位 Bot 已隱藏，請選擇其他 Bot。");
-    const parent =
-      this.deps.db.jobs
-        .list()
-        .find(
-          (j) =>
-            j.botId === source.id &&
-            j.runId === runId &&
-            j.status === "running",
-        ) || fail("只能在執行中的任務派工。", 409);
-    const path = parent.delegationPath || [source.id];
-    const settings =
-      this.deps.execution.jobSettings.get(parent.id) ||
-      this.deps.settings.read();
-    if (path.includes(target.id)) fail("不能派工給自己或上游 Bot。");
-    if (path.length > settings.maxDelegationDepth)
-      fail("派工層數已達上限，請回報目前結果。");
-    const requestId =
-      "delegate-" +
-      createHash("sha256").update(`${parent.id}:${callId}`).digest("hex");
-    const rootJobId = parent.rootJobId || parent.id;
-    const jobs = this.deps.db.jobs.list();
-    if (!this.deps.db.jobs.get(requestId)) {
-      if (
-        jobs.filter((j) => j.rootJobId === rootJobId).length >=
-        settings.maxDelegatedJobs
-      )
-        fail("本次工作的派工數已達上限，請整理目前結果。");
-      // Include other roots: two independent conversations must not wait on each other.
-      const pending = jobs.filter(
-        (j) => j.delegatedBy && ["queued", "running"].includes(j.status),
-      );
-      const visited = new Set<string>();
-      const reachesSource = (id: string): boolean => {
-        if (id === source.id) return true;
-        if (visited.has(id)) return false;
-        visited.add(id);
-        return pending.some(
-          (j) => j.delegatedBy === id && reachesSource(j.botId),
-        );
-      };
-      if (reachesSource(target.id))
-        fail("這次派工會形成互相等待，請改派其他 Bot。");
-    }
-    const resume = this.deps.execution.slots.suspend(parent.id);
-    let child: Job;
-    try {
-      child = await this.submit(
-        target.id,
-        { prompt, requestId },
+  reportCompletion(job: Job) {
+    const bot = this.deps.writableBot(job.botId);
+    if (
+      !job.sessionId ||
+      job.sessionId === bot.sessionId ||
+      ["queued", "running"].includes(job.status)
+    )
+      return;
+    const id = `work-result-${job.id}`;
+    const history = this.deps.tasks.store.conversations;
+    // Transcript primary key deduplicates the crash window before the job marker.
+    if (!history.message(bot.sessionId, id))
+      history.append(
+        bot.sessionId,
         {
-          delegatedBy: source.id,
-          delegatedByName: source.name,
-          parentJobId: parent.id,
-          rootJobId,
-          delegationPath: [...path, target.id],
-          permissionBotIds: [
-            ...new Set([...(parent.permissionBotIds || path), target.id]),
-          ],
+          id,
+          role: "assistant",
+          status: "complete",
+          createdAt: now(),
+          content: `${job.prompt.slice(0, 120)} — ${job.status}\n${job.result || job.error || ""}`,
         },
-        parent.location,
+        history.activeId(bot.sessionId),
       );
-    } catch (error) {
-      await resume();
-      throw error;
-    }
-    const cancel = () => {
-      const current = this.deps.db.jobs.get(child.id);
-      if (!current) return;
-      if (current.status === "queued")
-        this.deps.db.jobs.put(
-          transitionJob(current, "cancelled", "派工來源已停止。"),
-        );
-      else if (current.status === "running") {
-        this.deps.execution.cancelledDelegations.add(current.id);
-        this.deps.execution.jobControllers.get(current.id)?.abort();
-        this.deps.tasks.stop(target.sessionId);
-      }
-      this.deps.notify(target.id);
-    };
-    signal?.addEventListener("abort", cancel, { once: true });
-    try {
-      for (;;) {
-        if (signal?.aborted) {
-          cancel();
-          signal.throwIfAborted();
-        }
-        const current = this.deps.db.jobs.get(child.id);
-        if (!current) fail("接收派工的 Bot 或任務已刪除。", 404);
-        if (!["queued", "running"].includes(current!.status)) {
-          return {
-            jobId: child.id,
-            botId: target.id,
-            name: target.name,
-            status: current!.status,
-            result: current!.result || "",
-            error: current!.error,
-            artifacts: this.deps.db.artifacts
-              .list()
-              .filter(
-                (a) =>
-                  a.botId === target.id &&
-                  !!current!.runId &&
-                  a.runId === current!.runId,
-              ),
-          };
-        }
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    } finally {
-      signal?.removeEventListener("abort", cancel);
-      await resume();
-    }
+    this.deps.db.jobs.put({ ...job, completionMessageId: id });
   }
-  async drain(bot: Bot) {
-    const queueKey = bot.id;
-    const sessionId = bot.sessionId;
+  private readonly workspaceOwners = new Map<string, WorkLocation>();
+  private async workspaceTurn(job: Job, signal: AbortSignal) {
+    if (!job.location) return;
+    const { relative, isAbsolute, sep } = await import("node:path");
+    const inside = (a: string, b: string) => {
+      const r = relative(resolve(a), resolve(b));
+      return !r || (r !== ".." && !r.startsWith(".." + sep) && !isAbsolute(r));
+    };
+    while (
+      [...this.workspaceOwners.entries()].some(
+        ([id, location]) =>
+          id !== job.id &&
+          (inside(location.path, job.location!.path) ||
+            inside(job.location!.path, location.path)),
+      )
+    ) {
+      signal.throwIfAborted();
+      await new Promise((done) => setTimeout(done, 25));
+    }
+    signal.throwIfAborted();
+    this.workspaceOwners.set(job.id, job.location);
+    signal.throwIfAborted();
+  }
+  async drain(bot: Bot, sessionId = bot.sessionId) {
+    const queueKey = sessionId;
     if (this.deps.execution.active.has(queueKey) || this.deps.execution.closed)
       return;
     this.deps.execution.active.add(queueKey);
     try {
       for (;;) {
-        const job = this.deps.db.jobs.list({
-          botId: bot.id,
-          status: "queued",
-        })[0];
+        const job = this.deps.db.jobs
+          .list({
+            botId: bot.id,
+            status: "queued",
+          })
+          .find((j) => j.sessionId === sessionId);
         if (
           !job ||
           this.deps.execution.closed ||
@@ -355,9 +351,10 @@ export class JobService {
         this.deps.execution.jobControllers.set(job.id, controller);
         this.deps.db.jobs.put(job);
         try {
+          await this.workspaceTurn(job, controller.signal);
           await this.deps.execution.slots.acquire(
             job.id,
-            job.rootJobId || job.id,
+            sessionId === bot.sessionId ? "main-chat" : "background",
             this.deps.execution.jobSettings.get(job.id)!.maxConcurrent,
             controller.signal,
           );
@@ -423,14 +420,18 @@ export class JobService {
             transitionJob(job, status, (error as Error).message),
           );
         } finally {
+          this.workspaceOwners.delete(job.id);
           this.deps.execution.cancelledDelegations.delete(job.id);
           this.deps.execution.slots.release(job.id);
-          this.deps.execution.slots.forgetRoot(job.rootJobId || job.id);
+          this.deps.execution.slots.forgetRoot(
+            sessionId === bot.sessionId ? "main-chat" : "background",
+          );
           this.deps.execution.jobControllers.delete(job.id);
           this.deps.execution.jobSettings.delete(job.id);
-          this.deps.execution.steers.delete(bot.id);
+          this.deps.execution.steers.delete(sessionId);
           await this.deps.finishSteering(sessionId, job.runId);
           this.deps.db.jobs.put(job);
+          this.reportCompletion(job);
           this.deps.notify(bot.id, job.id);
         }
       }

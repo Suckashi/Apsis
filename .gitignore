@@ -1,6 +1,7 @@
 node_modules/
 .apsis/
 .apsis-v4/
+.apsis-v5/
 .apsis-pre-deep-*/
 .env
 .env.*

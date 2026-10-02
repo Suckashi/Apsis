@@ -86,7 +86,7 @@ test("steering receipts separate enqueue and adoption, deduplicate concurrent re
     await f.close();
   });
   await f.request("messages", { prompt: "begin", requestId: "job-1" });
-  await until(() => f.product.execution.steers.has(f.bot.id));
+  await until(() => f.product.execution.steers.has(f.bot.sessionId));
   const responses = await Promise.all([
     f.request("steer", { prompt: "add constraint", requestId: "same" }),
     f.request("steer", { prompt: "add constraint", requestId: "same" }),
@@ -187,7 +187,7 @@ for (const outcome of ["failed", "completed"] as const) {
       await f.close();
     });
     await f.request("messages", { prompt: "begin", requestId: "job" });
-    await until(() => f.product.execution.steers.has(f.bot.id));
+    await until(() => f.product.execution.steers.has(f.bot.sessionId));
     const response = await f.request("steer", {
       prompt: "constraint",
       requestId: "receipt",
@@ -218,7 +218,7 @@ test("cancellation during receipt persistence rejects late enqueue and keeps a t
     await f.close();
   });
   await f.request("messages", { prompt: "begin", requestId: "job-boundary" });
-  await until(() => f.product.execution.steers.has(f.bot.id));
+  await until(() => f.product.execution.steers.has(f.bot.sessionId));
   const history = f.tasks.store.conversations;
   const original = history.append.bind(history);
   let intercepted = false;

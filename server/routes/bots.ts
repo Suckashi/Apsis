@@ -2,7 +2,7 @@ import { BotWorkspaceRoutes } from "./bot-workspaces.ts";
 import { BotConversationRoutes } from "./bot-conversations.ts";
 import { BotAssetRoutes } from "./bot-assets.ts";
 
-import { string, reply } from "../product-support.ts";
+import { string, reply, fail } from "../product-support.ts";
 
 import type { RouteDependencies, RequestContext } from "./contracts.ts";
 
@@ -93,6 +93,10 @@ export class BotRoutes {
       return true;
     }
     if (path === "/bots" && method === "POST") {
+      fail(
+        "Apsis has one personal assistant; use background work for independent tasks.",
+        409,
+      );
       const input = await body(req);
       reply(
         res,

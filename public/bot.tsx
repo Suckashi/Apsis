@@ -1,3 +1,4 @@
+import { AssistantPresence } from "./assistant-presence.tsx";
 import { ConversationMessages } from "./conversation-messages.tsx";
 import { ChatComposer } from "./chat-composer.tsx";
 import { useChatComposer } from "./use-chat-composer.ts";
@@ -11,7 +12,7 @@ import { RoutineEditor } from "./routine-editor.tsx";
 import { Settings } from "./settings-panel.tsx";
 import { ProjectSettings } from "./project-settings.tsx";
 import { api } from "./chat-api.ts";
-import { ChatRoster } from "./chat-roster.tsx";
+import { BackgroundWork } from "./background-work.tsx";
 
 import { ConversationChanges } from "./conversation-changes.tsx";
 import { FilePanel, WorkFolder } from "./file-panel.tsx";
@@ -348,7 +349,12 @@ function App() {
       ) || [];
   const bot = state?.bots.find((b) => b.id === selected);
   const running = !!detail?.session.running;
-  const pending = detail?.approvals.filter((a) => a.status === "pending") || [];
+  const pending =
+    detail?.approvals.filter(
+      (a) =>
+        a.status === "pending" &&
+        (!a.sessionId || a.sessionId === detail.bot.sessionId),
+    ) || [];
   const summaries = new Map(detail?.runSummaries.map((r) => [r.id, r]));
   const activeSummary = detail?.runSummaries.find(
     (r) => r.id === detail.session.activeRunId && r.status === "running",
@@ -388,7 +394,9 @@ function App() {
   const repairModel = () =>
     modelOptions.length ? setProfile(true) : setSettings(true);
   const queuedCount =
-    detail?.jobs.filter((j) => j.status === "queued").length || 0;
+    detail?.jobs.filter(
+      (j) => j.sessionId === detail.bot.sessionId && j.status === "queued",
+    ).length || 0;
   const cannotStartTopic =
     networkOffline ||
     !detail ||
@@ -485,90 +493,17 @@ function App() {
           <span className="brand-copy">
             <strong>Apsis</strong>
           </span>
-          <span className="brand-actions">
-            <button
-              className="new-bot"
-              aria-label={uiText("新增 Bot")}
-              title={uiText("新增 Bot")}
-              onClick={newBot}
-              disabled={creating || !state}
-            >
-              <Icon name="plus" size={20} />
-            </button>
-            <button
-              className="icon roster-close"
-              aria-label={uiText("關閉名單")}
-              title={uiText("收起 Bot 名單")}
-              onClick={closeList}
-            >
-              <Icon name="close" />
-            </button>
-          </span>
         </div>
-        {selected && (
-          <button
-            className="sidebar-new-topic"
-            disabled={cannotStartTopic}
-            onClick={() => void startTopic()}
-          >
-            <Icon name="plus" size={18} />
-            {startingTopic ? uiText("載入中…") : uiText("開啟新話題")}
-          </button>
+        <p className="assistant-intro">
+          {uiText("一位助理，一段持續的對話。")}
+        </p>
+        {detail && (
+          <BackgroundWork
+            detail={detail}
+            refresh={refresh}
+            connected={eventsConnected && !connectionLost && !networkOffline}
+          />
         )}
-        <div className="roster-search-control">
-          <label className="search">
-            <Icon name="search" size={16} />
-            <input
-              ref={rosterSearch}
-              aria-label={uiText("搜尋 Bot")}
-              placeholder={uiText("搜尋 Bot")}
-              value={query}
-              maxLength={200}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-          {!!query.length && (
-            <button
-              className="icon roster-search-clear"
-              aria-label={uiText("清除搜尋")}
-              onClick={() => {
-                setQuery("");
-                rosterSearch.current?.focus();
-              }}
-            >
-              <Icon name="close" size={16} />
-            </button>
-          )}
-        </div>
-        {query.trim().length >= 2 && bot && detail?.bot.id === selected && (
-          <button
-            className="roster-history-search"
-            aria-label={uiText("搜尋 {0} 的歷史訊息", [bot.name])}
-            title={bot.name}
-            onClick={() => openHistory(query.trim())}
-          >
-            <Icon name="clock" size={18} />
-            <span>
-              <strong>{uiText("搜尋歷史訊息")}</strong>
-              <small>{bot.name}</small>
-            </span>
-            <Icon name="chevron-right" size={14} />
-          </button>
-        )}
-        <div className="roster-heading">
-          <h2>{hidden ? uiText("已隱藏") : uiText("最近對話")}</h2>
-          <button onClick={() => setHidden(!hidden)}>
-            {hidden ? uiText("返回") : uiText("查看隱藏")}
-          </button>
-        </div>
-        <ChatRoster
-          bots={bots}
-          selected={selected}
-          select={select}
-          hidden={hidden}
-          query={query}
-          loading={!state}
-        />
         <div className="sidebar-bottom">
           <div className="sidebar-actions">
             <button
@@ -607,6 +542,26 @@ function App() {
         className="conversation conversation-shell"
         inert={listDrawer || detailsDrawer}
       >
+        {detail && (
+          <AssistantPresence
+            avatar={detail.bot.avatar}
+            status={detail.session.running ? "running" : "idle"}
+            progress={detail.currentProgress}
+            connected={eventsConnected && !connectionLost && !networkOffline}
+          />
+        )}
+        {detail?.approvals.some(
+          (a) => a.status === "pending" && a.sessionId !== detail.bot.sessionId,
+        ) && (
+          <button
+            className="background-attention"
+            onClick={() => {
+              if (!listVisible) toggleList();
+            }}
+          >
+            {uiText("背景工作需要你的核准；你仍可繼續聊天。")}
+          </button>
+        )}
         {selected && state && (
           <h1 className="visually-hidden">
             {uiText("與 {0} 的對話", [bot?.name || "Bot"])}
@@ -843,16 +798,6 @@ function App() {
                   className="bot-actions-menu"
                   closeOnSelect
                 >
-                  {!listVisible && (
-                    <button
-                      disabled={cannotStartTopic}
-                      onClick={() => void startTopic()}
-                      className="menu-new-topic"
-                    >
-                      <Icon name="plus" size={16} />
-                      {uiText("開啟新話題")}
-                    </button>
-                  )}
                   <button onClick={() => openHistory()}>
                     <Icon name="clock" size={16} />
                     {uiText("瀏覽先前話題")}
@@ -1132,11 +1077,9 @@ function App() {
           (p) => p.id === detail?.session.context?.location?.projectId,
         ) && (
           <ProjectSettings
-            project={
-              state.projects.find(
-                (p) => p.id === detail?.session.context?.location?.projectId,
-              )!
-            }
+            project={state.projects.find(
+              (p) => p.id === detail?.session.context?.location?.projectId,
+            )!}
             api={api}
             refresh={refresh}
             close={() => setProjectSettings(false)}

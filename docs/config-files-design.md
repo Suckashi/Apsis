@@ -1,10 +1,12 @@
 # Apsis 設定檔
 
-一般設定和模型連線使用 `.apsis-v4/settings.toml`，MCP 使用 `.apsis-v4/mcp.json`。
+> Development redesign: see [single-assistant behavior and limits](single-assistant.md). Roster, role-template and manual Bot-delegation instructions below describe the earlier product and are not available in this phase. Use a new schema-5 directory; preserve older data.
+
+一般設定和模型連線使用 `.apsis-v5/settings.toml`，MCP 使用 `.apsis-v5/mcp.json`。
 設定頁與手動編輯讀寫同一份檔案。這份文件已由最初的 JSON 設計稿更新為實作說明。
 
-路徑由 `createApp({ dataDir })` 決定，預設是啟動目錄下的 `.apsis-v4`。
-從本專案根目錄啟動時，位置為 `D:\Code\Apsis\.apsis-v4`。
+路徑由 `createApp({ dataDir })` 決定，預設是啟動目錄下的 `.apsis-v5`。
+從本專案根目錄啟動時，位置為 `D:\Code\Apsis\.apsis-v5`。
 目前只有這一層設定，不會自動讀取 Bot 工作目錄內的同名檔案。
 
 ## 分工
@@ -155,8 +157,8 @@ contextWindowTokens = 131072
 ## 初始化與復原
 
 新資料目錄直接建立目前格式的 `settings.toml` 與 `mcp.json`，不讀取舊 JSON、
-舊 SQLite 設定或連接器紀錄。知識資料只接受 schema 4；舊格式不會被轉換、
-刪除或覆寫。預設使用 `.apsis-v4/`，原本 `.apsis/` 不讀取、不修改；
+舊 SQLite 設定或連接器紀錄。知識資料只接受 schema 5；舊格式不會被轉換、
+刪除或覆寫。預設使用 `.apsis-v5/`，原本 `.apsis/` 不讀取、不修改；
 `APSIS_DATA_DIR` 可指定自訂資料目錄，工作資料夾預設位於該目錄的 `workspace/`。
 
 設定檔格式錯誤會阻止啟動。若檔案遺失但 `.initialized` 還在，請恢復完整備份

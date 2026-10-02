@@ -40,6 +40,7 @@ export class BotBrowser {
     }
     return page;
   }
+  readonly revisions = new Map<string, number>();
   directory: string;
   context?: BrowserContext;
   opening?: Promise<BrowserContext>;
@@ -66,13 +67,58 @@ export class BotBrowser {
     if (!page || page.isClosed()) {
       page = await this.context.newPage();
       this.pages.set(botId, page);
+      page.on("framenavigated", () =>
+        this.revisions.set(botId, (this.revisions.get(botId) || 0) + 1),
+      );
     }
     return page;
   }
-  async act(botId: string, input: Record<string, string>, external = false) {
+  async target(sessionId: string, input: unknown) {
+    const args = input as { action?: string; selector?: string } | null;
+    const page = this.externalPages.get(sessionId) || this.pages.get(sessionId);
+    if (!page || page.isClosed()) return { sessionId, page: null };
+    const target = args?.selector
+      ? await page.locator(args.selector).evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            tag: node.tagName,
+            id: node.id,
+            name: node.getAttribute("name"),
+            type: node.getAttribute("type"),
+            href: node.getAttribute("href"),
+            action: node.closest("form")?.getAttribute("action"),
+            label: (
+              node.getAttribute("aria-label") ||
+              node.textContent ||
+              ""
+            ).slice(0, 240),
+          })),
+        )
+      : undefined;
+    return { sessionId, url: page.url(), target };
+  }
+  private readonly actions = new Map<string, Promise<unknown>>();
+  act(botId: string, input: Record<string, string>, external = false) {
+    const previous = this.actions.get(botId) || Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(() => this.actOwned(botId, input, external));
+    this.actions.set(botId, next);
+    void next
+      .finally(() => {
+        if (this.actions.get(botId) === next) this.actions.delete(botId);
+      })
+      .catch(() => {});
+    return next;
+  }
+  private async actOwned(
+    botId: string,
+    input: Record<string, string>,
+    external: boolean,
+  ) {
     const page = external
       ? await this.externalPage(botId)
       : await this.page(botId);
+    this.revisions.set(botId, (this.revisions.get(botId) || 0) + 1);
     page.setDefaultTimeout(15000);
     if (input.action === "navigate") {
       const url = new URL(input.url);

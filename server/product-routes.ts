@@ -1,3 +1,4 @@
+import { AssistantRoutes } from "./routes/assistant.ts";
 import { CoreRoutes } from "./routes/core.ts";
 import { ProjectRoutes } from "./routes/projects.ts";
 import { FileRoutes } from "./routes/files.ts";
@@ -13,6 +14,7 @@ export class ProductRoutes {
   }[];
   constructor(deps: RouteDependencies) {
     this.handlers = [
+      new AssistantRoutes(deps),
       new CoreRoutes({
         bootstrap: deps.bootstrap,
         bot: deps.bot,

@@ -6,18 +6,17 @@ export const approvalModes = [
   {
     value: "manual",
     label: "一般核准",
-    description: "唯讀及符合條件的 Git 工作區寫入自動放行，其他操作要求核准。",
+    description: "重大或未知影響的操作一律需要當次核准。",
   },
   {
     value: "yolo",
     label: "需要時詢問",
-    description:
-      "一般操作直接執行；命中危險、敏感路徑或詢問規則時要求核准。無法分析的命令也會放行。",
+    description: "重大或未知影響的操作一律需要當次核准。",
   },
   {
     value: "auto",
-    label: "不要求核准",
-    description: "除明確禁止與硬性權限外自動放行，包括危險命令。",
+    label: "自動處理一般操作",
+    description: "重大或未知影響的操作一律需要當次核准。",
   },
 ] as const;
 

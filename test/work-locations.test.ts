@@ -312,7 +312,7 @@ test("delegation and routines inherit the work location and never the recipient'
   let workerId = "";
   const f = await fixture(t, async (o) => {
     if (o.prompt === "delegate")
-      await call(o, "delegate_task", { botId: workerId, prompt: "child" });
+      await call(o, "start_background_work", { prompt: "child" });
     else await call(o, "write_file", { path: "result.txt", content: o.prompt });
     return { text: "done" };
   });
@@ -326,7 +326,12 @@ test("delegation and routines inherit the work location and never the recipient'
     requestId: "root",
   });
   await f.finish();
-  assert.equal(await readFile(join(own.path, "result.txt"), "utf8"), "child");
+  const child = f.product.db.jobs.list().find((j) => j.prompt === "child")!;
+  assert.notEqual(child.location!.path, own.path);
+  assert.equal(
+    await readFile(join(child.location!.path, "result.txt"), "utf8"),
+    "child",
+  );
   await assert.rejects(stat(other.path), { code: "ENOENT" });
   assert.equal(f.product.workLocation(worker).id, other.id);
   const routine = await f.product.routines.routine(owner.id, {
@@ -345,7 +350,10 @@ test("delegation and routines inherit the work location and never the recipient'
   );
   await assert.rejects(stat(current.path), { code: "ENOENT" });
   const jobs = f.product.db.all<Job>("job");
-  assert.ok(jobs.every((j) => j.location?.id === own.id));
+  assert.equal(
+    jobs.find((j) => j.prompt === "scheduled")?.location?.id,
+    own.id,
+  );
 });
 
 test("file CRUD preserves drafts on conflict, paginates, handles dotfiles and restores without overwrite", async (t) => {
@@ -651,7 +659,7 @@ test("delegated deliveries appear in the original bot and old snapshots can be e
   let workerId = "";
   const f = await fixture(t, async (o) => {
     if (o.prompt === "delegate")
-      await call(o, "delegate_task", { botId: workerId, prompt: "publish" });
+      await call(o, "start_background_work", { prompt: "publish" });
     else {
       await call(o, "write_file", {
         path: "result.md",
@@ -670,11 +678,8 @@ test("delegated deliveries appear in the original bot and old snapshots can be e
   });
   await f.finish();
   const artifact = f.product.queries.detail(owner.id).artifacts[0];
-  assert.equal(artifact.deliveredFrom, worker.id);
-  assert.equal(
-    artifact.snapshotPath,
-    f.product.queries.detail(worker.id).artifacts[0].snapshotPath,
-  );
+  assert.equal(artifact.botId, owner.id);
+  assert.equal(f.product.queries.detail(worker.id).artifacts.length, 0);
   await writeFile(
     join(artifact.location!.path, artifact.path),
     "Changed source",

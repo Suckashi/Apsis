@@ -14,6 +14,7 @@ export type SteerHandler = (
   onApplied?: () => Promise<void>,
 ) => Promise<void>;
 export interface ToolOptions {
+  jobId?: string;
   memoryKey?: string;
   historyContextId?: string;
   checkToolPermission?: (
@@ -26,6 +27,7 @@ export interface ToolOptions {
     name: string,
     operation: () => Promise<T>,
     signal?: AbortSignal,
+    args?: unknown,
   ) => Promise<T>;
   runtimeSettings?: import("../shared/settings.ts").RuntimeSettings;
   modelSettings?: {

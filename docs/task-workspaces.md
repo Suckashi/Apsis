@@ -1,5 +1,7 @@
 # 持續對話與任務工作資料夾
 
+> Development redesign: see [single-assistant behavior and limits](single-assistant.md). Roster, role-template and manual Bot-delegation instructions below describe the earlier product and are not available in this phase. Use a new schema-5 directory; preserve older data.
+
 每位 Bot 保留原本的主對話。一般訊息延續目前任務；「開啟新話題」切開模型背景，但不清除聊天歷史。任務不需要專案就能開始。
 
 ## 工作位置
@@ -68,7 +70,7 @@ Git 差異與隔離 worktree 使用聊天 context；操作細節見 [聊天中�
 ## 格式與驗證
 
 本版不提供舊工作位置、context、排程或記憶的遷移。新資料目錄直接使用目前
-資料模型；schema 4 以外的 state.json 會停止啟動並保留原檔。
+資料模型；schema 5 以外的 state.json 會停止啟動並保留原檔。
 
 ```sh
 npm test

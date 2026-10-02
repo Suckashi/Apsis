@@ -27,6 +27,7 @@ import type { ProductQueries } from "../product-queries.ts";
 import type { ProductTools } from "../product-tools.ts";
 
 export interface RouteDependencies {
+  submit: import("../job-service.ts").JobService["submit"];
   bootstrap: () => Promise<void>;
   bot: BotService["bot"];
   browser: BotBrowser;

@@ -33,7 +33,7 @@ interface Dependencies {
   connectors: McpConfig;
   createDocument: ArtifactService["createDocument"];
   db: ProductDB;
-  delegate: JobService["delegate"];
+  submit: JobService["submit"];
   execution: ExecutionState;
   notify: (botId?: string, jobId?: string) => void;
   publish: ArtifactService["publish"];
@@ -78,7 +78,7 @@ export class ProductTools {
             signal,
           );
           this.deps.db.put("web-verification", receipt);
-          this.deps.notify(bot.id);
+          this.deps.notify(bot.id, this.deps.db.jobs.list({ runId })[0]?.id);
           if (receipt.status === "failed") {
             const failedIndex = receipt.steps.findIndex(
               (step) => step.status === "failed",
@@ -105,6 +105,7 @@ export class ProductTools {
             bot.id,
             job!.workContextId!,
             input.url,
+            job!.sessionId,
           );
         },
       ),
@@ -115,49 +116,40 @@ export class ProductTools {
         async () =>
           this.deps.tasks.projects.list().filter((p) => p.id !== "workspace"),
       ),
-      makeTool(
-        "list_bots",
-        "List available teammates with their IDs, names and roles. Use delegate_task to ask a teammate a question or assign work.",
-        [],
-        async () => ({
-          nextStep:
-            "If the user asked you to delegate work or ask a teammate, call delegate_task now using a listed id as botId and the task as prompt. This list is not a dispatch confirmation. Wait for delegate_task to return before giving your final answer.",
-          bots: this.deps.db.bots
-            .list()
-            .filter(
-              (b) =>
-                b.id !== bot.id &&
-                !b.hidden &&
-                !b.deletedAt &&
-                !this.deps.execution.deleting.has(b.id),
-            )
-            .map((b) => ({
-              id: b.id,
-              name: b.name,
-              role: b.description,
-              busy: this.deps.execution.active.has(b.id),
-            })),
-        }),
-      ),
       {
-        name: "delegate_task",
-        label: "派工給 Bot",
+        name: "start_background_work",
+        label: "Background work",
         description:
-          "Assign a concrete task or question to another Bot by ID. Supply all necessary context in prompt. Waits for the assigned job's result and artifact list. Does not expose the other Bot's private history or memory. External actions follow the selected approval mode.",
-        parameters: Type.Object({
-          botId: Type.String(),
-          prompt: Type.String(),
-        }),
+          "Start independent persistent work and return its job/session IDs immediately. Supply the complete task and necessary context. Uses its own workspace and conversation. Native task is for temporary within-run analysis. Results are delivered once to the main chat. Never assume completion from submission.",
+        parameters: Type.Object({ prompt: Type.String() }),
         execute: async (callId, input, signal) => {
-          const result = await this.deps.delegate(
-            bot,
-            runId,
-            callId,
-            (input || {}) as Record<string, unknown>,
-            signal,
+          signal?.throwIfAborted();
+          const parent = this.deps.db.jobs.list({ runId })[0];
+          if (!parent) fail("Missing parent job", 409);
+          const job = await this.deps.submit(
+            bot.id,
+            {
+              requestId: `background-${runId}-${callId}`,
+              prompt: (input as { prompt: string }).prompt,
+              contextKind: "routine",
+            },
+            {
+              parentJobId: parent!.id,
+              rootJobId: parent!.rootJobId || parent!.id,
+              permissionBotIds: parent!.permissionBotIds || [bot.id],
+            },
           );
           return {
-            content: [{ type: "text" as const, text: JSON.stringify(result) }],
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify({
+                  jobId: job.id,
+                  sessionId: job.sessionId,
+                  status: job.status,
+                }),
+              },
+            ],
             details: {},
           };
         },
@@ -182,7 +174,7 @@ export class ProductTools {
             status: "draft",
             createdAt: now(),
           });
-          this.deps.notify(bot.id);
+          this.deps.notify(bot.id, this.deps.db.jobs.list({ runId })[0]?.id);
           return draft;
         },
       ),
@@ -222,7 +214,11 @@ export class ProductTools {
           const job = this.deps.db.jobs
             .list()
             .find((j) => j.botId === bot.id && j.runId === runId);
-          return this.deps.browser.act(bot.id, a, !!job?.location?.projectId);
+          return this.deps.browser.act(
+            job?.sessionId || bot.sessionId,
+            a,
+            !!job?.location?.projectId,
+          );
         },
       ),
       {

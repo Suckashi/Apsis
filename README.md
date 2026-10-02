@@ -4,11 +4,13 @@
 
 [![Test](https://github.com/Suckashi/Apsis/actions/workflows/test.yml/badge.svg)](https://github.com/Suckashi/Apsis/actions/workflows/test.yml) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Apsis is a local-first Bot workspace for handing off work through conversation, following execution, and keeping the results.**
+**Apsis is a local-first personal assistant with one ongoing conversation and independent background work.**
 
-Each Bot has a role, model selection, continuing conversation and memory. Ask it to work, add instructions while it runs, and review its reply, files and expandable execution records in the same conversation. Files and Git changes appear on demand. Bots can delegate to teammates and run scheduled work.
+Chat while work runs, review expandable work cards, and steer or stop a specific job. Progress, decisions and results stay visible; execution details stay collapsed. Personalize the assistant with any of the 48 original avatars.
 
-![Apsis conversation with a completed report and downloadable artifact](docs/assets/conversation.png)
+The development branch uses a new schema-5 namespace and mandatory approval for critical or unknown effects, including in auto mode. See the [single-assistant design and limits](docs/single-assistant.md). Tagged releases below predate this redesign.
+
+![Apsis conversation with a completed report and downloadable artifact](docs/assets/single-assistant/desktop.png)
 
 _Actual desktop UI captured with isolated demonstration data and a deterministic model fixture; this is not a live model benchmark._
 
@@ -32,7 +34,7 @@ npm start
 
 On Linux, if browser system libraries are missing, use `npx playwright install --with-deps chromium`. Browser installation is needed for browser tools; basic chat can run without it. Source ZIP downloads from the [release page](https://github.com/Suckashi/Apsis/releases) also work: extract, open a terminal in the extracted directory, and run the same npm commands. This release distributes source, not a desktop installer or an npm package.
 
-Open <http://localhost:3100>. In **Settings & Tools → Model connections**, add a connection, run its streaming/tool-call test, and set it as the default. Select the initial Bot or create one, then send:
+Open <http://localhost:3100>. In **Settings & Tools → Model connections**, add a connection, run its streaming/tool-call test, and set it as the default. Open the assistant conversation, then send:
 
 > Create `hello.md` in the current working folder with a short introduction to Apsis. Publish it as a downloadable result and tell me what you checked.
 
@@ -46,14 +48,14 @@ Success means you can see the file, download the published artifact, expand the 
 | Turn information into a deliverable | Attach source material, ask for a report, and preview or download the published result.                   |
 | Keep a Bot working regularly        | Create a schedule with a timezone, test it, and inspect each execution's result. Apsis must stay running. |
 
-Native Deep Agents `task` subagents handle internal research and analysis within a run. `list_bots` / `delegate_task` assign persistent work to another Bot with its own identity and history. Native `execute` is disabled; host commands use Apsis's guarded Shell tool. See [architecture](docs/architecture.md).
+Native Deep Agents `task` handles temporary internal subagents. `start_background_work` creates durable independent work with its own session. Native `execute` is disabled; host commands use the guarded Shell tool. See [architecture](docs/architecture.md).
 
 For static web apps, `verify_web` checks real browser interactions, including hidden items, checkbox state and state after reload. Its retry limit tracks the failed check, so a different check does not prematurely end the Bot's work.
 `publish_file` bundles local assets only for an HTML entry. Omit `assets` to publish a Markdown or other single file as its own result card.
 
 ## Data and execution
 
-Data defaults to `.apsis-v4/`, including settings, conversation databases, memory, artifacts, browser state and the default workspace. `APSIS_DATA_DIR` in an optional `.env` selects a custom directory. Existing projects linked outside this directory remain in their original locations and need their own backups.
+Data defaults to `.apsis-v5/`, including settings, conversation databases, memory, artifacts, browser state and the default workspace. `APSIS_DATA_DIR` in an optional `.env` selects a custom directory. Existing projects linked outside this directory remain in their original locations and need their own backups.
 
 API keys stay server-side, and configuration can reference environment variables. Provider requests still send the required task context to the configured model service; “local-first” describes application storage and hosting. Protect the data directory and its backups as private data.
 
@@ -61,7 +63,7 @@ Shell runs on your host. Approval and path rules are not an operating-system san
 
 Shell records command output as UTF-8. Python commands launched through Shell also use UTF-8 for piped output.
 
-This release accepts schema 4 only. Older `.apsis/` data is left untouched and is not imported automatically.
+This release accepts schema 5 only. Older `.apsis/` data is left untouched and is not imported automatically.
 
 ## Contribute and verify
 

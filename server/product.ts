@@ -1,3 +1,4 @@
+import { Workspace } from "./workspace.ts";
 import type { ServerResponse } from "node:http";
 
 import { join, resolve, relative, isAbsolute, sep } from "node:path";
@@ -112,6 +113,16 @@ export class ProductService {
       tasks: this.tasks,
     });
     this.approvals = new ApprovalService({
+      browserTarget: (sessionId) => {
+        const page =
+          this.browser.externalPages.get(sessionId) ||
+          this.browser.pages.get(sessionId);
+        return {
+          sessionId,
+          url: page && !page.isClosed() ? page.url() : undefined,
+          revision: this.browser.revisions.get(sessionId) || 0,
+        };
+      },
       bot: (...args) => this.bots.bot(...args),
       connectors: this.connectors,
       db: this.db,
@@ -181,7 +192,7 @@ export class ProductService {
       connectors: this.connectors,
       createDocument: (...args) => this.artifacts.createDocument(...args),
       db: this.db,
-      delegate: (...args) => this.jobs.delegate(...args),
+      submit: (...args) => this.jobs.submit(...args),
       execution: this.execution,
       notify: (...args) => this.notify(...args),
       publish: (...args) => this.artifacts.publish(...args),
@@ -193,6 +204,7 @@ export class ProductService {
       workspaces: this.workspaces,
     });
     this.routes = new ProductRoutes({
+      submit: (...args) => this.jobs.submit(...args),
       bootstrap: (...args) => this.bootstrap(...args),
       bot: (...args) => this.bots.bot(...args),
       browser: this.browser,
@@ -270,6 +282,7 @@ export class ProductService {
         this.db.jobs.put(
           recoverJob(job, this.tasks.runs.records.get(job.runId || "")),
         );
+    for (const job of this.db.jobs.list()) this.jobs.reportCompletion(job);
     this.tasks.timeoutMs = 30 * 60 * 1000;
     for (const draft of this.db.drafts.list())
       if (draft.status === "sending")
@@ -283,8 +296,7 @@ export class ProductService {
         .list()
         .some(
           (j) =>
-            this.db.bots.get(j.botId)?.sessionId === sessionId &&
-            this.execution.slots.isSuspended(j.id),
+            j.sessionId === sessionId && this.execution.slots.isSuspended(j.id),
         ) ||
       this.db.approvals
         .list()
@@ -297,16 +309,30 @@ export class ProductService {
     this.tasks.extensions = (session, runId) => {
       const bot = session.botId ? this.db.bots.get(session.botId) : undefined;
       if (!bot) return {};
-      const job = this.db.jobs.list({ botId: bot.id, status: "running" })[0];
+      const job = this.db.jobs
+        .list({ botId: bot.id, status: "running" })
+        .find((j) => j.sessionId === session.id);
+      if (job) {
+        job.runId = runId;
+        this.db.jobs.put(job);
+      }
       const quoted = job?.replyTo
         ? this.tasks.store.conversations.message(session.id, job.replyTo)
         : undefined;
       const settings =
         (job && this.execution.jobSettings.get(job.id)) || this.settings.read();
+      const authorizationArgs = async (name: string, args: unknown) =>
+        name === "browser"
+          ? {
+              ...(args as Record<string, unknown>),
+              browserTarget: await this.browser.target(session.id, args),
+            }
+          : args;
       return {
+        jobId: job?.id,
         ...buildRunConfig(bot, this.connections, this.connectors.all(), job),
         executionContext: [
-          "Work directly in this conversation and its working folder. Complete the user's requested scope and verify the result. Do not create independent tasks. If asked to plan first, return a plan and wait for the user before implementing.",
+          "Work directly in this conversation and its working folder. Complete the user's requested scope and verify the result. Use start_background_work for independent persistent work so the main chat remains available. Native task is temporary within-run delegation only. If asked to plan first, return a plan and wait for the user before implementing.",
           "Pushing, creating a PR, publishing or deploying requires explicit user authorization. Earlier authorization remains valid unless narrowed or revoked. Finish local work with a report of changes and actual checks. For static HTML/JS interfaces use verify_web after the last edit; never claim verification without passing evidence.",
           "Successful create_document and publish_file calls automatically add result cards with preview and download actions. Refer to readable filenames and these cards; do not repeat UUID directories, artifact IDs, source hashes or internal tool field names in an ordinary delivery reply. Include a working path when it is needed to use an unpublished file, or exact technical details when requested. Reports to a delegating Bot may include the evidence references it needs to verify or continue work. Do not publish an already published artifact again merely to add a card.",
           "For a static web app with separate local CSS, scripts, modules, images, fonts or data files, use publish_file with its HTML entry and an explicit assets list containing every required local file (including dependencies imported by other assets). This creates one immutable preview and a complete ZIP download. assets only works with an HTML entry; publish a standalone Markdown or other file by omitting assets. Paths are relative to the task workspace; the bundle includes at most 64 files and 20 MB. Verify the final app with verify_web before publishing, and do not claim undeclared or remote resources are included.",
@@ -339,9 +365,16 @@ export class ProductService {
         maxTurns: settings.maxTurns,
         runtimeSettings: settings,
         extraTools: this.toolRegistry.tools(bot, runId),
-        authorize: (name, args, signal) =>
-          this.approvals.authorize(bot.id, runId, name, args, signal),
+        authorize: async (name, args, signal) =>
+          this.approvals.authorize(
+            bot.id,
+            runId,
+            name,
+            await authorizationArgs(name, args),
+            signal,
+          ),
         checkToolPermission: async (name, args, signal, receipt) => {
+          args = await authorizationArgs(name, args);
           if (
             !receipt ||
             receipt.fingerprint !==
@@ -355,12 +388,33 @@ export class ProductService {
           name: string,
           operation: () => Promise<T>,
           signal?: AbortSignal,
-        ) =>
-          job && name !== "delegate_task"
-            ? this.execution.slots.withWork(job.id, operation, signal)
-            : operation(),
+          args?: unknown,
+        ) => {
+          const execute = () =>
+            job
+              ? this.execution.slots.withWork(job.id, operation, signal)
+              : operation();
+          const file = ["write_file", "edit_file"].includes(name)
+            ? Workspace.target(
+                this.workLocation(bot, runId).path,
+                (args as { path: string }).path,
+              )
+            : undefined;
+          const resource = file
+            ? `file:${process.platform === "win32" ? file.toLowerCase() : file}`
+            : name === "shell"
+              ? "host-shell"
+              : name === "browser"
+                ? `browser:${session.id}`
+                : undefined;
+          // Queue outside slot acquisition; final consent and mutation share
+          // one target lock, including sibling native tasks and other sessions.
+          return resource
+            ? this.execution.withResource(resource, execute, signal)
+            : execute();
+        },
         registerSteer: (steer) => {
-          this.execution.steers.set(bot.id, async (text, onApplied) => {
+          this.execution.steers.set(session.id, async (text, onApplied) => {
             const live = this.tasks.running.get(session.id);
             if (!live || live.runId !== runId || live.controller.signal.aborted)
               fail("目前回合已結束，補充指示尚未採用。", 409);
@@ -379,22 +433,14 @@ export class ProductService {
   }
   notify(botId?: string, jobId?: string) {
     const bot = botId ? this.db.bots.get(botId) : undefined;
-    const liveRunId = bot && this.tasks.running.get(bot.sessionId)?.runId;
-    const job = jobId
-      ? this.db.jobs.get(jobId)
-      : liveRunId
-        ? this.db.jobs.list({ runId: liveRunId })[0]
-        : undefined;
+    const job = jobId ? this.db.jobs.get(jobId) : undefined;
     const data = {
       botId,
       at: now(),
+      sessionId: job?.sessionId,
       jobId: job?.id,
       runId: job?.runId,
-      workContextId:
-        job?.workContextId ||
-        (bot && !bot.deletedAt
-          ? this.tasks.store.conversations.activeId(bot.sessionId)
-          : undefined),
+      workContextId: job?.workContextId,
       locationId: job?.location?.id,
     };
     const id = this.db.event(data);

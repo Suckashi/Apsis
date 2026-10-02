@@ -43,7 +43,7 @@ function RememberedApprovals({ api }: { api: SettingsRequest }) {
     <section className="remembered-approvals">
       <h4>{uiText("已記住的核准")}</h4>
       <p className="field-help">
-        {uiText("記住的核准只適用於原任務及其派工。")}
+        {uiText("記住的核准只適用於原執行，不包含重大或未知影響。")}
       </p>
       <button
         type="button"
@@ -64,7 +64,7 @@ function RememberedApprovals({ api }: { api: SettingsRequest }) {
       {rules?.map((rule) => (
         <div className="rule" key={rule.id}>
           <strong>{rule.tool}</strong>
-          <small>{uiText("限原任務及其派工")}</small>
+          <small>{uiText("限原執行，不含重大操作")}</small>
           <pre>{JSON.stringify(rule.args, null, 2)}</pre>
           <button
             type="button"
@@ -433,8 +433,8 @@ export function ExecutionSettings({
                 <label className="checkbox">
                   <input
                     type="checkbox"
-                    checked={draft.dangerousCommandGuard}
-                    disabled={busy || draft.approvalMode === "auto"}
+                    checked={true}
+                    disabled={true}
                     onChange={(e) =>
                       setDraft({
                         ...draft,
@@ -442,7 +442,7 @@ export function ExecutionSettings({
                       })
                     }
                   />
-                  {uiText("危險命令確認（不要求核准模式不適用）")}
+                  {uiText("重大或未知影響的操作一律需要當次核准。")}
                 </label>
                 <PermissionEditor
                   value={draft.permissionRules}

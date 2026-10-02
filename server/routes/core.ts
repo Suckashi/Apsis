@@ -70,6 +70,8 @@ export class CoreRoutes {
         return true;
       }
     }
+    if (path.startsWith("/templates"))
+      fail("Role templates are not part of the single-assistant model.", 410);
     if (path === "/templates") {
       if (method === "GET") {
         reply(res, this.deps.db.templates.list());

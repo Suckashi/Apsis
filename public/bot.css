@@ -6212,3 +6212,147 @@ label textarea::placeholder {
     max-height: min(48px, 20dvh);
   }
 }
+
+/* A single ongoing conversation, with independent work kept out of the composer. */
+.assistant-intro {
+  padding: 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.background-work {
+  padding: 12px 16px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.background-work h2 {
+  font-size: 15px;
+  margin: 0 0 14px;
+}
+.background-work form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.background-work label,
+.background-work p {
+  font-size: 13px;
+}
+.background-work textarea,
+.background-work input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px;
+  background: var(--bg);
+  color: inherit;
+}
+.background-work button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.work-card,
+.work-approval {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 10px 0;
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+.work-card summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+.work-card summary span {
+  display: block;
+  font-size: 12px;
+  opacity: 0.7;
+  margin-top: 6px;
+}
+.background-work pre {
+  white-space: pre-wrap;
+  font-size: 11px;
+  max-height: 240px;
+  overflow: auto;
+}
+.work-approval {
+  border-color: #c18b30;
+}
+.assistant-presence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 16px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.assistant-presence > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+.assistant-presence small {
+  font-size: 10px;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.presence-avatar {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+.presence-running .presence-avatar {
+  animation: assistant-think 2.8s ease-in-out infinite;
+}
+.presence-approval .presence-avatar {
+  transform: rotate(-8deg);
+}
+.presence-failed .presence-avatar,
+.presence-interrupted .presence-avatar,
+.presence-disconnected .presence-avatar,
+.presence-stale .presence-avatar {
+  opacity: 0.55;
+}
+.presence-completed .presence-avatar {
+  animation: assistant-nod 450ms ease-out 1;
+}
+.work-card .assistant-presence {
+  padding: 8px 0 0;
+}
+@keyframes assistant-think {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-3px) rotate(4deg);
+  }
+}
+@keyframes assistant-nod {
+  50% {
+    transform: translateY(2px) rotate(6deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .assistant-presence .presence-avatar {
+    animation: none;
+    transform: none;
+  }
+}
+.background-attention {
+  flex-shrink: 0;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border: 1px solid #c18b30;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13px;
+}

@@ -196,15 +196,8 @@ test("authenticated remote requests reach the Bot workspace and keep CSRF checks
     connectionId: connection.id,
     model: connection.model,
   });
-  const bot = JSON.parse(
-    (
-      await call(port, "/api/v2/bots", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ name: "Remote Bot" }),
-      })
-    ).body,
-  );
+  await app.product.bootstrap();
+  const bot = app.product.db.bots.list()[0];
   const reply = await call(port, `/api/v2/bots/${bot.id}/messages`, {
     method: "POST",
     headers,

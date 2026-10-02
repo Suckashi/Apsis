@@ -53,78 +53,13 @@ async function legacyStore() {
   return { directory, job, records };
 }
 
-test("retirement removes only economy data and preserves all 48 Bot/template identities and job evidence", async (t) => {
+test("opening the product store does not delete prior records; all 48 avatar designs remain available", async (t) => {
   const legacy = await legacyStore();
   const db = await new ProductDB().init(legacy.directory);
   t.after(() => db.db.close());
-  for (const kind of ["avatar-collection", "avatar-reward", "avatar-draw"])
-    assert.deepEqual(db.all(kind), []);
-  for (const avatar of botAvatars) {
-    assert.equal(db.bots.get(avatar.id)?.avatar, avatar.id);
-    assert.equal(db.templates.get(avatar.id)?.avatar, avatar.id);
-  }
-  const { avatarRewardsEligible: _retired, ...job } = legacy.job;
-  assert.deepEqual(db.jobs.get(job.id), job);
-  const unchanged = legacy.records.filter(
-    (row) => !String(row.kind).startsWith("avatar-") && row.kind !== "job",
-  );
+  assert.equal(botAvatars.length, 48);
   assert.deepEqual(
-    db.db
-      .prepare(
-        "SELECT kind,id,value FROM records WHERE kind<>'job' ORDER BY kind,id",
-      )
-      .all(),
-    unchanged,
+    db.db.prepare("SELECT kind,id,value FROM records ORDER BY kind,id").all(),
+    legacy.records,
   );
-});
-
-test("failed retirement rolls back all deletions and leaves the original evidence recoverable", async () => {
-  const legacy = await legacyStore();
-  const raw = new DatabaseSync(join(legacy.directory, "product.sqlite"));
-  raw.exec(
-    "CREATE TRIGGER reject_migration BEFORE UPDATE OF value ON records WHEN OLD.kind='job' BEGIN SELECT RAISE(ABORT,'migration-test'); END;",
-  );
-  raw.close();
-  await assert.rejects(
-    () => new ProductDB().init(legacy.directory),
-    /migration-test/,
-  );
-  const recovered = new DatabaseSync(join(legacy.directory, "product.sqlite"));
-  try {
-    assert.deepEqual(
-      recovered
-        .prepare("SELECT kind,id,value FROM records ORDER BY kind,id")
-        .all(),
-      legacy.records,
-    );
-    recovered.exec("DROP TRIGGER reject_migration");
-  } finally {
-    recovered.close();
-  }
-  const retried = await new ProductDB().init(legacy.directory);
-  try {
-    assert.deepEqual(retried.all("avatar-collection"), []);
-  } finally {
-    retried.db.close();
-  }
-});
-
-test("retirement is idempotent and does not recreate rewards or change stored avatars on another startup", async () => {
-  const legacy = await legacyStore();
-  const first = await new ProductDB().init(legacy.directory);
-  const records = first.db
-    .prepare("SELECT kind,id,value FROM records ORDER BY kind,id")
-    .all();
-  first.db.close();
-  const next = await new ProductDB().init(legacy.directory);
-  try {
-    assert.deepEqual(
-      next.db
-        .prepare("SELECT kind,id,value FROM records ORDER BY kind,id")
-        .all(),
-      records,
-    );
-  } finally {
-    next.db.close();
-  }
 });
