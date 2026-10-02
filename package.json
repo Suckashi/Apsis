@@ -61,7 +61,7 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
     "@langchain/anthropic": "1.5.11",
-    "@langchain/core": "1.2.12",
+    "@langchain/core": "1.2.13",
     "@langchain/openai": "1.5.13",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@rainbowatcher/toml-edit-js": "0.6.5",
