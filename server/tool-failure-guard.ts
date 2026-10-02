@@ -9,6 +9,54 @@ const pathKey = (value: string) =>
     .replace(/\/{2,}/g, "/")
     .replace(/^(?:\.\/)+/, "");
 
+interface WebCheckIdentity {
+  action: string;
+  selector?: string;
+  property?: string;
+  value?: string;
+}
+
+const webCheckKey = (step: WebCheckIdentity) => {
+  const value =
+    step.action === "expect_checked"
+      ? (step.value ?? "true")
+      : [
+            "fill",
+            "press",
+            "expect_text",
+            "expect_value",
+            "expect_style",
+          ].includes(step.action)
+        ? step.value
+        : undefined;
+  return digest([
+    step.action,
+    step.selector?.trim().replace(/\s+/g, " "),
+    step.property?.trim().toLowerCase(),
+    value,
+  ]);
+};
+
+function webChecks(value: unknown): Set<string> {
+  try {
+    const steps = typeof value === "string" ? JSON.parse(value) : value;
+    return new Set(
+      Array.isArray(steps)
+        ? steps
+            .filter(
+              (step): step is WebCheckIdentity =>
+                !!step &&
+                typeof step.action === "string" &&
+                (step.action === "reload" || typeof step.selector === "string"),
+            )
+            .map(webCheckKey)
+        : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
 function commandTarget(command: string) {
   // This is only a retry identity, never an execution or authorization parser.
   const withoutCd = command
@@ -135,11 +183,26 @@ export class ToolFailureLoopError extends Error {
   }
 }
 
+/** The actual failed web step, so distinct checks do not share a retry count. */
+export class WebCheckFailure extends Error {
+  readonly check?: WebCheckIdentity;
+  constructor(message: string, check?: WebCheckIdentity) {
+    super(message);
+    this.name = "WebCheckFailure";
+    this.check = check;
+  }
+}
+
 /** Run-local, monotonic once stopped; success must match the failed operation. */
 export class ToolFailureGuard {
   private failures = new Map<
     string,
-    { count: number; scope: string; recoveries: Set<string | undefined> }
+    {
+      count: number;
+      scope: string;
+      recoveries: Set<string | undefined>;
+      webCheck?: string;
+    }
   >();
   private stopped?: ToolFailureLoopError;
   assertActive() {
@@ -153,11 +216,16 @@ export class ToolFailureGuard {
   ) {
     this.assertActive();
     const { scope, recovery } = identity(name, args);
-    const key = digest([scope, failureCategory(message, error)]);
+    const webCheck =
+      name === "verify_web" && error instanceof WebCheckFailure && error.check
+        ? webCheckKey(error.check)
+        : undefined;
+    const key = digest([scope, failureCategory(message, error), webCheck]);
     const item = this.failures.get(key) || {
       count: 0,
       scope,
       recoveries: new Set<string | undefined>(),
+      webCheck,
     };
     item.count++;
     item.recoveries.add(recovery);
@@ -168,8 +236,14 @@ export class ToolFailureGuard {
   success(name: string, args: Record<string, unknown>) {
     this.assertActive();
     const { scope, recovery } = identity(name, args);
+    const passedChecks =
+      name === "verify_web" ? webChecks(args.steps) : undefined;
     for (const [key, item] of this.failures)
-      if (item.scope === scope && item.recoveries.has(recovery))
+      if (
+        item.scope === scope &&
+        item.recoveries.has(recovery) &&
+        (!item.webCheck || passedChecks?.has(item.webCheck))
+      )
         this.failures.delete(key);
   }
 }

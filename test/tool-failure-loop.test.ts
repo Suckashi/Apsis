@@ -15,6 +15,7 @@ import { toolFeedback } from "../server/tool-feedback.ts";
 import {
   ToolFailureGuard,
   ToolFailureLoopError,
+  WebCheckFailure,
 } from "../server/tool-failure-guard.ts";
 import type { ToolOperation } from "../shared/types.ts";
 import { Store } from "../server/store.ts";
@@ -163,7 +164,7 @@ test("successful same check resets prior failures; unrelated inline shell succes
   );
 });
 
-test("verify_web uses stable path and assertion category; shell aliases share failures", async () => {
+test("verify_web falls back to path and category without a failed step; shell aliases share failures", async () => {
   const web = harness();
   for (let i = 0; i < 2; i++)
     await web.call(
@@ -194,6 +195,122 @@ test("verify_web uses stable path and assertion category; shell aliases share fa
     ),
     ToolFailureLoopError,
   );
+});
+
+test("verify_web limits retries for the failed step and only a matching success recovers it", async () => {
+  const h = harness();
+  const click = { action: "click", selector: "#chk-T2" };
+  const hidden = { action: "expect_hidden", selector: "#task-T2" };
+  const failure = (check: typeof click) =>
+    new WebCheckFailure("網頁驗證失敗：Timeout 3500ms", check);
+  await h.call(
+    "verify_web",
+    { path: "./index.html", steps: [click] },
+    failure(click),
+  );
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [hidden] },
+    failure(hidden),
+  );
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [click] },
+    failure(click),
+  );
+  await h.call("verify_web", {
+    path: "index.html",
+    steps: JSON.stringify([{ action: "expect_visible", selector: "body" }]),
+  });
+  h.guard.assertActive();
+  await assert.rejects(
+    h.call(
+      "verify_web",
+      { path: "index.html", steps: [click] },
+      failure(click),
+    ),
+    ToolFailureLoopError,
+  );
+
+  const recovered = harness();
+  await recovered.call(
+    "verify_web",
+    { path: "index.html", steps: [click] },
+    failure(click),
+  );
+  await recovered.call("verify_web", { path: "index.html", steps: [click] });
+  await recovered.call(
+    "verify_web",
+    { path: "index.html", steps: [click] },
+    failure(click),
+  );
+  await recovered.call(
+    "verify_web",
+    { path: "index.html", steps: [click] },
+    failure(click),
+  );
+  recovered.guard.assertActive();
+});
+
+test("verify_web keeps different expected values on one selector independent", async () => {
+  const h = harness();
+  const one = {
+    action: "expect_text",
+    selector: "#progressText",
+    value: "1 / 6",
+  };
+  const three = {
+    action: "expect_text",
+    selector: "#progressText",
+    value: "3 / 6",
+  };
+  const failure = (check: typeof one) =>
+    new WebCheckFailure("網頁驗證失敗：預期值不符", check);
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [one] },
+    failure(one),
+  );
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [three] },
+    failure(three),
+  );
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [one] },
+    failure(one),
+  );
+  await h.call("verify_web", { path: "index.html", steps: [three] });
+  h.guard.assertActive();
+  await assert.rejects(
+    h.call("verify_web", { path: "index.html", steps: [one] }, failure(one)),
+    ToolFailureLoopError,
+  );
+});
+
+test("verify_web treats implicit and explicit checked true as the same recovery", async () => {
+  const h = harness();
+  const implicit = { action: "expect_checked", selector: "#chk-T1" };
+  const explicit = { ...implicit, value: "true" };
+  const failure = new WebCheckFailure("網頁驗證失敗：勾選狀態不符", implicit);
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [implicit] },
+    failure,
+  );
+  await h.call("verify_web", { path: "index.html", steps: [explicit] });
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [implicit] },
+    failure,
+  );
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [implicit] },
+    failure,
+  );
+  h.guard.assertActive();
 });
 
 test("failure loop ends the run as failed, preserves local effects and operation journal, and permits a fresh run", async (t) => {

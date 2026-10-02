@@ -19,6 +19,7 @@ import { McpConfig } from "./mcp-config.ts";
 import { ChatWorkspaces } from "./chat-workspaces.ts";
 
 import { verifyWeb } from "./coding-verification.ts";
+import { WebCheckFailure } from "./tool-failure-guard.ts";
 
 import type { ExecutionState } from "./execution-state.ts";
 import type { BotService } from "./bot-service.ts";
@@ -53,7 +54,14 @@ export class ProductTools {
     return [
       makeTool(
         "verify_web",
-        'Verify a static HTML/JS app in a disposable local browser. path is a workspace-relative HTML file. steps is a JSON array of {action,selector,value?}; action: fill, click, press, expect_text (visible text contains value), expect_value (exact input value), expect_visible, expect_style (exact computed CSS value). For expect_style include property, for example {"action":"expect_style","selector":"#result","property":"color","value":"rgb(17, 17, 17)"}. Read the real stylesheet and inspect real elements; never add visible or hidden probe elements solely for verification. Matching a style does not prove accessibility or overall visual quality. Each CSS selector must identify exactly one element. Use {"action":"reload"} without selector/value to reload the same page while preserving this check\'s browser storage; add an assertion after reload to verify persistence. Every call starts a fresh browser, so data from earlier calls is not retained. Use at least one meaningful assertion. Example: [{"action":"fill","selector":"#amount","value":"1000"},{"action":"click","selector":"button[type=submit]"},{"action":"expect_text","selector":"#result","value":"333.33"}]. Run after the last code edit. No external network, app server, account or browser setup required. Returns persisted check evidence; check selector ambiguity and expected results before changing application code in response to failures.',
+        [
+          "Verify a static HTML/JS app in a disposable local browser. path is a workspace-relative HTML file. steps is a JSON array of {action,selector,value?}.",
+          "Actions: fill, click, press, expect_text (visible text contains value), expect_value (exact input value), expect_visible, expect_hidden (hidden or removed), expect_checked (checkbox/radio checked, including a styled hidden input; value 'false' checks unchecked), expect_style (exact computed CSS value), reload (no selector/value).",
+          'For expect_style include property, for example {"action":"expect_style","selector":"#result","property":"color","value":"rgb(17, 17, 17)"}. Computed dimensions may be pixels even when CSS declares percentages; inspect the real computed value before asserting it.',
+          "Click the visible associated label when a styled label covers an input. Read the real stylesheet and inspect real elements; never add visible or hidden probe elements solely for verification. Matching a style does not prove accessibility or overall visual quality.",
+          "Each CSS selector must identify exactly one element, except expect_hidden may match none. reload preserves this check's browser storage; add an assertion after reload to verify persistence. Every call starts a fresh browser, so data from earlier calls is not retained.",
+          'Use at least one meaningful assertion. Example: [{"action":"fill","selector":"#amount","value":"1000"},{"action":"click","selector":"button[type=submit]"},{"action":"expect_text","selector":"#result","value":"333.33"}]. Run after the last code edit. No external network, app server, account or browser setup required. Returns persisted check evidence; check selector ambiguity and expected results before changing application code in response to failures.',
+        ].join(" "),
         ["path", "steps"],
         async (input, signal) => {
           const job = this.deps.db.jobs
@@ -71,10 +79,16 @@ export class ProductTools {
           );
           this.deps.db.put("web-verification", receipt);
           this.deps.notify(bot.id);
-          if (receipt.status === "failed")
-            throw new Error(
-              `網頁驗證失敗：${receipt.steps.find((s) => s.error)?.error || receipt.errors.join("；")}。請確認選擇器、預期結果及網頁內容，再執行 verify_web。檢查紀錄 ${receipt.id}`,
+          if (receipt.status === "failed") {
+            const failedIndex = receipt.steps.findIndex(
+              (step) => step.status === "failed",
             );
+            const failedStep = receipt.steps[failedIndex];
+            throw new WebCheckFailure(
+              `網頁驗證失敗${failedStep ? `（第 ${failedIndex + 1} 步 ${failedStep.action}）` : ""}：${failedStep?.error || receipt.errors.join("；")}。請確認選擇器、預期結果及網頁內容，再執行 verify_web。檢查紀錄 ${receipt.id}`,
+              failedStep,
+            );
+          }
           return receipt;
         },
       ),
@@ -214,7 +228,7 @@ export class ProductTools {
       {
         ...makeTool(
           "publish_file",
-          "Publish an existing workspace file as a result card with preview and download actions. For a multi-file static HTML app, supply assets as an explicit array of workspace-relative files (CSS, JS, modules, images, data, etc.), excluding the main path. Up to 64 files including the main HTML, 20 MB total, HTML max 1 MB. All included files are saved as immutable snapshots; preview uses only these resources and download is one ZIP preserving paths. Include every required local asset, and verify the final app before publishing. Omitting assets publishes only the single file. Files must already exist. create_document already publishes its results; do not publish those returned artifacts a second time. In ordinary user-facing handoffs, refer to the readable filename and result card rather than internal IDs or storage paths; provide exact paths or technical evidence when requested.",
+          "Publish an existing workspace file as a result card with preview and download actions. For a multi-file static HTML app, supply assets as an explicit array of workspace-relative files (CSS, JS, modules, images, data, etc.), excluding the main path. assets is valid only for an .html or .htm entry. To publish Markdown or any other single file, omit assets entirely; an assets error does not mean that file cannot be published. Up to 64 files including the main HTML, 20 MB total, HTML max 1 MB. All included files are saved as immutable snapshots; preview uses only these resources and download is one ZIP preserving paths. Include every required local asset, and verify the final app before publishing. Files must already exist. create_document already publishes its results; do not publish those returned artifacts a second time. In ordinary user-facing handoffs, refer to the readable filename and result card rather than internal IDs or storage paths; provide exact paths or technical evidence when requested.",
           ["path", "name"],
           (a, signal) =>
             this.deps.publish(
