@@ -208,7 +208,7 @@ try {
   const details = page.locator("#bot-details");
   const roster = page.locator("#bot-roster");
   const composerInput = page.getByRole("textbox", { name: "傳送訊息" });
-  assert.equal(await roster.isVisible(), true);
+  await expect(roster).toBeVisible();
   assert.equal(await details.count(), 0, "details closed by default");
   assert.equal(
     await roster.getByRole("button", { name: "新增 Bot" }).evaluate((el) => {
@@ -907,6 +907,8 @@ try {
   );
   await page.setViewportSize({ width: 375, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
+  // Wait for React to replace desktop controls before measuring mobile targets.
+  await expect(page.locator(".mobile-compose-options")).toBeVisible();
   assert.equal(
     await page
       .locator(".composer-card .activity-orbit, .composer-status")
@@ -919,13 +921,23 @@ try {
     ),
     true,
   );
-  for (const button of await page
-    .locator(".composer-card")
-    .getByRole("button")
-    .all()) {
-    const box = await button.boundingBox();
-    assert.ok(box && box.height >= 44 && box.width >= 44);
-  }
+  await expect
+    .poll(
+      () =>
+        page
+          .locator(".composer-card")
+          .getByRole("button")
+          .evaluateAll(
+            (buttons) =>
+              buttons.length > 0 &&
+              buttons.every((button) => {
+                const box = button.getBoundingClientRect();
+                return box.height >= 44 && box.width >= 44;
+              }),
+          ),
+      { message: "every mobile composer button has a 44px touch target" },
+    )
+    .toBe(true);
   await page.screenshot({
     path: join(output, "mobile-progress.png"),
     fullPage: true,
