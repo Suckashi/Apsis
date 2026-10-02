@@ -1,0 +1,43 @@
+name: Bug report / 問題回報
+description: Report a reproducible problem with sanitized evidence.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not attach keys, cookies, .env or conversation databases. For vulnerabilities use private reporting: https://github.com/Suckashi/Apsis/security/advisories/new"
+  - type: input
+    id: version
+    attributes:
+      label: Release or commit / 版本
+      placeholder: v0.2.0-alpha.1
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Node version and browser / 環境
+      placeholder: Windows 11, Node 22.19, Chrome
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Provider type and model / 供應商類型與模型
+      description: Omit credentials and private endpoint details; write not applicable if unrelated.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps / 重現步驟
+      description: Use a minimal disposable workspace and describe exact actions.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected and observed result / 預期與實際結果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized errors or screenshots / 去除私人資料的證據

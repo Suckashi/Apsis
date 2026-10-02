@@ -1,6 +1,6 @@
 {
   "name": "apsis",
-  "version": "0.2.0",
+  "version": "0.2.0-alpha.1",
   "private": true,
   "description": "A local Bot workspace powered by Deep Agents.",
   "type": "module",
@@ -45,7 +45,9 @@
     "test:document-reading:browser": "npm run build && node scripts/verify-document-reading.ts",
     "test:network:browser": "npm run build && node scripts/verify-network-resilience.ts",
     "test:removal:browser": "npm run build && node scripts/verify-bot-removal-sync.ts",
-    "test:startup:browser": "npm run build && node scripts/verify-startup-performance.ts --isolated --repeat --verify"
+    "test:startup:browser": "npm run build && node scripts/verify-startup-performance.ts --isolated --repeat --verify",
+    "check:docs": "node scripts/check-docs.ts",
+    "test:release": "node scripts/verify-release-source.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
@@ -95,5 +97,6 @@
     "jszip": "3.10.2",
     "prettier": "3.6.2",
     "typescript": "7.0.2"
-  }
+  },
+  "license": "Apache-2.0"
 }

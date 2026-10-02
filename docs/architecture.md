@@ -42,8 +42,12 @@ session model selection competing with Bot configuration.
 The Deep Agents adapter in `server/engines/deep.ts` connects the resolved model
 and Apsis tools to `createDeepAgent`. It owns the same-name summarization
 middleware, bounded model budgets, versioned normalized checkpoints and a
-context-scoped scratch backend. Native `task` and `execute` are disabled; Bot
-delegation and host execution go through Apsis authorization and journaling.
+context-scoped scratch backend. Native `task` creates ephemeral subagents for
+internal exploration and analysis. Children inherit guarded tools and permission
+context, and `deep-observation.ts` persists their public activity in the run
+timeline; private reasoning is not exposed. Native `execute` is disabled. Host
+execution uses Apsis Shell authorization and journaling; `delegate_task` assigns
+persistent work to another Bot with its own identity and independent context.
 
 ## Browser boundary
 

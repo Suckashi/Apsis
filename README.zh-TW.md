@@ -1,75 +1,78 @@
 # Apsis
 
-[English](README.md)
+[English](README.md) · [入門指南](docs/getting-started.zh-TW.md) · [文件索引](docs/README.md) · [版本發佈](https://github.com/Suckashi/Apsis/releases)
 
-Apsis 是使用 TypeScript 與 Node.js 的本機 Bot 工作空間。Bot 使用 **Deep Agents** 搭配 API／Ollama 模型。每位 Bot 有自己的角色、模型、持續對話、私有記憶、排程、瀏覽器分頁與成果。Bot 可以查找其他 Bot 並派工；Apsis 管理任務佇列、核准、資料保存與跨 Bot 協作。
+[![Test](https://github.com/Suckashi/Apsis/actions/workflows/test.yml/badge.svg)](https://github.com/Suckashi/Apsis/actions/workflows/test.yml) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-## 像聊天一樣使用
+**Apsis 是本機優先的 Bot 工作空間，讓你透過持續對話交辦工作、查看執行紀錄並取得成果。**
 
-選一位 Bot，直接傳訊息請它做事。工作中再傳訊息就是補充指示；「已收到／已採用／未採用」表示是否帶入模型，未採用可重新傳送。進度、工具紀錄與成果都留在同一條聊天，細節可展開。
+每位 Bot 有自己的角色、模型、持續對話與記憶。直接傳訊息交辦，工作中可補充指示；回答、成果和可展開的執行紀錄都留在同一條對話。檔案與 Git 修改按需開啟，Bot 也能派工給其他夥伴或定期執行排程。
 
-Bot 選單提供「開啟新話題」、聊天選項、排程與記憶。模型、核准模式及工作資料夾放在聊天選項；檔案與 Git 修改按需開啟側面板。程式工作不再建立另一個任務頁面。
+![Apsis 對話畫面，包含完成的報告與可下載成果](docs/assets/conversation.png)
 
-本版使用 schema 4 的單一資料模型；舊資料目錄會在寫入前被拒絕，不做自動遷移。舊執行路徑及相容層已移除。詳見 [聊天工作流程](docs/coding-workbench.md)。
+_實際桌面介面，以隔離示範資料和固定模型替身拍攝；這不是外部模型的能力評測。_
 
-## 啟動
+## 目前狀態
 
-需要 Node.js 22.19 以上。
+**Alpha：`v0.2.0-alpha.1`。** Apsis 持續開發中，目前以本機、單一使用者為範圍。Alpha 期間資料格式與公開 API 可能變動，每次發佈都需說明不相容變更。詳見[已知限制與路線圖](docs/roadmap.md)、[版本與備份政策](docs/releases.md)。
+
+唯一執行引擎是 **Deep Agents**，支援 OpenAI、Anthropic、Ollama 與 OpenAI 相容端點。模型服務由使用者提供，API 供應商可能按請求計費；固定模型替身的測試不能代表所有真實模型或端點的表現。
+
+## 安裝與啟動
+
+需要 **Node.js 22.19 以上**與 npm。CI 基準為 Windows／Ubuntu 搭配 Node.js 22.19；macOS 尚未納入 CI 驗證。下載程式庫需要 Git；Windows 的 Git for Windows 同時提供 Shell 工具使用的 Bash，Linux 使用系統 Bash。沒有 Bash 時，其他工具仍可使用。
 
 ```sh
+git clone --branch v0.2.0-alpha.1 https://github.com/Suckashi/Apsis.git
+cd Apsis
 npm ci
-npm run dev
+npx playwright install chromium
+npm start
 ```
 
-開啟 <http://localhost:3100>，在「設定與工具 → 模型連線」加入 OpenAI、Anthropic、Ollama 或 OpenAI 相容端點，測試串流與工具呼叫，再建立 Bot。一般設定與模型連線儲存在 `.apsis-v4/settings.toml`，MCP 伺服器儲存在 `.apsis-v4/mcp.json`；金鑰只由伺服器讀取，也可指定環境變數。新資料目錄會直接建立目前格式的設定檔，詳見[設定檔說明](docs/config-files-design.md)。
+Linux 若缺少瀏覽器系統套件，使用 `npx playwright install --with-deps chromium`。瀏覽器工具需要安裝 Chromium，基本聊天可以先使用。也可從[版本頁](https://github.com/Suckashi/Apsis/releases)下載原始碼 ZIP，解壓縮後在該目錄執行相同 npm 指令。本版提供原始碼，尚無桌面安裝程式或 npm 發佈套件。
 
-預設使用新的 `.apsis-v4/` 資料目錄，直接執行 `npm run dev` 即可啟動。
-原本的 `.apsis/` 保留，不匯入、不修改。若需要自訂位置，可在 `.env` 設定
-`APSIS_DATA_DIR`，工作資料夾也會放在該目錄下。模型連線需在新介面重新設定。
-本版只使用 Deep Agents 與上述四種供應商。
+開啟 <http://localhost:3100>，在「設定與工具 → 模型連線」新增連線，測試串流與工具呼叫，並設為預設。選取初始 Bot 或建立一位，傳送：
 
-本機 Ollama 可使用 `http://127.0.0.1:11434` 與已安裝的模型 ID，例如 `qwen3.5:9b`。Ollama 服務必須先啟動。複雜的規劃與派工建議使用工具能力較穩定的大型模型。
+> 請在目前工作資料夾建立 `hello.md`，寫一小段 Apsis 的介紹，發布成可下載成果，最後簡短說明你檢查了什麼。
 
-## 架構
+成功的標準是：檔案可讀、成果可下載、操作紀錄可展開，重新整理後對話仍在。[入門指南](docs/getting-started.zh-TW.md)提供完整步驟、設定與故障排除。開發時可下載預設分支，執行 `npm ci` 後使用 `npm run dev`。
 
-```text
-Web
-        ↓
-領域服務：Bot、訊息、工作、核准、成果、排程
-        ↓
-TaskService → Deep Agents → 所選模型
-        ↓
-Apsis 工具：工作區、記憶、技能、瀏覽器、文件、MCP、排程
-        ↓
-核准與工具操作紀錄
-```
+## 可以做什麼
 
-Deep Agents 是唯一啟用的執行引擎，負責單一 Bot 內部的規劃、上下文管理與虛擬暫存檔；原生 `task`、`execute` 工具已停用。Apsis 負責 Bot 身分、跨 Bot 派工、權限、排程與成果。`delegate_task` 與每次排程使用接收 Bot 的獨立工作 context；聊天則持續沿用目前 context，按「開啟新話題」才切換。
+| 工作流程           | 範例                                                           |
+| ------------------ | -------------------------------------------------------------- |
+| 修改既有專案       | 連結工作資料夾，請 Bot 修改一項需求，再查看檔案與 Git 差異。   |
+| 整理資料並產出成果 | 附上來源資料，請 Bot 製作報告，預覽或下載已發布成果。          |
+| 固定時間交辦       | 建立含時區的排程，先試跑，再查看每次結果；Apsis 必須持續執行。 |
 
-Deep Agents 的虛擬檔案只供對話暫存；真實檔案使用 `.apsis-v4/workspace/` 的 `workspace_*` 工具。工具核准採 Kimi 式確定性規則，不呼叫 LLM 審查。預設「需要時詢問」（yolo）會自動執行一般 Shell、網頁與 MCP 操作；命中較前面的危險、敏感路徑或權限策略才詢問，另提供 manual 與 auto 模式。Shell 在主機執行；工作區與路徑規則都不是作業系統沙箱。
+Deep Agents 原生 `task` 子代理用於同一次執行內的研究與分析；`list_bots`／`delegate_task` 則交辦給有獨立身分與歷史的另一位 Bot。原生 `execute` 已停用，主機命令經 Apsis 的 Shell 工具核准與記錄。詳見[架構](docs/architecture.md)。
 
-完整歷史保存於 SQLite，提供分頁與搜尋；模型輸入使用 checkpoint、自動摘要與核心／參考記憶控制容量。Context 上限未填寫時預設為 256K（262,144 tokens），可手動調整。詳見[長期對話與記憶管理](docs/conversation-context.md)。
+## 資料與執行範圍
 
-## 設定與範本
+預設資料目錄為 `.apsis-v4/`，包含設定、對話資料庫、記憶、成果、瀏覽器狀態與預設工作區。可在選用的 `.env` 中設定 `APSIS_DATA_DIR`。連結到目錄外的既有專案仍留在原處，需要另外備份。
 
-設定會保存執行限制及 `zh-Hant`／`en` 語言偏好。預設為 100 個 Agent 步驟、30 分鐘有效執行時間、每次 Shell 60 秒、24,000 字元的證據輸出上限、3 層派工、12 個派工工作，以及每個根任務 4 個同時執行名額。新任務會取得限制快照，子任務沿用；儲存設定時以修訂版本檢查避免覆蓋其他修改。
+API key 由伺服器讀取，設定也可引用環境變數。使用外部模型時，必要的任務背景仍會傳送到所選模型服務；本機優先指應用程式的儲存與執行位置。資料目錄及備份應視為私人資料保管。
 
-Bot 自動取得共用技能，可選取 MCP 連接器，並使用工作區或唯讀模式。唯讀與明確禁止不能被自動核准覆蓋。派工及其建立的排程會保留上游限制；本次任務已記住的核准先於一般詢問規則，但不能略過危險命令確認。新任務不繼承舊授權。Windows 使用 Git Bash（需安裝 Git for Windows），Linux 使用系統 Bash；可用 `APSIS_SHELL_PATH` 指定執行檔，缺少 Bash 時其他工具仍可使用。詳見 [核准模式與 Bash](docs/approval-modes.md)。
+Shell 在主機執行，核准與路徑規則不是作業系統沙箱。連接工具前請閱讀[核准模式](docs/approval-modes.md)與[安全範圍](SECURITY.md)。重啟後未完成工作標為中斷，不會自動重播外部操作。完整備份需先停止 Apsis，依[備份與還原流程](docs/releases.md#backup-and-restore)操作。
 
-範本將角色、圖示、模型、連接器選擇及權限複製至新 Bot，不複製憑證、對話、記憶或執行狀態；修改範本不影響既有 Bot。語言偏好用於已提供翻譯的介面文字，不翻譯訊息與工具證據，也不代表所有介面都已完成翻譯。
+本版只接受 schema 4；舊 `.apsis/` 保留，不自動匯入。
 
-資料保存在 `.apsis-v4/`：SQLite 存放 Bot、任務、核准、排程與事件；對話 SQLite 存放分頁歷史與 checkpoint；schema 4 JSON 存放專案、記憶與私有技能；執行日誌另存。重啟後未完成任務標為中斷，不會自動重播外部操作。完整備份請先停止程式，再複製 `.apsis-v4/`。
+## 參與與驗證
 
-操作細節見 [Bot 工作空間](docs/bot-workspace.md)，設定細節見 [設定平台](docs/settings-platform.md)，程式分工見 [架構說明](docs/architecture.md)。
-
-## 驗證
+從[貢獻指南](CONTRIBUTING.md)、[架構分工](docs/architecture.md)與[適合入門的工作](docs/roadmap.md#contribution-entry-points)開始。一般問題透過 [Issues](https://github.com/Suckashi/Apsis/issues/new/choose)回報，漏洞請[私下回報](https://github.com/Suckashi/Apsis/security/advisories/new)。
 
 ```sh
+npm run check:docs
 npm run build
 npm test
 npm run test:chat:browser
 npm run test:bots:browser
-node scripts/verify-settings.ts
+npm run test:settings:browser
 ```
 
-瀏覽器測試使用隔離資料與可重現的模型替身。設定驗證腳本需在 build 後執行，報告與截圖輸出至 `artifacts/settings-verification/`；這些檢查不代表真實供應商憑證或完整翻譯已通過驗證。`npm run test:bots:ollama` 可選擇實測本機模型派工；實際模型行為可能不同。
+瀏覽器驗證使用隔離資料與固定模型替身。備份還原整合測試驗證停止後的完整資料、已發布成果與對話保存；真實模型與獨立使用者的驗收另列於 [Alpha 驗收](docs/alpha-acceptance.md)。
+
+## 授權
+
+Apsis 採用 [Apache License 2.0](LICENSE)。內含的 Kimi Bash 程式碼保留 MIT 授權，詳見 [NOTICE](NOTICE) 與[第三方聲明](THIRD_PARTY_NOTICES.md)。

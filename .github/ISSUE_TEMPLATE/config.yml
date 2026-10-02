@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security report / 私人漏洞回報
+    url: https://github.com/Suckashi/Apsis/security/advisories/new
+    about: Report authorization bypasses, credential leaks or other vulnerabilities privately.

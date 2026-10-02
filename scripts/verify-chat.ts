@@ -616,13 +616,16 @@ try {
   if (!desktopOnly) {
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(input()).toBeVisible();
+    const mobileReplies = page.locator(
+      ".message.assistant > .message-body > .markdown",
+    );
+    const repliesBeforeMobileSend = await mobileReplies.count();
     await input().fill("手機換行");
     await input().press("Enter");
     await expect(input()).toHaveValue("手機換行\n");
     await page.getByRole("button", { name: "傳送", exact: true }).click();
-    await expect(
-      page.locator(".message.assistant > .message-body > .markdown"),
-    ).toHaveCount(3);
+    await expect(mobileReplies).toHaveCount(repliesBeforeMobileSend + 1);
+    await expect(mobileReplies.last()).toHaveText("已完成，結果在這裡。");
     await menu().click();
     await page.getByRole("button", { name: "聊天選項", exact: true }).click();
     await expect(options).toBeVisible();

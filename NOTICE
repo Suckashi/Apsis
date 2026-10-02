@@ -1,0 +1,8 @@
+Apsis
+Copyright 2026 Apsis contributors
+
+This product includes software developed by Moonshot AI, vendored from
+MoonshotAI/kimi-code at commit be7d5f5fea7800778e4660cd5f36780ba783bddd.
+The Kimi Bash parser and dangerous-command policy retain their MIT license:
+Copyright (c) 2026 Moonshot AI.
+See server/vendor/kimi-bash/LICENSE and THIRD_PARTY_NOTICES.md.

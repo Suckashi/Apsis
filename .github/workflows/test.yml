@@ -1,5 +1,15 @@
 name: Test
-on: [push, pull_request]
+on:
+  push:
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_call:
+    inputs:
+      release_check:
+        type: boolean
+        default: false
+permissions:
+  contents: read
 jobs:
   verify:
     strategy:
@@ -15,10 +25,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run check:docs
       - run: npx playwright install --with-deps chromium
       - run: npm test
       - run: npm run test:settings:browser
       - run: npm run test:bots:browser
+      - run: npm run test:chat:browser
+      - run: npm run test:release
+        if: inputs.release_check
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

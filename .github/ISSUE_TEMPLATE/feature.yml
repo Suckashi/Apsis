@@ -1,0 +1,21 @@
+name: Feature or improvement / 改善建議
+description: Describe a user problem and a focused improvement.
+title: "[Idea] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem / 使用情境與問題
+      description: What work are you trying to finish and where does the current flow fail?
+    validations:
+      required: true
+  - type: textarea
+    id: change
+    attributes:
+      label: Proposed behavior / 預期改善
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and scope / 替代方式與範圍
