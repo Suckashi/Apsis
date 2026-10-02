@@ -7,7 +7,7 @@
 安裝 Node.js 22.19 以上、npm 與 Git。CI 驗證 Windows／Ubuntu 搭配 Node.js 22.19，macOS 尚未驗證。Windows 的 Shell 工具使用 Git for Windows 提供的 Bash；Linux 使用系統 Bash。
 
 ```sh
-git clone --branch v0.2.0-alpha.1 https://github.com/Suckashi/Apsis.git
+git clone --branch v0.2.0-alpha.2 https://github.com/Suckashi/Apsis.git
 cd Apsis
 npm ci
 npx playwright install chromium

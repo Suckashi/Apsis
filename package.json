@@ -1,6 +1,6 @@
 {
   "name": "apsis",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.2",
   "private": true,
   "description": "A local Bot workspace powered by Deep Agents.",
   "type": "module",

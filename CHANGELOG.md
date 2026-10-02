@@ -1,14 +1,20 @@
 # Changelog
 
-Changes are recorded by published version. Earlier development commits are summarized in the first Alpha baseline; they are not represented as prior releases.
+Changes are recorded by version, with unpublished source tags explicitly marked. Earlier development commits are summarized in the first Alpha baseline; they are not represented as prior releases.
 
 ## Unreleased
 
 No changes recorded yet.
 
-## 0.2.0-alpha.1 — 2026-10-02
+## 0.2.0-alpha.2 — 2026-10-02
 
-First source Alpha, licensed under Apache License 2.0. Vendored Kimi Bash retains MIT notices.
+First published source Alpha, including the baseline below. The source-release verifier now uses the runner-provided temporary directory when available, allows a bounded ten minutes for dependency installation and prints per-stage timings. Main-branch CI checks the source archive before a release tag is created. Runtime/storage behavior is unchanged from the retained Alpha 1 tag.
+
+See [release notes](docs/releases/0.2.0-alpha.2.md).
+
+## 0.2.0-alpha.1 — unpublished source tag, 2026-10-02
+
+Source Alpha preparation, licensed under Apache License 2.0. Vendored Kimi Bash retains MIT notices. The tag's Windows source-install verification reached the helper's three-minute limit; publication was blocked. The original tag is retained and no GitHub Release was published for it.
 
 ### Baseline
 

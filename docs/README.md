@@ -16,7 +16,7 @@ The READMEs and guides below describe the current implementation. Several detail
 - [Roadmap and known limitations](roadmap.md).
 - [Alpha acceptance and independent-user trial](alpha-acceptance.md).
 - [Architecture](architecture.md), [contributing](../CONTRIBUTING.md) and [security](../SECURITY.md).
-- [Changelog](../CHANGELOG.md), [release notes](releases/0.2.0-alpha.1.md), [license](../LICENSE) and [third-party notices](../THIRD_PARTY_NOTICES.md).
+- [Changelog](../CHANGELOG.md), [release notes](releases/0.2.0-alpha.2.md), [license](../LICENSE) and [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 ## Historical design and quality evidence
 

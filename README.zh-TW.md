@@ -14,7 +14,7 @@ _實際桌面介面，以隔離示範資料和固定模型替身拍攝；這不�
 
 ## 目前狀態
 
-**Alpha：`v0.2.0-alpha.1`。** Apsis 持續開發中，目前以本機、單一使用者為範圍。Alpha 期間資料格式與公開 API 可能變動，每次發佈都需說明不相容變更。詳見[已知限制與路線圖](docs/roadmap.md)、[版本與備份政策](docs/releases.md)。
+**Alpha：`v0.2.0-alpha.2`。** Apsis 持續開發中，目前以本機、單一使用者為範圍。Alpha 期間資料格式與公開 API 可能變動，每次發佈都需說明不相容變更。詳見[已知限制與路線圖](docs/roadmap.md)、[版本與備份政策](docs/releases.md)。
 
 唯一執行引擎是 **Deep Agents**，支援 OpenAI、Anthropic、Ollama 與 OpenAI 相容端點。模型服務由使用者提供，API 供應商可能按請求計費；固定模型替身的測試不能代表所有真實模型或端點的表現。
 
@@ -23,7 +23,7 @@ _實際桌面介面，以隔離示範資料和固定模型替身拍攝；這不�
 需要 **Node.js 22.19 以上**與 npm。CI 基準為 Windows／Ubuntu 搭配 Node.js 22.19；macOS 尚未納入 CI 驗證。下載程式庫需要 Git；Windows 的 Git for Windows 同時提供 Shell 工具使用的 Bash，Linux 使用系統 Bash。沒有 Bash 時，其他工具仍可使用。
 
 ```sh
-git clone --branch v0.2.0-alpha.1 https://github.com/Suckashi/Apsis.git
+git clone --branch v0.2.0-alpha.2 https://github.com/Suckashi/Apsis.git
 cd Apsis
 npm ci
 npx playwright install chromium
