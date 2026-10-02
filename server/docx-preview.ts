@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { DOMParser } from "@xmldom/xmldom";
+import { DOMParser, type Element, type Node } from "@xmldom/xmldom";
 import type {
   DocumentNode,
   DocumentTag,
