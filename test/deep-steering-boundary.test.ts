@@ -47,6 +47,9 @@ async function fixture(
     for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw) as Request;
     requests.push(body);
+    // Each fixture response is complete. Avoid idle pooled-socket reuse when
+    // slow CI scheduling separates model turns; retry behavior is tested below.
+    res.setHeader("Connection", "close");
     handle(res, requests.length, body);
   });
   upstream.listen(0, "127.0.0.1");
@@ -96,6 +99,7 @@ async function fixture(
 
 test("tool-loop steering reaches the second internal model call once and persists before model execution", async (t) => {
   let applied = 0;
+  const retries: string[] = [];
   const f = await fixture((res, n, request) => {
     if (n > 1) {
       assert.equal(applied, 1);
@@ -118,26 +122,35 @@ test("tool-loop steering reaches the second internal model call once and persist
   t.after(f.close);
   let steer!: SteerHandler;
   let queued = false;
-  const result = await f.run({
-    maxTurns: 3,
-    registerSteer: (handler) => {
-      steer = handler;
-    },
-    emit: (event) => {
-      if (
-        !queued &&
-        event.type === "activity" &&
-        event.tool === "list_files" &&
-        event.text === "執行 list_files"
-      ) {
-        queued = true;
-        void steer("NEXT_MODEL_CONSTRAINT", async () => {
-          applied++;
-        });
-        assert.equal(applied, 0);
-      }
-    },
-  });
+  const result = await f
+    .run({
+      maxTurns: 3,
+      recordOperation: async (operation) => {
+        if (operation.name === "model_retry")
+          retries.push(operation.target || "retry");
+      },
+      registerSteer: (handler) => {
+        steer = handler;
+      },
+      emit: (event) => {
+        if (
+          !queued &&
+          event.type === "activity" &&
+          event.tool === "list_files" &&
+          event.text === "執行 list_files"
+        ) {
+          queued = true;
+          void steer("NEXT_MODEL_CONSTRAINT", async () => {
+            applied++;
+          });
+          assert.equal(applied, 0);
+        }
+      },
+    })
+    .catch((error) => {
+      t.diagnostic(JSON.stringify({ requests: f.requests.length, retries }));
+      throw error;
+    });
   assert.equal(
     f.requests.length,
     3,
