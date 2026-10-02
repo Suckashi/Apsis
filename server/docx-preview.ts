@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { DOMParser } from "@xmldom/xmldom";
+import { DOMParser, type Element, type Node } from "@xmldom/xmldom";
 import type {
   DocumentNode,
   DocumentTag,
@@ -47,16 +47,8 @@ const identifier = (value: string) =>
 export function documentReadingNodes(html: string): DocumentNode[] {
   if (html.length > 500_000) throw new Error("Document preview too large");
   const parsed = new DOMParser({
-    errorHandler: {
-      warning: () => {
-        throw new Error("Invalid document fragment");
-      },
-      error: () => {
-        throw new Error("Invalid document fragment");
-      },
-      fatalError: () => {
-        throw new Error("Invalid document fragment");
-      },
+    onError: () => {
+      throw new Error("Invalid document fragment");
     },
   }).parseFromString(`<document>${html}</document>`, "application/xml");
   const headings = Array.from(parsed.getElementsByTagName("*")).filter(
@@ -132,6 +124,7 @@ export function documentReadingNodes(html: string): DocumentNode[] {
     }
     return [result];
   };
+  if (!parsed.documentElement) throw new Error("Invalid document fragment");
   return children(parsed.documentElement, 0);
 }
 

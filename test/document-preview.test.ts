@@ -91,6 +91,20 @@ test("reading structure bounds reject excessive nesting rather than dropping uns
   );
 });
 
+test("document parsing rejects warnings, unknown entities and mismatched tags", () => {
+  for (const fragment of [
+    "<p class=bare>unquoted attribute</p>",
+    "<p>&missing;</p>",
+    "<p>broken</h1>",
+  ]) {
+    assert.throws(
+      () => documentReadingNodes(fragment),
+      /Invalid document fragment/,
+      fragment,
+    );
+  }
+});
+
 test("oversized DOCX text explicitly falls back to bounded text", async () => {
   const dir = await mkdtemp(join(tmpdir(), "apsis-docx-limit-"));
   const file = join(dir, "long.docx");
