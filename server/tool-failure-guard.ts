@@ -13,14 +13,29 @@ interface WebCheckIdentity {
   action: string;
   selector?: string;
   property?: string;
+  value?: string;
 }
 
-const webCheckKey = (step: WebCheckIdentity) =>
-  digest([
+const webCheckKey = (step: WebCheckIdentity) => {
+  const value =
+    step.action === "expect_checked"
+      ? (step.value ?? "true")
+      : [
+            "fill",
+            "press",
+            "expect_text",
+            "expect_value",
+            "expect_style",
+          ].includes(step.action)
+        ? step.value
+        : undefined;
+  return digest([
     step.action,
     step.selector?.trim().replace(/\s+/g, " "),
     step.property?.trim().toLowerCase(),
+    value,
   ]);
+};
 
 function webChecks(value: unknown): Set<string> {
   try {

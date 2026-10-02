@@ -252,6 +252,67 @@ test("verify_web limits retries for the failed step and only a matching success 
   recovered.guard.assertActive();
 });
 
+test("verify_web keeps different expected values on one selector independent", async () => {
+  const h = harness();
+  const one = {
+    action: "expect_text",
+    selector: "#progressText",
+    value: "1 / 6",
+  };
+  const three = {
+    action: "expect_text",
+    selector: "#progressText",
+    value: "3 / 6",
+  };
+  const failure = (check: typeof one) =>
+    new WebCheckFailure("網頁驗證失敗：預期值不符", check);
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [one] },
+    failure(one),
+  );
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [three] },
+    failure(three),
+  );
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [one] },
+    failure(one),
+  );
+  await h.call("verify_web", { path: "index.html", steps: [three] });
+  h.guard.assertActive();
+  await assert.rejects(
+    h.call("verify_web", { path: "index.html", steps: [one] }, failure(one)),
+    ToolFailureLoopError,
+  );
+});
+
+test("verify_web treats implicit and explicit checked true as the same recovery", async () => {
+  const h = harness();
+  const implicit = { action: "expect_checked", selector: "#chk-T1" };
+  const explicit = { ...implicit, value: "true" };
+  const failure = new WebCheckFailure("網頁驗證失敗：勾選狀態不符", implicit);
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [implicit] },
+    failure,
+  );
+  await h.call("verify_web", { path: "index.html", steps: [explicit] });
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [implicit] },
+    failure,
+  );
+  await h.call(
+    "verify_web",
+    { path: "index.html", steps: [implicit] },
+    failure,
+  );
+  h.guard.assertActive();
+});
+
 test("failure loop ends the run as failed, preserves local effects and operation journal, and permits a fresh run", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "apsis-failure-loop-"));
   const store = await new Store(join(dir, "data")).init();
