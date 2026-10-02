@@ -67,6 +67,17 @@ Format changed files with `npx prettier --write <paths>`. Avoid reformatting unr
 
 ## Submit a pull request
 
-Use a focused branch and a title describing the resulting behavior. Explain the problem, change and validation; include sanitized screenshots for visible UI changes. Call out data-format changes, permission changes and anything still unverified. CI verifies type checking, documentation, tests and core browser flows on Ubuntu and Windows.
+All changes, including documentation, go through **branch → PR → CI → merge**. Create a focused branch from the latest `main`; external contributors can use a fork. Push the branch and open a PR targeting `main` with a title describing the resulting behavior. Explain the problem, change and validation; include sanitized screenshots for visible UI changes. Call out data-format changes, permission changes and anything still unverified.
+
+The active [Protect main ruleset](https://github.com/Suckashi/Apsis/rules/24344036) requires:
+
+- A pull request for every change to `main`; direct pushes are blocked.
+- Successful `verify (ubuntu-latest)` and `verify (windows-latest)` checks from GitHub Actions. These verify type checking, documentation, tests and core browser flows on both platforms.
+- A branch updated with the latest `main` and passing CI before merging. Update the branch and let CI finish again if `main` changes.
+- Resolution of all review conversations before merging.
+
+Force pushes and deletion of `main` are blocked. There are no bypass actors, including administrators. Do not disable or bypass protection to land a change. The ruleset currently requires zero approving reviews so a solo maintainer can merge their own PR once every requirement passes; this does not remove the PR or CI requirements.
+
+After merging, confirm the resulting `main` CI run succeeds before tagging a release. Follow the [release procedure](docs/releases.md) for tag and publication checks.
 
 Contributions submitted for inclusion in Apsis are licensed under Apache License 2.0. Retain original third-party notices and explain the source/license of copied code. There is currently no separate CLA. Release procedure and compatibility rules are in [version and backup policy](docs/releases.md).

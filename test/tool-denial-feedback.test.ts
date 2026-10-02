@@ -55,7 +55,7 @@ async function fixture(
         () => !app.product.execution.active.size && !app.tasks.running.size,
       );
       const run = app.tasks.runs.list(bot.sessionId)[0];
-      assert.equal(run.status, "completed", run.error);
+      assert.equal(run.status, "completed", run.error ?? "run should complete");
       return run;
     },
     async close() {
