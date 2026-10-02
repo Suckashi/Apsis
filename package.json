@@ -68,7 +68,7 @@
     "@xmldom/xmldom": "^0.9.12",
     "croner": "^10.0.1",
     "deepagents": "1.14.1",
-    "diff": "8.0.4",
+    "diff": "9.0.0",
     "docx": "^9.8.1",
     "exceljs": "^4.4.0",
     "langchain": "1.5.14",
