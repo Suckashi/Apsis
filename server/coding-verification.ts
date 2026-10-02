@@ -45,13 +45,18 @@ async function assertRendered(
               getComputedStyle(node).getPropertyValue(property).trim(),
             step.property,
           )
-        : step.action === "expect_text"
-          ? (await element.innerText()).trim()
-          : await element.inputValue();
+        : step.action === "expect_checked"
+          ? String(await element.isChecked())
+          : step.action === "expect_text"
+            ? (await element.innerText()).trim()
+            : await element.inputValue();
     const matches =
       step.action === "expect_text"
         ? actual.includes(step.value!)
-        : actual === step.value;
+        : actual ===
+          (step.action === "expect_checked"
+            ? (step.value ?? "true")
+            : step.value);
     if (matches) return;
     if (Date.now() >= deadline)
       throw new Error(
@@ -65,7 +70,7 @@ export function parseWebSteps(input: unknown): WebCheckStep[] {
   const steps = typeof input === "string" ? JSON.parse(input) : input;
   if (!Array.isArray(steps) || !steps.length || steps.length > 40)
     throw new Error(
-      "請提供 1–40 個網頁操作，並至少包含一個 expect_text、expect_value、expect_style 或 expect_visible 檢查。",
+      "請提供 1–40 個網頁操作，並至少包含一個 expect_text、expect_value、expect_style、expect_visible、expect_hidden 或 expect_checked 檢查。",
     );
   for (const s of steps) {
     if (
@@ -78,6 +83,8 @@ export function parseWebSteps(input: unknown): WebCheckStep[] {
         "expect_text",
         "expect_value",
         "expect_visible",
+        "expect_hidden",
+        "expect_checked",
         "expect_style",
       ].includes(s.action) ||
       (s.action === "reload"
@@ -99,7 +106,10 @@ export function parseWebSteps(input: unknown): WebCheckStep[] {
         ? typeof s.property !== "string" ||
           !/^(?:--)?[a-zA-Z][a-zA-Z0-9-]{0,79}$/.test(s.property) ||
           !s.value.trim()
-        : s.property !== undefined)
+        : s.property !== undefined) ||
+      (s.action === "expect_checked" &&
+        s.value !== undefined &&
+        !["true", "false"].includes(s.value))
     )
       throw new Error(
         "網頁操作需包含 action、唯一 CSS selector，以及需要時的 value；reload 不使用 selector 或 value。",
@@ -299,11 +309,19 @@ export async function verifyWeb(
         else if (step.action === "click") await element.click();
         else if (step.action === "press") await element.press(step.value!);
         else {
-          await element.waitFor({ state: "visible" });
+          await element.waitFor({
+            state:
+              step.action === "expect_hidden"
+                ? "hidden"
+                : step.action === "expect_checked"
+                  ? "attached"
+                  : "visible",
+          });
           if (
             step.action === "expect_text" ||
             step.action === "expect_value" ||
-            step.action === "expect_style"
+            step.action === "expect_style" ||
+            step.action === "expect_checked"
           )
             await assertRendered(
               element,

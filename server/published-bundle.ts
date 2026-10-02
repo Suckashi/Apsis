@@ -55,7 +55,10 @@ export async function capturePublishedBundle(
   authorize: (tool: string, args: { path: string }) => Promise<unknown>,
   signal?: AbortSignal,
 ) {
-  if (!/\.html?$/i.test(entry)) fail("只有 HTML 網頁可一併發布資源。");
+  if (!/\.html?$/i.test(entry))
+    fail(
+      "assets 只適用於 HTML 網頁。若要發布 Markdown 或其他單一檔案，請省略 assets，使用相同的 path 與 name 重試 publish_file。",
+    );
   if (
     !Array.isArray(assets) ||
     assets.length < 1 ||

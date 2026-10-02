@@ -92,6 +92,36 @@ test("explicit web assets form immutable snapshots and a Unicode ZIP readable by
     assert.deepEqual(await decoded.file(path)!.async("nodebuffer"), data);
 });
 
+test("a Markdown assets error explains the single-file retry, which publishes a result card", async (t) => {
+  const f = await fixture(t);
+  await f.workspace.write("site/plan.md", "# 青禾讀書會\n");
+  const publishMarkdown = (assets?: string[]) =>
+    f.app.product.artifacts.publish(
+      f.bot,
+      "markdown-run",
+      "site/plan.md",
+      "plan.md",
+      "result",
+      undefined,
+      undefined,
+      undefined,
+      assets,
+    );
+  await assert.rejects(
+    publishMarkdown(["site/assets/style.css"]),
+    /assets 只適用於 HTML 網頁.*省略 assets.*path 與 name.*publish_file/,
+  );
+  assert.equal(f.app.product.db.artifacts.list().length, 0);
+  const artifact = await publishMarkdown();
+  assert.equal(artifact.mime, "text/markdown");
+  assert.equal(artifact.bundle, undefined);
+  assert.ok(artifact.snapshotPath);
+  assert.equal(
+    (await readFile(join(f.root, artifact.snapshotPath))).toString("utf8"),
+    "# 青禾讀書會\n",
+  );
+});
+
 test("bundle validation rejects malformed, duplicate, traversal, protected, missing and directory assets before publication", async (t) => {
   const f = await fixture(t);
   for (const assets of [

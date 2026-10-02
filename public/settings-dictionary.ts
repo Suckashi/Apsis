@@ -2,6 +2,32 @@ import { getSettingsLocale } from "./settings-locale.ts";
 
 // Source messages are stable dictionary keys. User content is never translated.
 export const english: Record<string, string> = {
+  暫時無法讀取網頁檢查紀錄: "Could not load the web check record",
+  尚未進行網頁操作驗證: "No web interaction check yet",
+  "檔案已變更，網頁需要重新驗證":
+    "Files changed; the web app needs to be checked again",
+  "最近一次網頁檢查通過 · {0} 項結果":
+    "Latest web check passed · {0} assertions",
+  網頁檢查未通過: "Web check failed",
+  網頁驗證: "Web verification",
+  "網頁功能請讓 Bot 操作並檢查結果；單元測試通過不代表畫面可用。":
+    "Ask the Bot to interact with and check the web app. Passing unit tests does not prove the page works.",
+  查看操作與結果: "View actions and results",
+  "僅涵蓋以下操作與當時載入的檔案。":
+    "Covers only these actions and the files loaded at the time.",
+  通過: "Passed",
+  失敗: "Failed",
+  未執行: "Not run",
+  輸入: "Fill",
+  點擊: "Click",
+  按鍵: "Press key",
+  文字包含: "Text contains",
+  輸入值等於: "Input value equals",
+  畫面可見: "Visible",
+  畫面隱藏或已移除: "Hidden or removed",
+  未勾選: "Unchecked",
+  已勾選: "Checked",
+  實際樣式等於: "Computed style equals",
   重試: "Retry",
   輸入建議: "Input suggestions",
   "方向鍵選擇 · Enter 插入 · Esc 關閉":
