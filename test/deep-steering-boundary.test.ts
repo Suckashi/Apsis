@@ -78,7 +78,10 @@ async function fixture(
           MODEL_ID: "fixture",
           COMPATIBLE_BASE_URL: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`,
         },
-        signal: AbortSignal.timeout(10000),
+        // Cold Deep Agents initialization plus three local HTTP model turns can
+        // exceed 10s on Windows runners. This is a behavior test, not a latency
+        // benchmark; retain a finite guard without changing its call assertions.
+        signal: AbortSignal.timeout(30000),
         emit: () => {},
         ...extra,
       }),

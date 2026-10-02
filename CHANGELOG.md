@@ -24,6 +24,7 @@ First source Alpha, licensed under Apache License 2.0. Vendored Kimi Bash retain
 - Added version/backup policies, a stopped backup/restore integration check, roadmap and independent-user acceptance plan.
 - Added documentation/metadata checks and a tag-triggered release workflow gated by cross-platform tests and core browser verification.
 - Corrected the mobile chat verifier's fixed reply count after earlier unread-message fixtures; it now checks the submitted message adds one expected reply.
+- Gave the existing steering-boundary fixture a 30-second finite guard for cold Windows CI initialization, retaining its exact call/persistence assertions.
 
 ### Compatibility and limitations
 
