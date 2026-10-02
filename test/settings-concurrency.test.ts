@@ -13,10 +13,15 @@ import type { Approval, Job } from "../shared/product.ts";
 import { ProductDB } from "../server/product-db.ts";
 import { RunSlots } from "../server/run-slots.ts";
 
-async function until(check: () => boolean) {
-  const deadline = Date.now() + 5000;
+async function until(check: () => boolean, describe = () => "") {
+  // These assert scheduling/slot invariants, not cold Windows disk latency.
+  // Job startup persists runs and prepares workspaces before invoking a runner.
+  const deadline = Date.now() + 30000;
   while (!check()) {
-    assert.ok(Date.now() < deadline, "Timed out waiting for concurrency state");
+    assert.ok(
+      Date.now() < deadline,
+      "Timed out waiting for concurrency state: " + describe(),
+    );
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
@@ -200,7 +205,18 @@ for (const limit of [1, 2]) {
       return { text: "done" };
     });
     await f.start();
-    await until(() => started.length === limit);
+    await until(
+      () => started.length === limit,
+      () =>
+        JSON.stringify({
+          started,
+          active,
+          limit,
+          jobs: f
+            .jobs()
+            .map(({ id, status, error }) => ({ id, status, error })),
+        }),
+    );
     await until(() => f.jobs().length === 5);
     // Existing root and its descendants retain the captured settings.
     f.product.settings.update(
