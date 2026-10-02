@@ -222,7 +222,12 @@ test("critical and unknown effects cannot bypass via modes, grants, allow rules 
       const d = evaluatePolicy(
         [{ id: "allow-all", scope: "global", tool: "*", effect: "allow" }],
         request,
-        { approvalMode, remembered: true, dangerousCommandGuard: false },
+        {
+          approvalMode,
+          remembered: true,
+          dangerousCommandGuard: false,
+          targetExists: request.path === "important.txt",
+        },
       );
       assert.equal(d.effect, "ask", JSON.stringify({ request, approvalMode }));
       assert.equal(d.explicitAsk, true);

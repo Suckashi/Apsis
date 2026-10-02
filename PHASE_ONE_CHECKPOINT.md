@@ -12,7 +12,7 @@ Implemented design and limits: [single-assistant.md](docs/single-assistant.md). 
 - The executor was reachable by successful commands after the reported disconnect; this work is preserved in committed increments.
 - `npm run check:docs`, `npm run build`: passed.
 - Last full `npm test`: **310 passed**, 0 failed. `/tmp/apsis-tests-final.log`.
-- Final SSE routing refinement: **28 focused tests passed** in `test/single-assistant.test.ts`, `test/bot-product.test.ts`, `test/steering-delivery.test.ts`. `/tmp/apsis-routing-final.log`. Final full rerun/CI follows the last commit.
+- Final SSE routing refinement: **28 focused tests passed** in `test/single-assistant.test.ts`, `test/bot-product.test.ts`, `test/steering-delivery.test.ts`. `/tmp/apsis-routing-final.log`. The final full suite also passed all 310 tests with conservative startup-target classification and nonexistent-target assertions. Final head CI follows the last commit.
 - Assistant desktop/mobile fixture browser: passed, including chat B during A, scoped stop, selected-avatar states, waiting approval, failure, disconnect/reconnect, reduced motion, stale-progress pause, distinct session-owned browser pages and reload. `/tmp/apsis-visual.log`.
 - Settings browser: **23 checks passed**, no unexpected browser errors or external requests. `artifacts/settings-verification/report.json`.
 - Synthetic screenshots: `docs/assets/single-assistant/`. Desktop, mobile, approval and stale states were visually inspected.
