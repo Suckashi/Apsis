@@ -38,7 +38,9 @@ for (const outputLimit of [100, 30000]) {
       runtimeSettings: {
         maxTurns: 48,
         taskTimeoutMs: 60000,
-        shellTimeoutSeconds: 10,
+        // Output truncation is not a cold Bash startup benchmark. Keep the
+        // normal shell budget; dedicated timeout tests below verify deadlines.
+        shellTimeoutSeconds: 60,
         outputLimit,
         maxDelegationDepth: 1,
         maxDelegatedJobs: 1,
@@ -46,7 +48,8 @@ for (const outputLimit of [100, 30000]) {
       },
     };
     const shell = codingTools(options).find((tool) => tool.name === "shell")!;
-    const command = "printf '%35000s' '' | tr ' ' x";
+    // Bash builtins produce the same 35,000 bytes without an extra MSYS fork.
+    const command = "printf 'x%.0s' {1..35000}";
     const result = await shell.execute("capture", { command });
     assert.equal(
       result.content[0].type === "text" && result.content[0].text.length,
