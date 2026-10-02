@@ -48,6 +48,9 @@ async function runShell(
   const executable = findBash();
   if (!executable) throw new Error(shellMissing);
   const env = visibleEnvironment();
+  // Python otherwise uses the Windows pipe code page, while Shell records
+  // tool output as UTF-8 on every platform.
+  env.PYTHONIOENCODING = "utf-8";
   if (windows) {
     const key =
       Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
@@ -81,11 +84,13 @@ async function runShell(
   });
   let output = "";
   let truncated = false;
-  const capture = (chunk: Buffer) => {
-    const text = chunk.toString("utf8");
+  const capture = (text: string) => {
     truncated ||= output.length + text.length > outputLimit;
     output = (output + text).slice(0, outputLimit);
   };
+  // Each pipe needs its own decoder so multibyte characters survive chunks.
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
   child.stdout.on("data", capture);
   child.stderr.on("data", capture);
   let stopping = false;

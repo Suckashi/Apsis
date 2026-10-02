@@ -160,6 +160,54 @@ test("real Bash executes complete commands beyond Windows argv limits", async (t
   );
 });
 
+test("shell preserves UTF-8 characters split across stdout and stderr chunks", async (t) => {
+  const { shell } = await shellFixture(t);
+  const result = await shell.execute("split-unicode", {
+    // Pause after incomplete byte sequences so each pipe delivers separate
+    // chunks. stdout and stderr need independent decoder state.
+    command: [
+      "printf '\\344'",
+      "printf '\\346' >&2",
+      "sleep 0.1",
+      "printf '\\270\\255'",
+      "sleep 0.1",
+      "printf '\\226\\207' >&2",
+      "sleep 0.1",
+      "printf '\\360\\237'",
+      "sleep 0.1",
+      "printf '\\247\\276'",
+    ].join("\n"),
+  });
+  assert.equal(
+    result.content[0].type === "text" && result.content[0].text,
+    "中文🧾",
+  );
+  assert.equal(
+    (result.details?.evidence as ToolOperation["evidence"] | undefined)?.output,
+    "中文🧾",
+  );
+});
+
+test("shell configures Python pipe output as UTF-8 when Python is available", async (t) => {
+  const { shell } = await shellFixture(t);
+  const probe = await shell.execute("find-python", {
+    command:
+      "for binary in python3 python; do if \"$binary\" -c 'import sys; print(sys.version_info.major)' >/dev/null 2>&1; then command -v \"$binary\"; exit 0; fi; done; printf 'missing'",
+  });
+  const python =
+    probe.content[0].type === "text" && probe.content[0].text.trim();
+  if (!python || python === "missing")
+    return t.skip("Python is not installed in this test environment");
+  const result = await shell.execute("python-unicode", {
+    command: `${JSON.stringify(python)} -c "import os; print(os.environ.get('PYTHONIOENCODING')); print(chr(0x4E2D)+chr(0x6587)+chr(0x1F9FE))"`,
+  });
+  assert.equal(
+    result.content[0].type === "text" &&
+      result.content[0].text.replaceAll("\r\n", "\n"),
+    "utf-8\n中文🧾\n",
+  );
+});
+
 test("real Bash writes a complete long Unicode heredoc without expansion", async (t) => {
   const { options, shell } = await shellFixture(t);
   const content =

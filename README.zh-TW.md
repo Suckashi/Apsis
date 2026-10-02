@@ -56,6 +56,8 @@ API key 由伺服器讀取，設定也可引用環境變數。使用外部模型
 
 Shell 在主機執行，核准與路徑規則不是作業系統沙箱。連接工具前請閱讀[核准模式](docs/approval-modes.md)與[安全範圍](SECURITY.md)。重啟後未完成工作標為中斷，不會自動重播外部操作。完整備份需先停止 Apsis，依[備份與還原流程](docs/releases.md#backup-and-restore)操作。
 
+Shell 以 UTF-8 記錄指令輸出；透過 Shell 啟動的 Python 也以 UTF-8 輸出至管線。
+
 本版只接受 schema 4；舊 `.apsis/` 保留，不自動匯入。
 
 ## 參與與驗證
