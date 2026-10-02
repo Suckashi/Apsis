@@ -56,6 +56,8 @@ API keys stay server-side, and configuration can reference environment variables
 
 Shell runs on your host. Approval and path rules are not an operating-system sandbox. Review [approval modes](docs/approval-modes.md) and the [security boundary](SECURITY.md) before connecting tools. After restart, unfinished work is marked interrupted and external actions are not automatically replayed. Stop Apsis before backing up the complete data directory; follow the [backup and restore procedure](docs/releases.md#backup-and-restore).
 
+Shell records command output as UTF-8. Python commands launched through Shell also use UTF-8 for piped output.
+
 This release accepts schema 4 only. Older `.apsis/` data is left untouched and is not imported automatically.
 
 ## Contribute and verify
