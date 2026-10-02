@@ -287,7 +287,8 @@ export async function verifyWeb(
       return route.fulfill(await asset(route.request().url()));
     });
     const page = await context.newPage();
-    page.setDefaultTimeout(assertionTimeout);
+    // Assertion overrides must not shorten the time available for user actions.
+    page.setDefaultTimeout(3500);
     page.on("pageerror", recordError);
     page.on("console", (message) => {
       if (message.type() === "error") recordError(message.text());
@@ -316,6 +317,7 @@ export async function verifyWeb(
                 : step.action === "expect_checked"
                   ? "attached"
                   : "visible",
+            timeout: assertionTimeout,
           });
           if (
             step.action === "expect_text" ||
