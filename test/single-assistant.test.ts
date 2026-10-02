@@ -203,6 +203,12 @@ test("critical and unknown effects cannot bypass via modes, grants, allow rules 
     { tool: "shell", command: "git push origin main" },
     { tool: "shell", command: "some-unknown-program" },
     { tool: "write_file", path: "important.txt" },
+    { tool: "write_file", path: ".profile" },
+    {
+      tool: "write_file",
+      path: "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/new.cmd",
+    },
+    { tool: "write_file", path: "AGENTS.md" },
     { tool: "read_file", path: ".env" },
     { tool: "browser", action: "click" },
     { tool: "browser", action: "navigate" },

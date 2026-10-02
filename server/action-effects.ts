@@ -15,6 +15,17 @@ export function classifyAction(
     impact,
   });
   const path = typeof args.path === "string" ? args.path : "";
+  const normalizedPath = path.replaceAll("\\", "/").toLowerCase();
+  const sensitiveStartup =
+    /(^|\/)(?:startup|\.vscode)(\/|$)/.test(normalizedPath) ||
+    /(?:^|\/)(?:\.bashrc|\.bash_profile|\.profile|\.zshrc|\.zprofile|\.zshenv|\.npmrc|\.gitconfig|\.netrc|\.pypirc|authorized_keys|agents\.md|claude\.md|microsoft\.powershell_profile\.ps1)$/.test(
+      normalizedPath,
+    );
+  if (sensitiveStartup)
+    return effect(
+      "critical",
+      "Access to startup configuration, credentials or persistent execution/instructions",
+    );
   if (
     path &&
     (isSensitiveFile(path) ||
