@@ -13,13 +13,23 @@ import type { AddressInfo } from "node:net";
 const npmCli = process.env.npm_execpath;
 assert.ok(npmCli, "Run this verifier with npm run test:release");
 const root = fileURLToPath(new URL("../", import.meta.url));
-const temporary = await mkdtemp(join(tmpdir(), "apsis-source-release-"));
+const temporary = await mkdtemp(
+  join(process.env.RUNNER_TEMP || tmpdir(), "apsis-source-release-"),
+);
 const archive = join(temporary, "source.tar");
 let server: ReturnType<typeof spawn> | undefined;
 let exited: Promise<unknown> | undefined;
 let serverOutput = "";
 
-async function command(executable: string, args: string[], cwd: string) {
+async function command(
+  executable: string,
+  args: string[],
+  cwd: string,
+  label: string,
+  timeoutMs = 180000,
+) {
+  const started = Date.now();
+  console.log(`${label} started (limit ${timeoutMs / 1000}s).`);
   const child = spawn(executable, args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
@@ -31,10 +41,18 @@ async function command(executable: string, args: string[], cwd: string) {
   child.stderr.on("data", (chunk) => {
     output += chunk.toString();
   });
-  const deadline = setTimeout(() => child.kill(), 180000);
+  let timedOut = false;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, timeoutMs);
   try {
     const [code] = await once(child, "exit");
+    assert.ok(!timedOut, `${label} exceeded ${timeoutMs / 1000}s:\n${output}`);
     assert.equal(code, 0, `${executable} ${args.join(" ")} failed:\n${output}`);
+    console.log(
+      `${label} passed in ${((Date.now() - started) / 1000).toFixed(1)}s.`,
+    );
     return output;
   } finally {
     clearTimeout(deadline);
@@ -46,8 +64,14 @@ try {
     "git",
     ["archive", "--format=tar", `--output=${archive}`, "HEAD"],
     root,
+    "Archive committed source",
   );
-  await command("tar", ["-xf", archive, "-C", temporary], root);
+  await command(
+    "tar",
+    ["-xf", archive, "-C", temporary],
+    root,
+    "Extract source",
+  );
   const entries = await readdir(temporary);
   for (const entry of entries) {
     assert.ok(
@@ -67,9 +91,27 @@ try {
     "Commit release changes before checking the source archive",
   );
   assert.equal(distributed.license, "Apache-2.0");
-  await command(process.execPath, [npmCli, "ci"], temporary);
-  await command(process.execPath, [npmCli, "run", "check:docs"], temporary);
-  await command(process.execPath, [npmCli, "run", "build"], temporary);
+  // Installing on a cold Windows runner is not a product latency benchmark.
+  // Keep it bounded, with a separate budget and stage-level diagnostic output.
+  await command(
+    process.execPath,
+    [npmCli, "ci"],
+    temporary,
+    "Install source dependencies",
+    600000,
+  );
+  await command(
+    process.execPath,
+    [npmCli, "run", "check:docs"],
+    temporary,
+    "Check distributed documentation",
+  );
+  await command(
+    process.execPath,
+    [npmCli, "run", "build"],
+    temporary,
+    "Build distributed UI",
+  );
 
   const reservation = createServer();
   reservation.listen(0, "127.0.0.1");

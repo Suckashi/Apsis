@@ -14,7 +14,7 @@ _Actual desktop UI captured with isolated demonstration data and a deterministic
 
 ## Status
 
-**Alpha: `v0.2.0-alpha.1`.** Apsis is actively developed for local, single-owner use. Data compatibility and public APIs may change during Alpha; every release must describe breaking changes. See [known limitations and the roadmap](docs/roadmap.md) and [version and backup policy](docs/releases.md).
+**Alpha: `v0.2.0-alpha.2`.** Apsis is actively developed for local, single-owner use. Data compatibility and public APIs may change during Alpha; every release must describe breaking changes. See [known limitations and the roadmap](docs/roadmap.md) and [version and backup policy](docs/releases.md).
 
 The runtime is **Deep Agents**. Supported model connections are OpenAI, Anthropic, Ollama and OpenAI-compatible endpoints. Model access is supplied by you; API providers may charge for requests. Deterministic tests do not certify the behavior of every model or endpoint.
 
@@ -23,7 +23,7 @@ The runtime is **Deep Agents**. Supported model connections are OpenAI, Anthropi
 Requires **Node.js 22.19+** and npm. Windows and Ubuntu with Node.js 22.19 are the CI baseline; macOS has not yet been verified in CI. Install Git for cloning; on Windows, Git for Windows also supplies Bash for Shell tools. Linux uses system Bash. Other tools remain available without Bash.
 
 ```sh
-git clone --branch v0.2.0-alpha.1 https://github.com/Suckashi/Apsis.git
+git clone --branch v0.2.0-alpha.2 https://github.com/Suckashi/Apsis.git
 cd Apsis
 npm ci
 npx playwright install chromium

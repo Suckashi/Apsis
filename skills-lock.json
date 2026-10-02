@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "write-agents-md": {
+      "source": "Suckashi/write-agents-md",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "df9ca6489256b8673cfd76b25bc1eef7edd43994a19a429ca4a31dd0dece95c2"
+    }
+  }
+}

@@ -7,7 +7,7 @@
 Install Node.js 22.19+ with npm and Git. Windows and Ubuntu with Node.js 22.19 are tested in CI; macOS is not yet verified. Git for Windows provides Bash for Shell tools. Linux uses system Bash.
 
 ```sh
-git clone --branch v0.2.0-alpha.1 https://github.com/Suckashi/Apsis.git
+git clone --branch v0.2.0-alpha.2 https://github.com/Suckashi/Apsis.git
 cd Apsis
 npm ci
 npx playwright install chromium
