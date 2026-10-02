@@ -79,7 +79,7 @@ test("one message endpoint handles chat, steering, retries and state races witho
   t.after(() => release());
   const first = await f.send({ requestId: "first", prompt: "Build it" });
   assert.equal(first.status, 202);
-  await until(() => f.product.execution.steers.has(f.bot.id));
+  await until(() => f.product.execution.steers.has(f.bot.sessionId));
   const input = { requestId: "follow", prompt: "Make it smaller" };
   const replies = await Promise.all([f.send(input), f.send(input)]);
   assert.equal(deliveries, 1);
@@ -141,7 +141,7 @@ test("steering rejects foreign attachments and changed files; unconsumed message
   });
   t.after(() => release());
   await f.send({ requestId: "start", prompt: "begin" });
-  await until(() => f.product.execution.steers.has(f.bot.id));
+  await until(() => f.product.execution.steers.has(f.bot.sessionId));
   assert.equal(
     (
       await f.send({

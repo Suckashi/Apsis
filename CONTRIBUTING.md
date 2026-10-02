@@ -39,7 +39,7 @@ Use an optional `.env` with `APSIS_DATA_DIR` pointing to a separate absolute dir
 | Conversation UI                    | `public/bot.tsx`, `public/conversation-messages.tsx`, `public/chat-composer.tsx` |
 | Tests and browser fixtures         | `test/`, `scripts/verify-*.ts`                                                   |
 
-Keep the core Node-only and cross-platform. Use strict TypeScript and built-in Node APIs where practical. Add integrations as server-side adapters. Deep Agents native `task` handles ephemeral subagents; persistent Bot collaboration uses `delegate_task`. Host execution must use the guarded Shell tool. Write tools must honor permissions and operation journaling.
+Keep the core Node-only and cross-platform. Use strict TypeScript and built-in Node APIs where practical. Add integrations as server-side adapters. Deep Agents native `task` handles ephemeral subagents; persistent independent work uses `start_background_work`. Host execution must use the guarded Shell tool. Write tools must honor permissions and operation journaling.
 
 Show observable progress, results and uncertainty; do not expose private model reasoning or invent successful execution. Keep advanced UI details collapsed and approvals visible. Add fixed UI strings to the relevant localization dictionary and check both languages when changing a flow.
 
@@ -56,8 +56,7 @@ npm test
 Run relevant browser checks after a UI or user-flow change:
 
 ```sh
-npm run test:chat:browser
-npm run test:bots:browser
+npm run test:assistant:browser
 npm run test:settings:browser
 ```
 

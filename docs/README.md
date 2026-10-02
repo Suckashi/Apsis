@@ -26,3 +26,5 @@ The READMEs and guides below describe the current implementation. Several detail
 - [Development quality log](product-quality-audit.md), [quality benchmark](award-quality-benchmark.md) and [2026-09-29 live UX audit](live-ux-audit-2026-09-29.md).
 
 These records include superseded flows and references to local, ignored `artifacts/` evidence. Those local artifacts are not part of the source release, and a historical successful check is not proof that the current release passes it.
+
+- [Single-assistant development design, verification and limits](single-assistant.md)

@@ -34,6 +34,7 @@ export class BotConversationRoutes {
   async handle(context: BotRequestContext): Promise<boolean> {
     const { req, res, url, path, method, body, id, action, bot } = context;
     if (!action && method === "DELETE") {
+      fail("The personal assistant cannot be deleted.", 409);
       await this.deps.remove(id);
       reply(res, { ok: true });
       return true;
@@ -145,6 +146,7 @@ export class BotConversationRoutes {
       return true;
     }
     if (action === "contexts" && method === "POST") {
+      fail("Apsis uses one long-lived main conversation.", 409);
       reply(res, this.deps.newContext(id), 201);
       return true;
     }
@@ -201,9 +203,13 @@ export class BotConversationRoutes {
     }
     if (action === "stop" && method === "POST") {
       this.deps.tasks.stop(bot.sessionId);
-      for (const job of this.deps.db.jobs.list({ botId: id }))
+      for (const job of this.deps.db.jobs
+        .list({ botId: id })
+        .filter((j) => j.sessionId === bot.sessionId))
         this.deps.execution.jobControllers.get(job.id)?.abort();
-      for (const job of this.deps.db.jobs.list({ botId: id, status: "queued" }))
+      for (const job of this.deps.db.jobs
+        .list({ botId: id, status: "queued" })
+        .filter((j) => j.sessionId === bot.sessionId))
         this.deps.db.jobs.put(transitionJob(job, "cancelled"));
       this.deps.notify(id);
       reply(res, { ok: true });

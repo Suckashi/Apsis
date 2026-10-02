@@ -157,7 +157,7 @@ test("verification API returns only the latest receipt belonging to the requeste
   );
 });
 
-test("deleting a Bot clears all of its task receipts and preserves other Bots' receipts", async (t) => {
+test("the assistant deletion endpoint preserves verification evidence", async (t) => {
   const f = await fixture(t);
   const removedBot = await f.product.bots.create("Remove me");
   const retainedBot = await f.product.bots.create("Keep me");
@@ -171,20 +171,18 @@ test("deleting a Bot clears all of its task receipts and preserves other Bots' r
   assert.equal(f.product.db.all("web-verification").length, 4);
   assert.equal(
     (await f.request(`/bots/${removedBot.id}`, "DELETE")).status,
-    200,
+    409,
   );
-  assert.deepEqual(f.product.db.all<WebVerification>("web-verification"), [
-    keptReceipt,
-  ]);
+  assert.equal(f.product.db.all<WebVerification>("web-verification").length, 4);
   assert.equal(
     (await f.request(`/bots/${first.botId}/verification?context=${first.id}`))
       .status,
-    404,
+    200,
   );
   assert.equal(
     (await f.request(`/bots/${second.botId}/verification?context=${second.id}`))
       .status,
-    404,
+    200,
   );
   assert.deepEqual(await f.verification(retained), {
     applicable: true,

@@ -186,7 +186,7 @@ export class MessageService {
       !input.retryOf &&
       live &&
       liveContext === contextId &&
-      this.deps.execution.steers.has(id) &&
+      this.deps.execution.steers.has(bot.sessionId) &&
       !live.controller.signal.aborted
     ) {
       try {
@@ -206,8 +206,20 @@ export class MessageService {
   }
   async steerMessage(id: string, input: Record<string, unknown>) {
     const bot = this.deps.writableBot(id);
-    const sessionId = bot.sessionId;
-    const steerKey = id;
+    const job =
+      typeof input.jobId === "string"
+        ? this.deps.db.jobs.get(input.jobId)
+        : undefined;
+    if (
+      input.jobId !== undefined &&
+      (!job ||
+        job.botId !== id ||
+        job.status !== "running" ||
+        job.runId !== input.runId)
+    )
+      fail("Work changed; reload before steering.", 409);
+    const sessionId = job?.sessionId || bot.sessionId;
+    const steerKey = sessionId;
     const prompt = string(input.prompt);
     const requestId =
       input.requestId === undefined

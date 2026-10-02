@@ -1,5 +1,7 @@
 # 入門指南
 
+> Development redesign: see [single-assistant behavior and limits](single-assistant.md). Roster, role-template and manual Bot-delegation instructions below describe the earlier product and are not available in this phase. Use a new schema-5 directory; preserve older data.
+
 [English](getting-started.md) · [文件索引](README.md)
 
 ## 1. 安裝固定版本
@@ -57,7 +59,7 @@ _畫面採用隔離示範資料與固定模型替身。真實模型可能需要�
 
 ## 資料位置與設定
 
-預設資料目錄為 `.apsis-v4/`，預設工作檔案位於 `.apsis-v4/workspace/`。可用編輯器將 `.env.example` 複製為 `.env`，設定：
+預設資料目錄為 `.apsis-v5/`，預設工作檔案位於 `.apsis-v5/workspace/`。可用編輯器將 `.env.example` 複製為 `.env`，設定：
 
 ```dotenv
 PORT=3100

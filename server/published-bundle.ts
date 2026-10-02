@@ -83,9 +83,9 @@ export async function capturePublishedBundle(
     // Validate the original path too: normalization must never erase a leading
     // slash, drive prefix, parent traversal or protected workspace boundary.
     const original = index === 0 ? entry : assetPaths[index - 1];
+    const file = await workspace.resolve(original);
     await authorize("publish_file", { path: original });
     await authorize("read_file", { path: original });
-    const file = await workspace.resolve(original);
     const handle = await open(file, "r");
     try {
       const info = await handle.stat();

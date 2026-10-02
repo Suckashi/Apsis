@@ -153,6 +153,7 @@ export class ArtifactService {
         visited.add(job.parentJobId);
         job = this.deps.db.jobs.get(job.parentJobId);
         if (!job) break;
+        if (job.botId === bot.id) continue;
         this.deps.db.artifacts.put({
           ...artifact,
           id: randomUUID(),

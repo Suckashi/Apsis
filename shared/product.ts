@@ -29,6 +29,9 @@ export interface BotTemplate {
   permissionRules: PermissionRule[];
 }
 export interface Approval {
+  sessionId?: string;
+  jobId?: string;
+  impact?: string;
   workContextId?: string;
   location?: import("./types.ts").WorkLocation;
   matchedRuleIds?: string[];
@@ -62,6 +65,9 @@ export interface Routine {
   permissionBotIds?: string[];
 }
 export interface Job {
+  /** Execution owner; independent work never shares the main chat session. */
+  sessionId?: string;
+  completionMessageId?: string;
   location?: import("./types.ts").WorkLocation;
   fileReferences?: { locationId: string; path: string; revision: string }[];
   /** Set only when enqueuing work after the collection feature is initialized. */
@@ -73,12 +79,7 @@ export interface Job {
   prompt: string;
   createdAt: string;
   status:
-    | "queued"
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | "interrupted";
+    "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
   error?: string;
   dismissedAt?: string;
   runId?: string;

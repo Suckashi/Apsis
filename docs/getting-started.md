@@ -1,5 +1,7 @@
 # Getting started
 
+> Development redesign: see [single-assistant behavior and limits](single-assistant.md). Roster, role-template and manual Bot-delegation instructions below describe the earlier product and are not available in this phase. Use a new schema-5 directory; preserve older data.
+
 [繁體中文](getting-started.zh-TW.md) · [Documentation index](README.md)
 
 ## 1. Install a known version
@@ -57,7 +59,7 @@ Use [Alpha acceptance](alpha-acceptance.md) to record real provider and multi-da
 
 ## Data location and configuration
 
-Defaults are `.apsis-v4/` for application data and `.apsis-v4/workspace/` for default work files. You can copy `.env.example` to `.env` using your editor and set:
+Defaults are `.apsis-v5/` for application data and `.apsis-v5/workspace/` for default work files. You can copy `.env.example` to `.env` using your editor and set:
 
 ```dotenv
 PORT=3100

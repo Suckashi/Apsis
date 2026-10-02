@@ -47,7 +47,8 @@
     "test:removal:browser": "npm run build && node scripts/verify-bot-removal-sync.ts",
     "test:startup:browser": "npm run build && node scripts/verify-startup-performance.ts --isolated --repeat --verify",
     "check:docs": "node scripts/check-docs.ts",
-    "test:release": "node scripts/verify-release-source.ts"
+    "test:release": "node scripts/verify-release-source.ts",
+    "test:assistant:browser": "npm run build && node scripts/verify-assistant.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

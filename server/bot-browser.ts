@@ -40,6 +40,7 @@ export class BotBrowser {
     }
     return page;
   }
+  readonly revisions = new Map<string, number>();
   directory: string;
   context?: BrowserContext;
   opening?: Promise<BrowserContext>;
@@ -66,13 +67,35 @@ export class BotBrowser {
     if (!page || page.isClosed()) {
       page = await this.context.newPage();
       this.pages.set(botId, page);
+      page.on("framenavigated", () =>
+        this.revisions.set(botId, (this.revisions.get(botId) || 0) + 1),
+      );
     }
     return page;
   }
-  async act(botId: string, input: Record<string, string>, external = false) {
+  private readonly actions = new Map<string, Promise<unknown>>();
+  act(botId: string, input: Record<string, string>, external = false) {
+    const previous = this.actions.get(botId) || Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(() => this.actOwned(botId, input, external));
+    this.actions.set(botId, next);
+    void next
+      .finally(() => {
+        if (this.actions.get(botId) === next) this.actions.delete(botId);
+      })
+      .catch(() => {});
+    return next;
+  }
+  private async actOwned(
+    botId: string,
+    input: Record<string, string>,
+    external: boolean,
+  ) {
     const page = external
       ? await this.externalPage(botId)
       : await this.page(botId);
+    this.revisions.set(botId, (this.revisions.get(botId) || 0) + 1);
     page.setDefaultTimeout(15000);
     if (input.action === "navigate") {
       const url = new URL(input.url);

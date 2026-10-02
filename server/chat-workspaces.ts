@@ -41,13 +41,19 @@ export class ChatWorkspaces {
       path,
     );
   }
-  async track(botId: string, contextId: string, url: string) {
+  async track(
+    botId: string,
+    contextId: string,
+    url: string,
+    executionSessionId?: string,
+  ) {
     const p = this.deps,
       bot = p.bot(botId),
       history = p.tasks.store.conversations;
+    const sessionId = executionSessionId || bot.sessionId;
     const ref = identifyPullRequest(url);
     const snapshot = await this.readRemote(
-      p.tasks.locations.ensure(bot.sessionId, contextId).path,
+      p.tasks.locations.ensure(sessionId, contextId).path,
       url,
     );
     const pullRequest = {
@@ -57,7 +63,7 @@ export class ChatWorkspaces {
       checkedAt: new Date().toISOString(),
       followUps: 0,
     };
-    history.updateContext(bot.sessionId, contextId, { pullRequest });
+    history.updateContext(sessionId, contextId, { pullRequest });
     p.notify(botId);
     return pullRequest;
   }

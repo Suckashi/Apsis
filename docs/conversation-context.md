@@ -1,5 +1,7 @@
 # 長期對話、Context 與記憶
 
+> Development redesign: see [single-assistant behavior and limits](single-assistant.md). Roster, role-template and manual Bot-delegation instructions below describe the earlier product and are not available in this phase. Use a new schema-5 directory; preserve older data.
+
 Apsis 保留 Deep Agents 1.14.0 的執行迴圈；對話生命週期、持久化、預算與記憶由 Apsis 管理。
 
 ## 使用行為
@@ -26,9 +28,9 @@ Scratch 與真實 workspace 分開。Deep Agents 的虛擬檔案工具只操作 
 
 ## 格式與備份
 
-本版不匯入舊 session、agent 或訊息。`state.json` 只接受 schema 4，不含
+本版不匯入舊 session、agent 或訊息。`state.json` 只接受 schema 5，不含
 對話或重複模型設定；Session 用 `botId` 關聯 Bot。對話寫入直接使用 SQLite
-交易，不經過知識檔的 mutate queue。schema 4 的對話資料庫或知識檔遺失時
+交易，不經過知識檔的 mutate queue。schema 5 的對話資料庫或知識檔遺失時
 停止啟動，不建立空白替代資料。較舊格式須改用全新的資料目錄。
 
 `GET /api/storage/backup` 輸出版本化串流 JSON，包含 metadata、記憶、SQLite 歷史／checkpoint／摘要與 scratch 內容（base64）。資料庫部分使用讀取快照；運行中的檔案可能繼續改變，因此這是邏輯匯出，不是完整離線還原映像。完整備份仍須停止程式後複製整個資料目錄，包括 `product.sqlite`、`runs/`、連線設定與 workspace。

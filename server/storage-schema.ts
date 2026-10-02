@@ -119,7 +119,7 @@ const knowledge = z
   })
   .passthrough();
 export const storageSchema = z.strictObject({
-  schemaVersion: z.literal(4),
+  schemaVersion: z.literal(5),
   projects: z.array(projectSchema),
   memories: z.array(knowledge),
   skills: z.array(knowledge.extend({ name: z.string(), agentId: z.string() })),

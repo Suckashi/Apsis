@@ -158,6 +158,7 @@ export type RunTimelineEntry =
   | { kind: "commentary"; id: string; at: string; text: string }
   | { kind: "operation"; id: string; at: string; operationId: string };
 export interface TaskRun {
+  jobId?: string;
   location?: WorkLocation;
   timeline?: RunTimelineEntry[];
   workContextId?: string;

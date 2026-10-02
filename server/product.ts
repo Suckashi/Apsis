@@ -112,6 +112,16 @@ export class ProductService {
       tasks: this.tasks,
     });
     this.approvals = new ApprovalService({
+      browserTarget: (sessionId) => {
+        const page =
+          this.browser.externalPages.get(sessionId) ||
+          this.browser.pages.get(sessionId);
+        return {
+          sessionId,
+          url: page && !page.isClosed() ? page.url() : undefined,
+          revision: this.browser.revisions.get(sessionId) || 0,
+        };
+      },
       bot: (...args) => this.bots.bot(...args),
       connectors: this.connectors,
       db: this.db,
@@ -181,7 +191,7 @@ export class ProductService {
       connectors: this.connectors,
       createDocument: (...args) => this.artifacts.createDocument(...args),
       db: this.db,
-      delegate: (...args) => this.jobs.delegate(...args),
+      submit: (...args) => this.jobs.submit(...args),
       execution: this.execution,
       notify: (...args) => this.notify(...args),
       publish: (...args) => this.artifacts.publish(...args),
@@ -193,6 +203,7 @@ export class ProductService {
       workspaces: this.workspaces,
     });
     this.routes = new ProductRoutes({
+      submit: (...args) => this.jobs.submit(...args),
       bootstrap: (...args) => this.bootstrap(...args),
       bot: (...args) => this.bots.bot(...args),
       browser: this.browser,
@@ -270,6 +281,7 @@ export class ProductService {
         this.db.jobs.put(
           recoverJob(job, this.tasks.runs.records.get(job.runId || "")),
         );
+    for (const job of this.db.jobs.list()) this.jobs.reportCompletion(job);
     this.tasks.timeoutMs = 30 * 60 * 1000;
     for (const draft of this.db.drafts.list())
       if (draft.status === "sending")
@@ -283,8 +295,7 @@ export class ProductService {
         .list()
         .some(
           (j) =>
-            this.db.bots.get(j.botId)?.sessionId === sessionId &&
-            this.execution.slots.isSuspended(j.id),
+            j.sessionId === sessionId && this.execution.slots.isSuspended(j.id),
         ) ||
       this.db.approvals
         .list()
@@ -297,16 +308,23 @@ export class ProductService {
     this.tasks.extensions = (session, runId) => {
       const bot = session.botId ? this.db.bots.get(session.botId) : undefined;
       if (!bot) return {};
-      const job = this.db.jobs.list({ botId: bot.id, status: "running" })[0];
+      const job = this.db.jobs
+        .list({ botId: bot.id, status: "running" })
+        .find((j) => j.sessionId === session.id);
+      if (job) {
+        job.runId = runId;
+        this.db.jobs.put(job);
+      }
       const quoted = job?.replyTo
         ? this.tasks.store.conversations.message(session.id, job.replyTo)
         : undefined;
       const settings =
         (job && this.execution.jobSettings.get(job.id)) || this.settings.read();
       return {
+        jobId: job?.id,
         ...buildRunConfig(bot, this.connections, this.connectors.all(), job),
         executionContext: [
-          "Work directly in this conversation and its working folder. Complete the user's requested scope and verify the result. Do not create independent tasks. If asked to plan first, return a plan and wait for the user before implementing.",
+          "Work directly in this conversation and its working folder. Complete the user's requested scope and verify the result. Use start_background_work for independent persistent work so the main chat remains available. Native task is temporary within-run delegation only. If asked to plan first, return a plan and wait for the user before implementing.",
           "Pushing, creating a PR, publishing or deploying requires explicit user authorization. Earlier authorization remains valid unless narrowed or revoked. Finish local work with a report of changes and actual checks. For static HTML/JS interfaces use verify_web after the last edit; never claim verification without passing evidence.",
           "Successful create_document and publish_file calls automatically add result cards with preview and download actions. Refer to readable filenames and these cards; do not repeat UUID directories, artifact IDs, source hashes or internal tool field names in an ordinary delivery reply. Include a working path when it is needed to use an unpublished file, or exact technical details when requested. Reports to a delegating Bot may include the evidence references it needs to verify or continue work. Do not publish an already published artifact again merely to add a card.",
           "For a static web app with separate local CSS, scripts, modules, images, fonts or data files, use publish_file with its HTML entry and an explicit assets list containing every required local file (including dependencies imported by other assets). This creates one immutable preview and a complete ZIP download. assets only works with an HTML entry; publish a standalone Markdown or other file by omitting assets. Paths are relative to the task workspace; the bundle includes at most 64 files and 20 MB. Verify the final app with verify_web before publishing, and do not claim undeclared or remote resources are included.",
@@ -355,12 +373,21 @@ export class ProductService {
           name: string,
           operation: () => Promise<T>,
           signal?: AbortSignal,
-        ) =>
-          job && name !== "delegate_task"
-            ? this.execution.slots.withWork(job.id, operation, signal)
-            : operation(),
+        ) => {
+          const execute = () =>
+            job
+              ? this.execution.slots.withWork(job.id, operation, signal)
+              : operation();
+          return name === "shell" || name === "browser"
+            ? this.execution.withResource(
+                name === "shell" ? "host-shell" : `browser:${session.id}`,
+                execute,
+                signal,
+              )
+            : execute();
+        },
         registerSteer: (steer) => {
-          this.execution.steers.set(bot.id, async (text, onApplied) => {
+          this.execution.steers.set(session.id, async (text, onApplied) => {
             const live = this.tasks.running.get(session.id);
             if (!live || live.runId !== runId || live.controller.signal.aborted)
               fail("目前回合已結束，補充指示尚未採用。", 409);
@@ -388,6 +415,7 @@ export class ProductService {
     const data = {
       botId,
       at: now(),
+      sessionId: job?.sessionId || bot?.sessionId,
       jobId: job?.id,
       runId: job?.runId,
       workContextId:

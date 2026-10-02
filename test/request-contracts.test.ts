@@ -113,7 +113,11 @@ test("HTTP mutations reject unknown fields and wrong types before changing store
     });
     assert.equal(
       response.status,
-      400,
+      path === "/api/v2/bots"
+        ? 409
+        : path.startsWith("/api/v2/templates")
+          ? 410
+          : 400,
       `${method} ${path}: ${await response.text()}`,
     );
   }

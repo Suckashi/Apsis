@@ -178,7 +178,7 @@ test("policy deny overrides ask and allow regardless of rule order or scope", ()
     rule("ask", "ask", { scope: "bot", botId: "b" }),
     rule("deny", "deny", { path: "src" }),
   ];
-  const request = { tool: "write_file", botId: "b", path: "src/a" };
+  const request = { tool: "read_file", botId: "b", path: "src/a" };
   const decision = evaluatePolicy(rules, request);
   assert.equal(decision.effect, "deny");
   assert.equal(decision.explicitAsk, false);
@@ -198,13 +198,13 @@ test("policy scopes and target restrictions must all match", () => {
     rule("deny", "deny", {
       scope: "bot",
       botId: "a",
-      tool: "delegate_task",
+      tool: "start_background_work",
       targetBotId: "b",
       path: "src",
     }),
   ];
   const request = {
-    tool: "delegate_task",
+    tool: "start_background_work",
     botId: "a",
     targetBotId: "b",
     path: "src/x",
@@ -230,11 +230,11 @@ test("policy defaults to yolo and readonly cannot be overridden", () => {
     { tool: "browser", action: "click" },
     { tool: "browser" },
   ]) {
-    assert.equal(evaluatePolicy([], request).effect, "allow");
-    assert.equal(evaluatePolicy([], request).explicitAsk, false);
+    assert.equal(evaluatePolicy([], request).effect, "ask");
+    assert.equal(evaluatePolicy([], request).explicitAsk, true);
     assert.equal(
       evaluatePolicy([rule("allow", "allow")], request).effect,
-      "allow",
+      "ask",
     );
     assert.equal(
       evaluatePolicy([rule("allow", "allow")], { ...request, readonly: true })
@@ -245,8 +245,6 @@ test("policy defaults to yolo and readonly cannot be overridden", () => {
   for (const request of [
     { tool: "read_file" },
     { tool: "browser", action: "read" },
-    { tool: "browser", action: "navigate" },
-    { tool: "other_tool" },
   ])
     assert.equal(
       evaluatePolicy([], { ...request, readonly: true }).effect,
@@ -257,7 +255,7 @@ test("policy defaults to yolo and readonly cannot be overridden", () => {
     { tool: "edit_file" },
     { tool: "create_document" },
     { tool: "draft_message" },
-    { tool: "delegate_task" },
+    { tool: "start_background_work" },
     { tool: "custom", mutation: true },
   ])
     assert.equal(

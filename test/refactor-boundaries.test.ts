@@ -35,7 +35,7 @@ test("old state is rejected before opening databases or rewriting user files", a
     skills: [],
   });
   await writeFile(join(dir, "state.json"), original);
-  await assert.rejects(new Store(dir).init(), /schema 4/);
+  await assert.rejects(new Store(dir).init(), /schema 5/);
   assert.equal(await readFile(join(dir, "state.json"), "utf8"), original);
   assert.deepEqual(await readdir(dir), ["state.json"]);
 });
@@ -45,7 +45,7 @@ test("a missing current conversation database never creates empty replacement hi
   await writeFile(
     join(dir, "state.json"),
     JSON.stringify({
-      schemaVersion: 4,
+      schemaVersion: 5,
       projects: [],
       memories: [],
       skills: [],
@@ -134,7 +134,7 @@ test("Bot config resolves afresh between runs and transcripts never rewrite know
   assert.equal(response.status, 200);
   const backup = await response.json();
   assert.equal(backup.version, 4);
-  assert.equal(backup.state.schemaVersion, 4);
+  assert.equal(backup.state.schemaVersion, 5);
   assert.ok(!Object.hasOwn(backup.state, "sessions"));
   assert.ok(!Object.hasOwn(backup.state, "agents"));
   assert.ok(JSON.stringify(backup.conversations).includes("second prompt"));

@@ -22,8 +22,8 @@ const index = fileURLToPath(new URL("../server/index.ts", import.meta.url));
 
 test("startup directories share one default and custom data implies a matching workspace", () => {
   assert.deepEqual(appDirectories({}, {}), {
-    dataDir: resolve(".apsis-v4"),
-    workspaceDir: resolve(".apsis-v4/workspace"),
+    dataDir: resolve(".apsis-v5"),
+    workspaceDir: resolve(".apsis-v5/workspace"),
   });
   assert.deepEqual(appDirectories({}, { APSIS_DATA_DIR: "custom-data" }), {
     dataDir: resolve("custom-data"),
@@ -39,7 +39,7 @@ test("startup directories share one default and custom data implies a matching w
       workspaceDir: resolve("explicit-work"),
     },
   );
-  assert.equal(Workspace.allowed(".apsis-v4"), false);
+  assert.equal(Workspace.allowed(".apsis-v5"), false);
 });
 
 test("createApp with only dataDir keeps workspace and status in that directory", async (t) => {
@@ -131,11 +131,11 @@ test(
     const status = await response.json();
     assert.equal(
       await realpath(status.dataDir),
-      await realpath(join(dir, ".apsis-v4")),
+      await realpath(join(dir, ".apsis-v5")),
     );
     assert.equal(
       await realpath(status.workspace),
-      await realpath(join(dir, ".apsis-v4", "workspace")),
+      await realpath(join(dir, ".apsis-v5", "workspace")),
     );
     const bootstrap = await fetch(base + "/api/v2/bootstrap", {
       method: "POST",
@@ -146,9 +146,9 @@ test(
     assert.equal(state.bots.length, 1);
     assert.deepEqual(state.connections, []);
     assert.equal(
-      JSON.parse(await readFile(join(dir, ".apsis-v4", "state.json"), "utf8"))
+      JSON.parse(await readFile(join(dir, ".apsis-v5", "state.json"), "utf8"))
         .schemaVersion,
-      4,
+      5,
     );
     assert.equal(
       await readFile(join(oldDirectory, "state.json"), "utf8"),

@@ -78,7 +78,7 @@ for (const [command, matched] of dangerous)
     assert.equal(
       evaluatePolicy([], { tool: "shell", command }, { approvalMode: "auto" })
         .effect,
-      "allow",
+      "ask",
     );
   });
 
@@ -96,10 +96,7 @@ test("upstream exceptions and unknown-command behavior are preserved", () => {
     "curl https://example.com",
   ]) {
     assert.equal(analyzeDangerousCommand(command), undefined, command);
-    assert.equal(
-      evaluatePolicy([], { tool: "shell", command }).effect,
-      "allow",
-    );
+    assert.equal(evaluatePolicy([], { tool: "shell", command }).effect, "ask");
   }
   for (const command of [
     "$CMD --force",
@@ -114,7 +111,7 @@ test("upstream exceptions and unknown-command behavior are preserved", () => {
     assert.equal(
       evaluatePolicy([], { tool: "shell", command }, { approvalMode: "yolo" })
         .effect,
-      "allow",
+      "ask",
     );
   }
   assert.equal(parse("echo hello", { maxNodes: 1 }).ok, false);
@@ -128,7 +125,7 @@ const rule = (effect: PermissionRule["effect"]): PermissionRule => ({
   effect,
 });
 test("Kimi strategy ordering, guard toggle, and Apsis hard limits", () => {
-  const request = { tool: "shell", command: "echo hello" };
+  const request = { tool: "shell", command: "pwd" };
   assert.equal(
     evaluatePolicy([rule("deny")], request, {
       approvalMode: "auto",
@@ -155,7 +152,7 @@ test("Kimi strategy ordering, guard toggle, and Apsis hard limits", () => {
       { ...request, command: "shutdown now" },
       { dangerousCommandGuard: false },
     ).effect,
-    "allow",
+    "ask",
   );
   for (const approvalMode of ["manual", "yolo", "auto"] as const)
     assert.equal(
@@ -173,7 +170,7 @@ test("Kimi strategy ordering, guard toggle, and Apsis hard limits", () => {
     );
     assert.equal(
       evaluatePolicy([], { tool }, { approvalMode: "yolo" }).effect,
-      "allow",
+      "ask",
     );
   }
   assert.equal(
@@ -182,13 +179,13 @@ test("Kimi strategy ordering, guard toggle, and Apsis hard limits", () => {
       { tool: "browser", action: "navigate" },
       { approvalMode: "manual" },
     ).effect,
-    "allow",
+    "ask",
   );
   assert.equal(
     evaluatePolicy(
       [],
       { tool: "write_file", path: "file.txt" },
-      { approvalMode: "manual", gitWorkspace: true },
+      { approvalMode: "manual", gitWorkspace: true, targetExists: false },
     ).reason,
     "git-workspace",
   );
@@ -219,7 +216,7 @@ test("sensitive names and Git path guards preserve upstream exceptions", async (
     assert.equal(isSensitiveFile(path), false, path);
   assert.equal(
     evaluatePolicy([rule("allow")], { tool: "read_file", path: ".env" }).effect,
-    "allow",
+    "ask",
   );
   assert.equal(
     evaluatePolicy(
@@ -227,7 +224,7 @@ test("sensitive names and Git path guards preserve upstream exceptions", async (
       { tool: "read_file", path: ".env" },
       { approvalMode: "auto" },
     ).effect,
-    "allow",
+    "ask",
   );
   const dir = await mkdtemp(join(tmpdir(), "apsis-policy-git-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -263,8 +260,7 @@ test("settings and whole-command glob validation", () => {
     "ask",
   );
   assert.equal(
-    evaluatePolicy(rules, { tool: "shell", command: "echo npm run build" })
-      .effect,
+    evaluatePolicy(rules, { tool: "shell", command: "pwd" }).effect,
     "allow",
   );
   assert.equal(commandMatches("echo \\*", "echo *"), true);

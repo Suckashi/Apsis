@@ -1,5 +1,7 @@
 # Apsis Bot 工作空間
 
+> Development redesign: see [single-assistant behavior and limits](single-assistant.md). Roster, role-template and manual Bot-delegation instructions below describe the earlier product and are not available in this phase. Use a new schema-5 directory; preserve older data.
+
 `npm run dev` 啟動 Apsis Bot 工作空間。新使用者可先讀[入門指南](getting-started.zh-TW.md)。Bot 統一使用 Deep Agents 搭配第三方 LLM API／Ollama。原生 `task` 用於同一次執行內的短期子代理，沿用受控工具與權限，公開活動保存於執行紀錄；跨 Bot 持續派工使用 `delegate_task`。原生 `execute` 已停用，主機命令經 Apsis Shell 工具核准與記錄。
 
 ## 啟動
@@ -13,7 +15,7 @@ npm run dev
 
 開啟 http://localhost:3100。到「設定與工具 → 模型連線」新增 OpenAI 相容 API、OpenAI、Anthropic 或 Ollama，填入模型 ID，設為預設。使用「測試」確認供應商的串流和工具呼叫。API key 儲存在本機，不回傳到前端。
 
-本版預設使用 `.apsis-v4/` 與 schema 4，直接啟動即可。原本 `.apsis/` 不做遷移、不修改；`APSIS_DATA_DIR` 只用於自訂資料位置。
+本版預設使用 `.apsis-v5/` 與 schema 5，直接啟動即可。原本 `.apsis/` 不做遷移、不修改；`APSIS_DATA_DIR` 只用於自訂資料位置。
 
 本機 Ollama 可填入 `http://127.0.0.1:11434` 和已安裝的模型 ID（例如 `qwen3.5:9b`）。同一模型也可用「OpenAI 相容」服務測試，Base URL 改為 `http://127.0.0.1:11434/v1`；此本機端點不需 API key。這是兩條獨立連線，設定其中一條為預設即可。
 
@@ -66,14 +68,14 @@ Bot 範本可保存角色、圖示、模型、連接器選擇及權限，建立�
 
 ## 工具、附件和成果
 
-- 新話題的預設位置：`.apsis-v4/workspace/tasks/<id>/`；也可連結既有資料夾或專案。可列檔、讀取、精準修改、寫入及使用本機 Bash（Windows 使用 Git Bash）。
+- 新話題的預設位置：`.apsis-v5/workspace/tasks/<id>/`；也可連結既有資料夾或專案。可列檔、讀取、精準修改、寫入及使用本機 Bash（Windows 使用 Git Bash）。
 - 工具核准預設採 Kimi 式「需要時詢問」（yolo）：一般操作直接執行，命中危險或敏感路徑等前置策略才詢問；也可選擇 manual 或 auto。唯讀與禁止規則仍優先，詳見 [核准模式](approval-modes.md)。
 - 唯讀模式拒絕資料修改、Shell、MCP 呼叫與瀏覽器修改操作，允許規則不能覆蓋。路徑規則按目錄邊界比對，Windows 不區分大小寫；不接受絕對路徑、跳出工作區或模糊路徑別名。
 - 核准可只允許一次，或允許本次任務內相同操作，包含向下派工。此授權先於一般詢問規則，但不能略過危險命令；新話題不繼承。舊版永久核准留作不生效的歷史紀錄。
 - Shell 在主機執行，工作區不是作業系統沙箱，路徑規則不能限制命令內部存取的檔案。需要僅限檔案工具的 Bot 應拒絕 Shell。Shell 預設 60 秒、設定上限 120 秒；任務預設 100 個步驟／30 分鐘有效執行時間，等待核准不計入時間。
 - 支援上傳 TXT、MD、CSV、PDF、DOCX、XLSX、PNG、JPEG，每個檔案最多 20 MB。PDF 讀取文字層，沒有 OCR；圖片需要模型支援視覺。
 - 可讀取文件，產生 DOCX、XLSX、PDF，或發布已寫入的程式碼／Markdown 等檔案。成果保存獨立快照，後續修改原始檔不影響已發布成果。
-- MCP 支援 **Streamable HTTP + 選用 Bearer token**。連接器透過 `.apsis-v4/mcp.json` 管理，設定頁入口已隱藏。Bot 可準備操作草稿，由使用者修改 JSON 參數後傳送或捨棄；傳送前會重新檢查連接器選擇、唯讀與上游拒絕規則。傳送結果不明時不自動重試。
+- MCP 支援 **Streamable HTTP + 選用 Bearer token**。連接器透過 `.apsis-v5/mcp.json` 管理，設定頁入口已隱藏。Bot 可準備操作草稿，由使用者修改 JSON 參數後傳送或捨棄；傳送前會重新檢查連接器選擇、唯讀與上游拒絕規則。傳送結果不明時不自動重試。
 - 瀏覽器共用持久登入狀態，每位 Bot 有自己的分頁。先停止執行中的任務，再按「接管瀏覽器」，開啟本機專用視窗；交還後恢復自動操作。接管切換會重新載入分頁，網頁未提交的暫存內容可能不保留。
 
 ## 排程
@@ -82,7 +84,7 @@ Bot 範本可保存角色、圖示、模型、連接器選擇及權限，建立�
 
 ## 資料與恢復
 
-- 所有執行資料放在 `.apsis-v4/`。
+- 所有執行資料放在 `.apsis-v5/`。
 - Bot、佇列、設定版本、範本、權限、核准、草稿、排程、成果索引及事件使用 SQLite（WAL）；對話與知識沿用經驗證的原子 JSON 儲存，執行日誌另外保存。憑證僅存在本機資料目錄。
 - 瀏覽器重新整理透過 SSE 重新訂閱並讀取最新狀態，不會中止伺服器任務。
 - 服務重啟後，執行中／排隊中的工作標為中斷，核准過期，傳送中的草稿標為結果待確認；不自動重播可能有副作用的操作。

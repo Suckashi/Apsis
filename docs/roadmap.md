@@ -22,7 +22,7 @@ The [Alpha acceptance plan](alpha-acceptance.md) defines evidence and a trial re
 
 ## Known limitations
 
-- Alpha APIs and data formats may change; only schema 4 is accepted, with no schema 3 import. Source releases need Node/npm and a build at startup.
+- Alpha APIs and data formats may change; only schema 5 is accepted, with no schema 3 import. Source releases need Node/npm and a build at startup.
 - Automated browser tests use deterministic runners. Passing them does not prove real-model long-task reliability, provider compatibility or multi-day unattended use.
 - Windows and Ubuntu on Node.js 22.19 are the CI baseline. macOS, other Node versions and broader browser coverage need additional evidence.
 - Shell is host execution, not OS isolation. Optional sharing is trusted access to a single-owner workspace, not a multi-tenant service.

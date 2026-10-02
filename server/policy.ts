@@ -4,6 +4,7 @@ import type {
   PermissionRule,
 } from "../shared/settings.ts";
 import { analyzeDangerousCommand } from "./vendor/kimi-bash/dangerous.ts";
+import { classifyAction } from "./action-effects.ts";
 import { isSensitiveFile } from "./policy-paths.ts";
 
 export interface PolicyOptions {
@@ -11,12 +12,14 @@ export interface PolicyOptions {
   approvalMode?: ApprovalMode;
   dangerousCommandGuard?: boolean;
   remembered?: boolean;
+  targetExists?: boolean;
   gitWorkspace?: boolean;
   gitControl?: boolean;
 }
 
 export interface PolicyRequest {
   tool: string;
+  args?: Record<string, unknown>;
   botId?: string;
   botIds?: string[];
   command?: string;
@@ -32,6 +35,8 @@ export interface PolicyRequest {
 export interface PolicyDecision {
   effect: PermissionEffect;
   reason:
+    | "critical-action"
+    | "unknown-effect"
     | "readonly"
     | "rule"
     | "default"
@@ -147,6 +152,7 @@ const mutationTools = new Set([
   "create_routine",
   "update_profile",
   "delegate_task",
+  "start_background_work",
 ]);
 const defaultTools = new Set([
   "list_files",
@@ -162,6 +168,7 @@ const defaultTools = new Set([
   "list_bots",
   "mcp_list",
   "delegate_task",
+  "start_background_work",
   "connection_probe",
   "list_memories",
   "search_memory",
@@ -244,11 +251,7 @@ export function evaluatePolicy(
   });
   if (matches.some((rule) => rule.effect === "deny"))
     return decision("deny", "rule");
-  if (
-    mode !== "auto" &&
-    options.dangerousCommandGuard !== false &&
-    request.tool === "shell"
-  ) {
+  if (request.tool === "shell") {
     const verdict =
       typeof request.command === "string"
         ? analyzeDangerousCommand(request.command)
@@ -258,9 +261,27 @@ export function evaluatePolicy(
         ...decision("ask", "dangerous-command", true),
         dangerousCommand: verdict.command,
       };
-    if (verdict?.kind === "unanalyzable" && mode === "manual")
+    if (verdict?.kind === "unanalyzable")
       return decision("ask", "unanalyzable-command", true);
   }
+  const actionEffect = classifyAction(
+    request.tool,
+    {
+      ...request.args,
+      path: request.path,
+      command: request.command,
+      action: request.action,
+    },
+    options.targetExists,
+  );
+  if (request.readonly && ["critical", "unknown"].includes(actionEffect.kind))
+    return decision("deny", "readonly");
+  if (actionEffect.kind === "critical" || actionEffect.kind === "unknown")
+    return decision(
+      "ask",
+      actionEffect.kind === "critical" ? "critical-action" : "unknown-effect",
+      true,
+    );
   if (mode === "auto") return decision("allow", "auto-mode");
   if (options.remembered) return decision("allow", "session-approval");
   for (const effect of ["ask", "allow"] as const) {

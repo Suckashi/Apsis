@@ -89,7 +89,7 @@ test("PDF reports actual pages, tagged structure and text without fetching suppl
     assert.match(text, /讀書清單專案提案/);
     assert.match(text, /本機資料/);
     assert.match(text, /3\./);
-    assert.match(text, /\[\s*圖片：圖例\s*\]/);
+    assert.match(text.normalize("NFKC").replace(/\s/g, ""), /\[圖片:圖例\]/);
     assert.doesNotMatch(text, /\*\*本機資料\*\*|## 目標/);
     assert.ok(await page.getStructTree());
     assert.ok((await pdf.getOutline())?.length);

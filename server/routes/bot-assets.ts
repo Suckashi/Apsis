@@ -30,7 +30,7 @@ export class BotAssetRoutes {
       return true;
     }
     if (action === "screenshot" && method === "GET") {
-      const image = await this.deps.browser.screenshot(id);
+      const image = await this.deps.browser.screenshot(bot.sessionId);
       if (!image) {
         res.writeHead(204);
         res.end();
@@ -43,8 +43,14 @@ export class BotAssetRoutes {
     if (action === "takeover" && method === "POST") {
       if (this.deps.tasks.running.size)
         fail("請先停止執行中的任務再接管共用瀏覽器。", 409);
+      if (
+        this.deps.db.jobs
+          .list()
+          .some((j) => ["running", "queued"].includes(j.status))
+      )
+        fail("Stop active work before taking over the browser.", 409);
       await this.deps.browser.takeover(
-        id,
+        bot.sessionId,
         parseRequest(takeoverSchema, await body(req)).take,
       );
       this.deps.notify(id);

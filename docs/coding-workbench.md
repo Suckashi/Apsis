@@ -1,5 +1,7 @@
 # 聊天中的程式工作
 
+> Development redesign: see [single-assistant behavior and limits](single-assistant.md). Roster, role-template and manual Bot-delegation instructions below describe the earlier product and are not available in this phase. Use a new schema-5 directory; preserve older data.
+
 Apsis 只有 Bot 持續聊天。一般問題、文件、規劃與程式修改共用訊息入口，不再建立 CodingTask、獨立 session、任務頁籤或計畫版本流程。
 
 ## 操作
@@ -24,8 +26,8 @@ GET /api/v2/bots/:id/changes?context=<id>&path=<relative-path> 與 verification?
 
 ## 資料格式
 
-本版只接受 schema 4，不保留獨立程式任務的型別、執行器或遷移流程。
-預設啟動使用 `.apsis-v4/`，原本 `.apsis/` 不讀取也不修改。
+本版只接受 schema 5，不保留獨立程式任務的型別、執行器或遷移流程。
+預設啟動使用 `.apsis-v5/`，原本 `.apsis/` 不讀取也不修改。
 若以 `APSIS_DATA_DIR` 指定不支援的舊資料目錄，仍會停止啟動並保留原檔。
 
 ## 驗證

@@ -4,7 +4,7 @@
 
 Alpha releases use `0.x.y-alpha.N` and Git tags such as `v0.2.0-alpha.1`. They are published as GitHub prereleases. `main` is the development branch; install a tagged release for a reproducible version. The current distribution is source with a lockfile, not an npm package or desktop binary.
 
-During Alpha, public APIs, checkpoint formats and storage may change. A release must state the accepted data schema, any incompatible changes, and whether migration is provided. The current release accepts schema 4 and checkpoint version 1 tagged `deepagents@1.14.0`; older stores are rejected without rewriting them. There is no automatic import of `.apsis/`.
+During Alpha, public APIs, checkpoint formats and storage may change. A release must state the accepted data schema, any incompatible changes, and whether migration is provided. The current release accepts schema 5 and checkpoint version 1 tagged `deepagents@1.14.0`; older stores are rejected without rewriting them. There is no automatic import of `.apsis/`.
 
 A schema number alone does not guarantee that two releases can interchange checkpoints or all configuration. Follow the specific release notes. Never open newer data with older code as a rollback strategy; restore the stopped backup made with that older release instead. External changes made by tools need their own recovery procedure.
 
@@ -22,7 +22,7 @@ If the release requires a new store and offers no migration, preserve the old da
 
 ## Backup and restore
 
-The default is `<source-checkout>/.apsis-v4`; `APSIS_DATA_DIR` selects a custom location. Back up the **entire directory**, including hidden files, both SQLite databases, settings, MCP configuration, journals, checkpoints, artifacts, browser state and the default workspace. Do not copy an actively running store or select only individual database files.
+The default is `<source-checkout>/.apsis-v5`; `APSIS_DATA_DIR` selects a custom location. Back up the **entire directory**, including hidden files, both SQLite databases, settings, MCP configuration, journals, checkpoints, artifacts, browser state and the default workspace. Do not copy an actively running store or select only individual database files.
 
 Linked projects, work folders outside the data directory, `~/.agents/skills`, `.env` and environment-variable secret values are not covered by that directory backup. Back them up separately. Project and work-location references can contain absolute paths; moving a data directory does not rewrite them. Protect backups like the original private data.
 

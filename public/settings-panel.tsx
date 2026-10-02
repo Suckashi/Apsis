@@ -8,7 +8,6 @@ import type { Snapshot } from "../shared/api.ts";
 
 import { ProviderSettings } from "./provider-settings.tsx";
 import { ExecutionSettings } from "./settings-controls.tsx";
-import { TemplateSettings } from "./settings-templates.tsx";
 import { settingsText as t, useSettingsLocale } from "./settings-locale.ts";
 
 import { Icon } from "./chat-visuals.tsx";
@@ -56,9 +55,7 @@ export function Settings({
               {uiText(
                 tab === "general"
                   ? "調整介面語言與執行方式。"
-                  : tab === "templates"
-                    ? "保存常用的 Bot 設定，方便下次建立。"
-                    : "管理所有 Bot 共用的模型連線。",
+                  : "管理助理使用的模型連線。",
               )}
             </p>
           </div>
@@ -75,7 +72,6 @@ export function Settings({
             {[
               ["general", t("general"), "settings"],
               ["models", t("models"), "spark"],
-              ["templates", t("templates"), "file"],
             ].map(([id, label, icon]) => (
               <button
                 key={id}
@@ -98,13 +94,6 @@ export function Settings({
                 api={api}
                 onDirtyChange={setDirty}
                 diagnostics={state.skillDiagnostics}
-              />
-            )}
-            {tab === "templates" && (
-              <TemplateSettings
-                api={api}
-                refresh={refresh}
-                onDirtyChange={setDirty}
               />
             )}
             {tab === "models" && (

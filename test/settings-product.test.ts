@@ -102,115 +102,6 @@ test("settings GET/PATCH persists updates and rejects stale revisions without ov
   );
 });
 
-test("templates copy preferences without secrets and per-bot choices reach the runner independently", async (t) => {
-  const f = await fixture(t);
-  f.store.skills.create({
-    id: "skill-a",
-    name: "Settings Skill A",
-    content: "Fixture A",
-  });
-  f.store.skills.create({
-    id: "skill-b",
-    name: "Settings Skill B",
-    content: "Fixture B",
-  });
-  for (const id of ["connector-a", "connector-b"])
-    f.product.connectors.put({
-      id,
-      name: id,
-      url: "http://127.0.0.1:1/mcp",
-      token: `${id}-secret`,
-      enabled: true,
-    });
-  const alternate = await f.connections.save({
-    name: "Alternate",
-    provider: "ollama",
-    model: "other-model",
-    modelSettings: { "other-model": { contextWindowTokens: 128000 } },
-    url: "http://127.0.0.1:1",
-  });
-  const templateRequest = {
-    name: "Reusable",
-    connectionId: f.connection.id,
-    model: f.connection.model,
-    connectorIds: ["connector-a"],
-    permissionMode: "workspace",
-  };
-  const invalid = await f.request("/api/v2/templates", "POST", {
-    ...templateRequest,
-    apiKey: "fixture-api-secret",
-    token: "connector-a-secret",
-    messages: [{ content: "private-conversation" }],
-  });
-  assert.equal(invalid.status, 400);
-  const response = await f.request(
-    "/api/v2/templates",
-    "POST",
-    templateRequest,
-  );
-  assert.equal(response.status, 201);
-  const template = response.data as BotTemplate;
-  const stored = f.product.db.get<BotTemplate>("template", template.id)!;
-  assert.deepEqual(stored, template);
-  assert.deepEqual(
-    Object.keys(stored).sort(),
-    [
-      "id",
-      "name",
-      "description",
-      "avatar",
-      "connectionId",
-      "model",
-      "connectorIds",
-      "permissionMode",
-      "permissionRules",
-    ].sort(),
-  );
-  assert.doesNotMatch(
-    JSON.stringify((await f.request("/api/v2/templates")).data),
-    /fixture-api-secret|connector-a-secret|private-conversation/,
-  );
-  const a = await f.product.bots.create("A", { templateId: template.id });
-  const b = await f.product.bots.create("B", { templateId: template.id });
-  await f.product.bots.update(b.id, {
-    connectionId: alternate.id,
-    model: alternate.model,
-
-    connectorIds: ["connector-b"],
-  });
-
-  assert.deepEqual(f.product.bots.bot(a.id).connectorIds, ["connector-a"]);
-  assert.deepEqual(f.product.db.get("template", template.id), stored);
-  for (const bot of [a, b])
-    await f.product.jobs.submit(bot.id, {
-      requestId: randomUUID(),
-      prompt: "verify choices",
-    });
-  await until(() => !f.product.execution.active.size);
-  assert.equal(f.calls.length, 2);
-  for (const [bot, connection, skill, connector, excluded] of [
-    [a, f.connection, "skill-a", "connector-a", "connector-b"],
-    [b, alternate, "skill-b", "connector-b", "connector-a"],
-  ] as const) {
-    const call = f.calls.find((c) => c.session.id === bot.sessionId)!;
-    assert.equal(call.agent?.connectionId, connection.id);
-    assert.equal(call.env?.MODEL_ID, connection.model);
-
-    assert.ok(call.agent?.instructions.includes(connector));
-    assert.ok(!call.agent?.instructions.includes(excluded));
-    assert.doesNotMatch(
-      call.agent!.instructions,
-      /fixture-api-secret|connector-a-secret|connector-b-secret/,
-    );
-    await assert.rejects(
-      f.product.approvals.authorize(bot.id, randomUUID(), "mcp_call", {
-        connectorId: excluded,
-      }),
-      { status: 403 },
-    );
-  }
-});
-
 async function rememberShell(
   f: Awaited<ReturnType<typeof fixture>>,
   bot: Bot,
@@ -232,14 +123,14 @@ async function rememberShell(
   assert.ok(approval);
   f.product.approvals.decide(approval.id, { approved: true, remember: true });
   await pending;
-  await f.product.approvals.authorize(bot.id, "reuse-run", "shell", args);
+  await f.product.approvals.authorize(bot.id, "remember-run", "shell", args);
   assert.equal(f.product.db.all<Approval>("approval").length, 1);
 }
 
 test("permission deny defeats a remembered allow", async (t) => {
   const f = await fixture(t);
   const bot = await f.product.bots.create("Policy");
-  const args = { command: "echo fixture", cwd: "." };
+  const args = { command: "pwd", cwd: "." };
   await rememberShell(f, bot, args);
   f.product.settings.update({
     revision: f.product.settings.read().revision,
@@ -257,7 +148,7 @@ test("permission deny defeats a remembered allow", async (t) => {
 test("session approval precedes explicit ask, as in Kimi", async (t) => {
   const f = await fixture(t);
   const bot = await f.product.bots.create("Ask");
-  const args = { command: "echo fixture", cwd: "." };
+  const args = { command: "pwd", cwd: "." };
   await rememberShell(f, bot, args);
   await f.product.bots.update(bot.id, {
     permissionRules: [
@@ -270,7 +161,7 @@ test("session approval precedes explicit ask, as in Kimi", async (t) => {
       },
     ],
   });
-  await f.product.approvals.authorize(bot.id, "fresh-run", "shell", args);
+  await f.product.approvals.authorize(bot.id, "remember-run", "shell", args);
   assert.equal(f.product.execution.pending.size, 0);
   assert.equal(f.product.db.all<Approval>("approval").length, 1);
 });

@@ -1,5 +1,7 @@
+import { classifyAction } from "./action-effects.ts";
 import { randomUUID, createHash } from "node:crypto";
 
+import { lstatSync, realpathSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 import type { TaskService } from "./tasks.ts";
@@ -29,6 +31,7 @@ interface Dependencies {
   settings: SettingsService;
   tasks: TaskService;
   workLocation: (bot: Bot, runId?: string) => WorkLocation;
+  browserTarget?: (sessionId: string) => unknown;
 }
 
 export class ApprovalService {
@@ -61,10 +64,8 @@ export class ApprovalService {
       job?.location?.path ||
       root?.location?.path ||
       (root?.workContextId
-        ? this.deps.tasks.locations.ensure(
-            this.deps.bot(root.botId).sessionId,
-            root.workContextId,
-          ).path
+        ? this.deps.tasks.locations.ensure(root.sessionId!, root.workContextId)
+            .path
         : this.deps.workLocation(this.deps.bot(botId), runId).path);
     const scopeKey = root
       ? JSON.stringify([root.botId, root.workContextId || root.id])
@@ -88,7 +89,7 @@ export class ApprovalService {
     const confirmKnowledge =
       !!job?.workContextId &&
       !!this.deps.tasks.store.conversations.context(
-        this.deps.bot(botId).sessionId,
+        job.sessionId!,
         job.workContextId,
       ).git &&
       !!job.location?.projectId &&
@@ -138,6 +139,7 @@ export class ApprovalService {
       rules,
       {
         tool,
+        args: a,
         botId,
         botIds: context.owners.map((owner) => owner.id),
         path,
@@ -153,6 +155,9 @@ export class ApprovalService {
         approvalMode: settings.approvalMode,
         dangerousCommandGuard: settings.dangerousCommandGuard,
         remembered,
+        targetExists: path
+          ? existsSync(resolve(context.workspace, path))
+          : undefined,
         ...filePolicyContext(
           context.workspace,
           tool === "shell" ? undefined : path,
@@ -189,6 +194,7 @@ export class ApprovalService {
             .digest("hex")
         : undefined;
     return JSON.stringify({
+      runId,
       scope: context.scopeKey,
       workspace: context.workspace,
       tool,
@@ -229,6 +235,27 @@ export class ApprovalService {
             )
             .map((entry) => entry.id)
             .sort(),
+          target: (() => {
+            if (tool === "browser") {
+              const job = this.deps.db.jobs.list({ runId })[0];
+              return this.deps.browserTarget?.(
+                job?.sessionId || this.deps.bot(botId).sessionId,
+              );
+            }
+            if (!a?.path) return undefined;
+            const target = resolve(context.workspace, a.path);
+            try {
+              const stat = lstatSync(target);
+              return {
+                path: realpathSync(target),
+                ino: stat.ino,
+                size: stat.size,
+                modified: stat.mtimeMs,
+              };
+            } catch {
+              return { path: target, missing: true };
+            }
+          })(),
           paths: filePolicyContext(
             context.workspace,
             tool === "shell" ? undefined : a?.path,
@@ -258,7 +285,11 @@ export class ApprovalService {
     };
     if (policy.effect === "allow") return receipt;
     signal?.throwIfAborted();
+    const ownerJob = this.deps.db.jobs.list({ runId })[0];
     const approval: Approval = {
+      impact: classifyAction(tool, args as Record<string, unknown>).impact,
+      jobId: ownerJob?.id,
+      sessionId: ownerJob?.sessionId,
       workContextId: this.deps.tasks.runs.records.get(runId)?.workContextId,
       location: this.deps.workLocation(this.deps.bot(botId), runId),
       reason: policy.reason,
@@ -266,7 +297,12 @@ export class ApprovalService {
       matchedRuleIds: policy.matchedRuleIds,
       rememberAllowed:
         !["remember", "update_memory", "manage_memory"].includes(tool) &&
-        !["dangerous-command", "unanalyzable-command"].includes(policy.reason),
+        ![
+          "dangerous-command",
+          "unanalyzable-command",
+          "critical-action",
+          "unknown-effect",
+        ].includes(policy.reason),
       fingerprint,
       id: randomUUID(),
       botId,

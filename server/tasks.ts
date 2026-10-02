@@ -167,6 +167,7 @@ export class TaskService {
     const env: Environment = extensions?.env || {};
     const userId = randomUUID();
     const run: TaskRun = {
+      jobId: extensions?.jobId,
       location,
       workContextId: session.workContextId,
       project: session.project || this.projects.get(),

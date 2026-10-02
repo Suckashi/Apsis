@@ -4,9 +4,11 @@
 
 [![Test](https://github.com/Suckashi/Apsis/actions/workflows/test.yml/badge.svg)](https://github.com/Suckashi/Apsis/actions/workflows/test.yml) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Apsis 是本機優先的 Bot 工作空間，讓你透過持續對話交辦工作、查看執行紀錄並取得成果。**
+**Apsis 是本機優先的個人助理：一段持續對話，加上可獨立執行的背景工作。**
 
-每位 Bot 有自己的角色、模型、持續對話與記憶。直接傳訊息交辦，工作中可補充指示；回答、成果和可展開的執行紀錄都留在同一條對話。檔案與 Git 修改按需開啟，Bot 也能派工給其他夥伴或定期執行排程。
+背景工作進行時仍可聊天；工作卡可展開查看、補充指示或停止指定工作。重要進度、決策和結果保持可見，工具細節預設收合。48 款原始頭像全部可直接選用。
+
+開發分支使用新的 schema 5 資料目錄；重大或未知影響的操作，即使在自動模式也需要當次核准。詳見[單一助理設計與限制](docs/single-assistant.md)。以下標記版本早於本次改版。
 
 ![Apsis 對話畫面，包含完成的報告與可下載成果](docs/assets/conversation.png)
 
@@ -46,14 +48,14 @@ Linux 若缺少瀏覽器系統套件，使用 `npx playwright install --with-dep
 | 整理資料並產出成果 | 附上來源資料，請 Bot 製作報告，預覽或下載已發布成果。          |
 | 固定時間交辦       | 建立含時區的排程，先試跑，再查看每次結果；Apsis 必須持續執行。 |
 
-Deep Agents 原生 `task` 子代理用於同一次執行內的研究與分析；`list_bots`／`delegate_task` 則交辦給有獨立身分與歷史的另一位 Bot。原生 `execute` 已停用，主機命令經 Apsis 的 Shell 工具核准與記錄。詳見[架構](docs/architecture.md)。
+Deep Agents 原生 `task` 僅處理同次執行內的暫時子代理；`start_background_work` 建立獨立、持久的背景工作階段。原生 `execute` 已停用，主機命令一律使用有核准與記錄的 Shell。
 
 製作靜態網頁時，`verify_web` 可操作真實瀏覽器，檢查項目隱藏、勾選狀態及重新整理後的狀態。重試限制依實際失敗的檢查計數，其他檢查失敗不會提早中止 Bot 工作。
 `publish_file` 僅在 HTML 入口使用 `assets` 打包本機資源；發布 Markdown 等單檔成果時省略 `assets`，即可取得獨立成果卡。
 
 ## 資料與執行範圍
 
-預設資料目錄為 `.apsis-v4/`，包含設定、對話資料庫、記憶、成果、瀏覽器狀態與預設工作區。可在選用的 `.env` 中設定 `APSIS_DATA_DIR`。連結到目錄外的既有專案仍留在原處，需要另外備份。
+預設資料目錄為 `.apsis-v5/`，包含設定、對話資料庫、記憶、成果、瀏覽器狀態與預設工作區。可在選用的 `.env` 中設定 `APSIS_DATA_DIR`。連結到目錄外的既有專案仍留在原處，需要另外備份。
 
 API key 由伺服器讀取，設定也可引用環境變數。使用外部模型時，必要的任務背景仍會傳送到所選模型服務；本機優先指應用程式的儲存與執行位置。資料目錄及備份應視為私人資料保管。
 
@@ -61,7 +63,7 @@ Shell 在主機執行，核准與路徑規則不是作業系統沙箱。連接�
 
 Shell 以 UTF-8 記錄指令輸出；透過 Shell 啟動的 Python 也以 UTF-8 輸出至管線。
 
-本版只接受 schema 4；舊 `.apsis/` 保留，不自動匯入。
+本版只接受 schema 5；舊 `.apsis/` 保留，不自動匯入。
 
 ## 參與與驗證
 

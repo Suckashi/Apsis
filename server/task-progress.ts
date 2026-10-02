@@ -135,7 +135,11 @@ export function taskPresentation(
     return ownProgress(run);
   }
   const ownRuns = runs
-    .filter((r) => r.sessionId === bot.sessionId)
+    .filter(
+      (r) =>
+        r.sessionId === bot.sessionId ||
+        jobs.some((j) => j.botId === bot.id && j.runId === r.id),
+    )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const associations = new Map(ownRuns.map((r) => [r.id, related(r)]));
   const summaries: RunSummary[] = ownRuns.map((run) => {

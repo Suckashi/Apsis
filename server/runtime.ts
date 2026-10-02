@@ -14,6 +14,7 @@ export type SteerHandler = (
   onApplied?: () => Promise<void>,
 ) => Promise<void>;
 export interface ToolOptions {
+  jobId?: string;
   memoryKey?: string;
   historyContextId?: string;
   checkToolPermission?: (

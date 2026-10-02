@@ -364,11 +364,13 @@ try {
       await page
         .locator(".execution-settings .settings-advanced > summary")
         .click();
-      const guard = page.getByLabel(/危險命令確認|Dangerous-command guard/);
+      const guard = page.getByLabel(
+        /重大或未知影響|Critical or unknown effects/,
+      );
       await expect(guard).toBeDisabled();
       await mode.locator('[data-mode="manual"]').click();
-      await expect(guard).toBeEnabled();
-      await guard.uncheck();
+      await expect(guard).toBeDisabled();
+      await expect(guard).toBeChecked();
       await page.getByRole("button", { name: /新增規則|Add rule/ }).click();
       const rule = page.locator(".execution-settings .permission-rule").last();
       await rule.getByLabel(/工具|Tool/, { exact: true }).fill("shell");
@@ -377,7 +379,7 @@ try {
         .fill("npm run *");
       await savedSettings(page);
       assert.equal(app.product.settings.read().approvalMode, "manual");
-      assert.equal(app.product.settings.read().dangerousCommandGuard, false);
+      assert.equal(app.product.settings.read().dangerousCommandGuard, true);
       assert.equal(
         app.product.settings.read().permissionRules[0].commandPattern,
         "npm run *",
@@ -476,11 +478,7 @@ try {
           exact: true,
         }),
       ).toBeVisible();
-      for (const name of [
-        "Execution & language",
-        "Model connections",
-        "Bot templates",
-      ])
+      for (const name of ["Execution & language", "Model connections"])
         await expect(
           dialog(page)
             .locator(".settings-tabs")
@@ -497,7 +495,7 @@ try {
     async () => {
       await openSettings(page);
       const navigation = dialog(page).locator(".settings-tabs");
-      await expect(navigation.getByRole("button")).toHaveCount(3);
+      await expect(navigation.getByRole("button")).toHaveCount(2);
       for (const name of ["Telegram", "Connectors", "Skills", "Auto approvals"])
         await expect(
           navigation.getByRole("button", { name, exact: true }),
@@ -529,7 +527,7 @@ try {
         .locator(".rule")
         .filter({ hasText: "echo fixture" });
       await expect(record).toContainText(
-        "Original task and its delegated work only",
+        "Original run only; critical actions excluded",
       );
       await record.getByRole("button", { name: "Revoke approval" }).click();
       await expect(record).toHaveCount(0);
@@ -773,10 +771,9 @@ try {
     },
   );
   await check(
-    "shared skills, per-Bot MCP choices, read-only rules, and template save/create",
+    "shared skills, assistant MCP choices and read-only rules",
     async () => {
       await page.goto(url);
-      await page.getByTitle(bot.name, { exact: true }).click();
       await page.locator(".header-profile").click();
       const profile = page.locator(".profile-form");
       await expect(
@@ -839,31 +836,7 @@ try {
       await expect(
         profile.getByLabel(/工作區權限|Workspace access/),
       ).toHaveValue("readonly");
-      await profile.locator(".profile-management > summary").click();
-      await profile
-        .getByRole("button", { name: /儲存為範本|Save as template/ })
-        .click();
-      await expect(
-        profile.getByText(/範本已儲存|Template saved/, { exact: true }),
-      ).toBeVisible();
-      const template = app.product.db.all<BotTemplate>("template")[0];
-      assert.ok(template);
-      assert.ok(!("apiKey" in template) && !("token" in template));
-      await openSettings(page, /Bot 範本|Bot templates/);
-      await page
-        .locator(".template-card")
-        .getByRole("button", { name: /建立 Bot|Create Bot/, exact: true })
-        .click();
-      await expect(
-        page.getByText(/已從範本建立 Bot|Bot created from template/, {
-          exact: true,
-        }),
-      ).toBeVisible();
-      const copy = app.product.db.all<Bot>("bot").find((b) => b.id !== bot.id)!;
-
-      assert.deepEqual(copy.connectorIds, saved.connectorIds);
-      assert.equal(copy.permissionMode, "readonly");
-      assert.equal(copy.permissionRules?.[0].effect, "deny");
+      const copy = saved;
       await app.product.jobs.submit(copy.id, {
         requestId: "settings-browser-run",
         prompt: "fixture",
@@ -903,7 +876,7 @@ try {
         () =>
           dialog(page)
             .locator(".settings-tabs")
-            .getByRole("button", { name: "Bot templates", exact: true })
+            .getByRole("button", { name: "Execution & language", exact: true })
             .click(),
         false,
       );
@@ -931,66 +904,6 @@ try {
       await openSettings(page, /模型連線|Model connections/);
       await edit();
       await expect(name).toHaveValue(before.name);
-    },
-  );
-  await check(
-    "template unsaved edits guard navigation and Escape without changing saved preferences",
-    async () => {
-      // Independent fixture: a profile-save regression must not hide guard coverage.
-      const before = app.product.bots.template({
-        name: "Dirty guard template",
-        permissionMode: "readonly",
-
-        connectorIds: ["connector-A"],
-      });
-      await openSettings(page, /Bot 範本|Bot templates/);
-      const templates = page.locator(".template-settings");
-      const edit = () =>
-        templates
-          .locator(".template-card")
-          .filter({
-            has: page.getByRole("heading", { name: before.name, exact: true }),
-          })
-          .getByRole("button", { name: "Edit", exact: true })
-          .click();
-      await edit();
-      const name = templates.getByLabel("Name", { exact: true });
-      await name.fill("Unsaved template draft");
-      const models = dialog(page)
-        .locator(".settings-tabs")
-        .getByRole("button", { name: "Model connections", exact: true });
-      await discardSettingsDraft(() => models.click(), false);
-      await expect(name).toHaveValue("Unsaved template draft");
-      await discardSettingsDraft(() => models.click(), true);
-      await expect(page.locator(".provider-settings")).toBeVisible();
-      await dialog(page)
-        .locator(".settings-tabs")
-        .getByRole("button", { name: "Bot templates", exact: true })
-        .click();
-      await edit();
-      await expect(name).toHaveValue(before.name);
-      await templates.locator(".template-advanced > summary").click();
-      const access = templates.getByLabel("Workspace access");
-      await access.selectOption(
-        before.permissionMode === "readonly" ? "workspace" : "readonly",
-      );
-      // Leave the native select before testing the dialog's Escape handler.
-      await name.focus();
-      await discardSettingsDraft(() => page.keyboard.press("Escape"), false);
-      await expect(access).toHaveValue(
-        before.permissionMode === "readonly" ? "workspace" : "readonly",
-      );
-      await discardSettingsDraft(() => page.keyboard.press("Escape"), true);
-      await expect(dialog(page)).toHaveCount(0);
-      assert.deepEqual(
-        app.product.db.get<BotTemplate>("template", before.id),
-        before,
-      );
-      await openSettings(page, /Bot 範本|Bot templates/);
-      await edit();
-      await expect(name).toHaveValue(before.name);
-      await templates.locator(".template-advanced > summary").click();
-      await expect(access).toHaveValue(before.permissionMode);
     },
   );
   await check(

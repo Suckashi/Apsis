@@ -471,7 +471,7 @@ export async function runDeep(options: RunOptions) {
     failureGuard,
   );
   const nativeInstructions =
-    "Use task for internal exploration, research, tests, review and parallel analysis. Use list_bots/delegate_task only for a persistent assignment to another Apsis Bot with its own identity/history. Deep Agents filesystem is private scratch; project files require workspace_* tools. Host execution requires the guarded shell tool. Report public progress and findings, never private reasoning.";
+    "Use task for internal exploration, research, tests, review and parallel analysis. Use start_background_work for persistent independent work with its own session and workspace. The user sees one personal assistant. Deep Agents filesystem is private scratch; project files require workspace_* tools. Host execution requires the guarded shell tool. Report public progress and findings, never private reasoning.";
   const agent = createDeepAgent({
     subagents: [
       {

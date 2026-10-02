@@ -70,9 +70,13 @@ export class Workspace {
   }
   static allowed(name: string) {
     return (
-      ![".git", ".apsis", DEFAULT_DATA_DIR, ".apsis-trash"].includes(
-        name.toLowerCase(),
-      ) &&
+      ![
+        ".git",
+        ".apsis",
+        ".apsis-v4",
+        DEFAULT_DATA_DIR,
+        ".apsis-trash",
+      ].includes(name.toLowerCase()) &&
       name !== "." &&
       name !== ".." &&
       !/[\x00-\x1f<>:"|?*]/.test(name) &&
