@@ -11,10 +11,13 @@ import { verificationLaunch } from "./verification-browser.ts";
 const directory = await mkdtemp(join(tmpdir(), "apsis-assistant-browser-"));
 const output = resolve("artifacts/single-assistant");
 await mkdir(output, { recursive: true });
+const executions: string[] = [];
+const adopted: string[] = [];
 const app = await createApp({
   dataDir: join(directory, "data"),
   workspaceDir: join(directory, "work"),
   runner: async (o) => {
+    executions.push(o.prompt);
     if (o.prompt.includes("failure")) throw new Error("Synthetic work failure");
     if (o.prompt.includes("approval"))
       await o.authorize?.(
@@ -24,6 +27,7 @@ const app = await createApp({
       );
     if (o.prompt.includes("long")) {
       o.registerSteer?.(async (_text, applied) => {
+        adopted.push(_text);
         await applied?.();
       });
       await new Promise<void>((done) =>
@@ -63,10 +67,41 @@ try {
     await page.locator(".new-bot, .chat-roster, .menu-new-topic").count(),
     0,
   );
+  let droppedCreation = 0;
+  await page.route(
+    "**/api/v2/work",
+    async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      await route.fetch();
+      droppedCreation++;
+      await route.abort("failed");
+    },
+    { times: 1 },
+  );
   await page.locator("#background-prompt").fill("A long background work");
   await page
     .getByRole("button", { name: "Start background work", exact: true })
     .click();
+  await expect.poll(() => droppedCreation).toBe(1);
+  await expect(page.locator(".background-work [role=alert]")).toBeVisible();
+  await page.reload();
+  await expect(page.locator("#background-prompt")).toHaveValue(
+    "A long background work",
+  );
+  await page
+    .getByRole("button", { name: "Start background work", exact: true })
+    .click();
+  await expect(page.locator("#background-prompt")).toHaveValue("");
+  assert.equal(
+    executions.filter((p) => p === "A long background work").length,
+    1,
+  );
+  assert.equal(
+    app.product.db.jobs
+      .list()
+      .filter((j) => j.prompt === "A long background work").length,
+    1,
+  );
   const card = page
     .locator(".work-card")
     .filter({ hasText: "A long background work" });
@@ -85,6 +120,30 @@ try {
   const activeJob = app.product.db.jobs
     .list()
     .find((j) => j.prompt === "A long background work")!;
+  let droppedSteering = 0;
+  await page.route(
+    `**/api/v2/work/${activeJob.id}/steer`,
+    async (route) => {
+      await route.fetch();
+      droppedSteering++;
+      await route.abort("failed");
+    },
+    { times: 1 },
+  );
+  await card.locator("summary").first().click();
+  await card.locator("input").fill("Keep the same steering receipt");
+  await card.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => droppedSteering).toBe(1);
+  await expect(page.locator(".background-work [role=alert]")).toBeVisible();
+  await page.reload();
+  await card.locator("summary").first().click();
+  await expect(card.locator("input")).toHaveValue(
+    "Keep the same steering receipt",
+  );
+  await card.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(card.locator("input")).toHaveValue("");
+  assert.deepEqual(adopted, ["Keep the same steering receipt"]);
+  await card.locator("summary").first().click();
   const activeRun = app.tasks.runs.records.get(activeJob.runId!)!;
   const startedAt = activeRun.createdAt;
   activeRun.createdAt = new Date(Date.now() - 90000).toISOString();
@@ -146,6 +205,13 @@ try {
       .evaluate((e) => getComputedStyle(e).animationName),
     "none",
   );
+  const pendingApproval = app.product.db.approvals
+    .list()
+    .find((a) => a.status === "pending")!;
+  await expect(page.locator(".work-approval-location")).toContainText(
+    pendingApproval.location!.path,
+  );
+  await expect(page.locator(".work-approval-location")).toBeVisible();
   await page.screenshot({
     path: join(output, "desktop-approval.png"),
     fullPage: true,

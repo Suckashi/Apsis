@@ -1,3 +1,4 @@
+import { Workspace } from "./workspace.ts";
 import type { ServerResponse } from "node:http";
 
 import { join, resolve, relative, isAbsolute, sep } from "node:path";
@@ -387,17 +388,29 @@ export class ProductService {
           name: string,
           operation: () => Promise<T>,
           signal?: AbortSignal,
+          args?: unknown,
         ) => {
           const execute = () =>
             job
               ? this.execution.slots.withWork(job.id, operation, signal)
               : operation();
-          return name === "shell" || name === "browser"
-            ? this.execution.withResource(
-                name === "shell" ? "host-shell" : `browser:${session.id}`,
-                execute,
-                signal,
+          const file = ["write_file", "edit_file"].includes(name)
+            ? Workspace.target(
+                this.workLocation(bot, runId).path,
+                (args as { path: string }).path,
               )
+            : undefined;
+          const resource = file
+            ? `file:${process.platform === "win32" ? file.toLowerCase() : file}`
+            : name === "shell"
+              ? "host-shell"
+              : name === "browser"
+                ? `browser:${session.id}`
+                : undefined;
+          // Queue outside slot acquisition; final consent and mutation share
+          // one target lock, including sibling native tasks and other sessions.
+          return resource
+            ? this.execution.withResource(resource, execute, signal)
             : execute();
         },
         registerSteer: (steer) => {

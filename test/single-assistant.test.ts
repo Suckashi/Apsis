@@ -1,3 +1,6 @@
+import { createServer } from "node:http";
+import { runDeep } from "../server/engines/deep.ts";
+import { createTools } from "../server/tools.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, readFile, writeFile, mkdir, rm } from "node:fs/promises";
@@ -507,4 +510,189 @@ test("a changed browser target requires fresh consent inside the execution bound
   f.product.approvals.decide(second.id, { approved: false });
   await until(() => f.product.db.jobs.get(job.id)?.status === "failed");
   assert.equal(effects, 0);
+});
+
+test("separator aliases cannot downgrade an existing-file overwrite in auto or yolo", async (t) => {
+  for (const approvalMode of ["auto", "yolo"] as const) {
+    let entered = false;
+    const f = await fixture(async (o) => {
+      await o.workspace.write("docs/report.txt", "original");
+      entered = true;
+      const write = createTools(o).find((tool) => tool.name === "write_file")!;
+      await write.execute(
+        "alias-write",
+        { path: "docs\\report.txt", content: "replacement" },
+        o.signal,
+      );
+      return { text: "done" };
+    });
+    t.after(f.cleanup);
+    f.product.settings.update({
+      revision: f.product.settings.read().revision,
+      approvalMode,
+    });
+    const job = await f.product.jobs.submit(f.bot.id, {
+      requestId: randomUUID(),
+      prompt: "alias",
+    });
+    await until(
+      () =>
+        entered &&
+        f.product.db.approvals.list().some((a) => a.status === "pending"),
+    );
+    const approval = f.product.db.approvals
+      .list()
+      .find((a) => a.status === "pending")!;
+    assert.equal(approval.reason, "critical-action");
+    const target = join(approval.location!.path, "docs", "report.txt");
+    assert.equal(await readFile(target, "utf8"), "original");
+    f.product.approvals.decide(approval.id, { approved: false });
+    await until(() => f.product.db.jobs.get(job.id)?.status === "failed");
+    assert.equal(await readFile(target, "utf8"), "original");
+  }
+});
+
+test("parallel same-target writes recheck consent under one canonical lock and leave main chat usable", async (t) => {
+  let arrivals = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  let target = "";
+  const f = await fixture(async (o) => {
+    if (o.prompt !== "parallel writes") return { text: "main answer" };
+    target = join(o.workspace.root, "docs", "report.txt");
+    const tools = createTools({
+      ...o,
+      authorize: async (...args) => {
+        const receipt = await o.authorize!(...args);
+        if (++arrivals === 2) release();
+        await gate;
+        return receipt;
+      },
+    });
+    const write = tools.find((tool) => tool.name === "write_file")!;
+    const results = await Promise.allSettled([
+      write.execute(
+        "writer-one",
+        { path: "docs/report.txt", content: "first" },
+        o.signal,
+      ),
+      write.execute(
+        "writer-two",
+        { path: "docs\\report.txt", content: "second" },
+        o.signal,
+      ),
+    ]);
+    assert.equal(
+      results.filter((result) => result.status === "fulfilled").length,
+      1,
+    );
+    return { text: "one writer completed; overwrite denied" };
+  });
+  t.after(f.cleanup);
+  f.product.settings.update({
+    revision: f.product.settings.read().revision,
+    approvalMode: "auto",
+    maxConcurrent: 1,
+  });
+  const job = await f.product.jobs.submit(f.bot.id, {
+    requestId: randomUUID(),
+    prompt: "parallel writes",
+    contextKind: "routine",
+  });
+  await until(() =>
+    f.product.db.approvals.list().some((a) => a.status === "pending"),
+  );
+  const approval = f.product.db.approvals
+    .list()
+    .find((a) => a.status === "pending")!;
+  assert.equal(arrivals, 2, "both preliminary checks saw a missing target");
+  assert.equal(approval.reason, "critical-action");
+  assert.equal(approval.jobId, job.id);
+  const before = await readFile(target, "utf8");
+  assert.ok(["first", "second"].includes(before));
+  const main = await f.product.jobs.submit(f.bot.id, {
+    requestId: randomUUID(),
+    prompt: "answer B",
+  });
+  await until(() => f.product.db.jobs.get(main.id)?.status === "completed");
+  f.product.approvals.decide(approval.id, { approved: false });
+  await until(() => f.product.db.jobs.get(job.id)?.status === "completed");
+  assert.equal(await readFile(target, "utf8"), before);
+});
+
+test("completed background work reaches the checkpointed main assistant without a history search", async (t) => {
+  const requests: { messages: unknown[] }[] = [];
+  const upstream = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+    requests.push(body);
+    const knowsResult = JSON.stringify(body.messages).includes(
+      "WORK_RESULT_314",
+    );
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      Connection: "close",
+    });
+    res.end(
+      `data: ${JSON.stringify({ id: `turn-${requests.length}`, object: "chat.completion.chunk", model: "fixture", choices: [{ index: 0, delta: { role: "assistant", content: knowsResult ? "The background result is 314." : "Ready." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+    );
+  });
+  upstream.listen(0, "127.0.0.1");
+  await once(upstream, "listening");
+  t.after(() => {
+    upstream.closeAllConnections();
+    upstream.close();
+  });
+  let backgroundExecutions = 0;
+  const f = await fixture(async (o) => {
+    if (o.prompt === "run independent work") {
+      backgroundExecutions++;
+      return { text: "WORK_RESULT_314" };
+    }
+    return runDeep({
+      ...o,
+      agent: undefined,
+      env: {
+        MODEL_PROVIDER: "openai-compatible",
+        MODEL_ID: "fixture",
+        COMPATIBLE_BASE_URL: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`,
+      },
+    });
+  });
+  t.after(f.cleanup);
+  const first = await f.product.jobs.submit(f.bot.id, {
+    requestId: randomUUID(),
+    prompt: "Begin main conversation",
+  });
+  await until(() => f.product.db.jobs.get(first.id)?.status === "completed");
+  assert.ok(f.tasks.store.conversations.load(f.bot.sessionId).engineState);
+  const work = await f.product.jobs.submit(f.bot.id, {
+    requestId: randomUUID(),
+    prompt: "run independent work",
+    contextKind: "routine",
+  });
+  await until(() => !!f.product.db.jobs.get(work.id)?.completionMessageId);
+  f.product.jobs.reportCompletion(f.product.db.jobs.get(work.id)!);
+  const followup = await f.product.jobs.submit(f.bot.id, {
+    requestId: randomUUID(),
+    prompt: "What did the background work find?",
+  });
+  await until(() => f.product.db.jobs.get(followup.id)?.status === "completed");
+  assert.equal(
+    f.product.db.jobs.get(followup.id)?.result,
+    "The background result is 314.",
+  );
+  assert.equal(
+    JSON.stringify(requests[1].messages).split("WORK_RESULT_314").length - 1,
+    1,
+  );
+  assert.equal(backgroundExecutions, 1);
+  assert.equal(
+    requests.length,
+    2,
+    "followup sees result immediately without search or replay",
+  );
 });

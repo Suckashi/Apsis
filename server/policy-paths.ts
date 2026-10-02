@@ -85,7 +85,7 @@ export function gitPaths(root: string): {
 export function filePolicyContext(root: string, path: string | undefined) {
   if (path === undefined) return { gitWorkspace: false, gitControl: false };
   const git = gitPaths(root);
-  const target = resolve(root, path);
+  const target = resolve(root, path.replaceAll("\\", "/"));
   return {
     gitWorkspace: git.worktree,
     gitControl:

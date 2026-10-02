@@ -2,6 +2,7 @@ import { getSettingsLocale } from "./settings-locale.ts";
 
 // Source messages are stable dictionary keys. User content is never translated.
 export const english: Record<string, string> = {
+  "工作位置：": "Work location: ",
   "背景工作需要你的核准；你仍可繼續聊天。":
     "Background work needs your approval. You can keep chatting.",
   "管理助理使用的模型連線。": "Manage model connections for your assistant.",

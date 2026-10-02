@@ -6,6 +6,7 @@ import {
 } from "@langchain/core/messages";
 
 export interface DeepValue {
+  backgroundResultsThrough?: number;
   messages: BaseMessage[];
   todos?: {
     content: string;
@@ -19,6 +20,7 @@ export interface DeepValue {
   };
 }
 export interface ContextCheckpoint {
+  backgroundResultsThrough?: number;
   version: 1;
   engine: "deepagents@1.14.0";
   messages: StoredMessage[];
@@ -57,6 +59,7 @@ export function checkpoint(value: DeepValue): ContextCheckpoint | undefined {
     engine: "deepagents@1.14.0",
     messages: mapChatMessagesToStoredMessages(messages),
     todos: value.todos,
+    backgroundResultsThrough: value.backgroundResultsThrough,
   };
 }
 export function restoreCheckpoint(value: unknown): DeepValue | undefined {
@@ -68,9 +71,16 @@ export function restoreCheckpoint(value: unknown): DeepValue | undefined {
     throw new Error("不支援的 context checkpoint 版本。");
   if (!Array.isArray(saved.messages))
     throw new Error("Context checkpoint 格式錯誤。");
+  if (
+    saved.backgroundResultsThrough !== undefined &&
+    (!Number.isSafeInteger(saved.backgroundResultsThrough) ||
+      saved.backgroundResultsThrough < 0)
+  )
+    throw new Error("Invalid background result checkpoint cursor.");
   // Checkpoints already contain the summary; never apply an earlier cutoff.
   return {
     messages: mapStoredMessagesToChatMessages(saved.messages),
     todos: saved.todos,
+    backgroundResultsThrough: saved.backgroundResultsThrough,
   };
 }

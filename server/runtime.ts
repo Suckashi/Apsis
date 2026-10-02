@@ -27,6 +27,7 @@ export interface ToolOptions {
     name: string,
     operation: () => Promise<T>,
     signal?: AbortSignal,
+    args?: unknown,
   ) => Promise<T>;
   runtimeSettings?: import("../shared/settings.ts").RuntimeSettings;
   modelSettings?: {

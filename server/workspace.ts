@@ -84,7 +84,7 @@ export class Workspace {
       !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)
     );
   }
-  async resolve(input = "", create = false) {
+  static segments(input = "") {
     if (
       typeof input !== "string" ||
       input.includes("\0") ||
@@ -104,6 +104,13 @@ export class Workspace {
       throw Object.assign(new Error("不允許系統資料、無效路徑或離開工作區。"), {
         status: 403,
       });
+    return segments;
+  }
+  static target(root: string, input: string) {
+    return path.resolve(root, ...Workspace.segments(input));
+  }
+  async resolve(input = "", create = false) {
+    const segments = Workspace.segments(input);
     if (
       this.protectedRoots.some((root) =>
         Workspace.contains(root, path.resolve(this.root, ...segments)),

@@ -1,8 +1,8 @@
 import { classifyAction } from "./action-effects.ts";
 import { randomUUID, createHash } from "node:crypto";
 
-import { lstatSync, realpathSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { Workspace } from "./workspace.ts";
 
 import type { TaskService } from "./tasks.ts";
 
@@ -38,6 +38,22 @@ export class ApprovalService {
   private readonly deps: Dependencies;
   constructor(deps: Dependencies) {
     this.deps = deps;
+  }
+  private fileTarget(root: string, input: string) {
+    const target = Workspace.target(root, input);
+    try {
+      const stat = lstatSync(target);
+      return {
+        path: realpathSync(target),
+        ino: stat.ino,
+        size: stat.size,
+        modified: stat.mtimeMs,
+      };
+    } catch (error) {
+      // Only a genuinely absent target may receive new-file treatment.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return { path: target, missing: true };
+    }
   }
   permissionContext(botId: string, runId: string) {
     const jobs = this.deps.db.jobs.list();
@@ -135,6 +151,20 @@ export class ApprovalService {
           entry.key === key &&
           context.owners.some((owner) => owner.id === entry.ownerBotId),
       );
+    let targetExists: boolean | undefined;
+    if (path && tool !== "shell") {
+      try {
+        targetExists =
+          this.fileTarget(context.workspace, path).missing !== true;
+      } catch {
+        return {
+          effect: "deny",
+          reason: "invalid-path",
+          explicitAsk: false,
+          matchedRuleIds: [],
+        } as PolicyDecision;
+      }
+    }
     const decision = evaluatePolicy(
       rules,
       {
@@ -155,9 +185,7 @@ export class ApprovalService {
         approvalMode: settings.approvalMode,
         dangerousCommandGuard: settings.dangerousCommandGuard,
         remembered,
-        targetExists: path
-          ? existsSync(resolve(context.workspace, path))
-          : undefined,
+        targetExists,
         ...filePolicyContext(
           context.workspace,
           tool === "shell" ? undefined : path,
@@ -243,18 +271,7 @@ export class ApprovalService {
               );
             }
             if (!a?.path) return undefined;
-            const target = resolve(context.workspace, a.path);
-            try {
-              const stat = lstatSync(target);
-              return {
-                path: realpathSync(target),
-                ino: stat.ino,
-                size: stat.size,
-                modified: stat.mtimeMs,
-              };
-            } catch {
-              return { path: target, missing: true };
-            }
+            return this.fileTarget(context.workspace, a.path);
           })(),
           paths: filePolicyContext(
             context.workspace,

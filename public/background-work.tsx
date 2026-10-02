@@ -1,3 +1,4 @@
+import { useWorkRequest } from "./use-work-request.ts";
 import { AssistantPresence } from "./assistant-presence.tsx";
 import { useState } from "react";
 import type { BotDetail } from "../shared/api.ts";
@@ -17,7 +18,11 @@ export function BackgroundWork({
 }) {
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const submission = useWorkRequest(
+    detail.bot.id,
+    "/work",
+    (request) => `/work/${request.requestId}`,
+  );
   const work = detail.jobs.filter(
     (j) => j.sessionId && j.sessionId !== detail.bot.sessionId,
   );
@@ -36,25 +41,25 @@ export function BackgroundWork({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          setBusy(true);
           void act(async () => {
-            await api("/work", "POST", {
-              prompt,
-              requestId: crypto.randomUUID(),
-            });
-            setPrompt("");
-          }).finally(() => setBusy(false));
+            if (await submission.send({ prompt })) setPrompt("");
+          });
         }}
       >
         <label htmlFor="background-prompt">{uiText("交辦獨立工作")}</label>
         <textarea
           id="background-prompt"
-          value={prompt}
+          value={submission.pending?.prompt ?? prompt}
+          readOnly={!!submission.pending}
           onChange={(e) => setPrompt(e.target.value)}
           maxLength={16000}
           rows={3}
         />
-        <button disabled={busy || !prompt.trim()}>
+        <button
+          disabled={
+            submission.busy || !(submission.pending?.prompt ?? prompt).trim()
+          }
+        >
           {uiText("開始背景工作")}
         </button>
       </form>
@@ -93,6 +98,12 @@ export function BackgroundWork({
             <summary>
               {uiText("等待你的核准")} · {approval.tool}
             </summary>
+            {approval.location?.path && (
+              <p className="work-approval-location">
+                {uiText("工作位置：")}
+                {approval.location.path}
+              </p>
+            )}
             <p>{approval.impact}</p>
             <p>
               {detail.jobs
@@ -138,6 +149,11 @@ function WorkCard({
   const [record, setRecord] = useState<unknown>();
   const active = ["running", "queued"].includes(job.status);
   const control = { sessionId: job.sessionId, runId: job.runId };
+  const steering = useWorkRequest(
+    `${job.id}:${job.runId}:steer`,
+    `/work/${job.id}/steer`,
+    (request) => `/work/${job.id}/steer/${request.requestId}`,
+  );
   return (
     <details className="work-card" data-job-id={job.id}>
       <summary>
@@ -167,20 +183,26 @@ function WorkCard({
           onSubmit={(e) => {
             e.preventDefault();
             void act(async () => {
-              await api(`/work/${job.id}/steer`, "POST", {
-                ...control,
-                prompt: steer,
-                requestId: crypto.randomUUID(),
-              });
-              setSteer("");
+              if (await steering.send({ ...control, prompt: steer }))
+                setSteer("");
             });
           }}
         >
           <label>
             {uiText("補充這項工作")}
-            <input value={steer} onChange={(e) => setSteer(e.target.value)} />
+            <input
+              value={steering.pending?.prompt ?? steer}
+              readOnly={!!steering.pending}
+              onChange={(e) => setSteer(e.target.value)}
+            />
           </label>
-          <button disabled={!steer.trim()}>{uiText("傳送")}</button>
+          <button
+            disabled={
+              steering.busy || !(steering.pending?.prompt ?? steer).trim()
+            }
+          >
+            {uiText("傳送")}
+          </button>
         </form>
       )}
       <details>

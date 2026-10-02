@@ -388,7 +388,7 @@ export function createTools({
           return t.execute(id, args, signal);
         };
         const output = await (executeAuthorizedTool
-          ? executeAuthorizedTool(t.name, execute, signal)
+          ? executeAuthorizedTool(t.name, execute, signal, args)
           : execute());
         executed = true;
         await recordOperation?.({

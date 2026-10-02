@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { RouteDependencies, RequestContext } from "./contracts.ts";
 import { fail, reply } from "../product-support.ts";
 import { transitionJob } from "../task-lifecycle.ts";
@@ -37,9 +38,23 @@ export class AssistantRoutes {
       );
       return true;
     }
-    const match = path.match(/^\/work\/([^/]+)(?:\/(stop|steer))?$/);
+    const match = path.match(
+      /^\/work\/([^/]+)(?:\/(stop|steer)(?:\/([^/]+))?)?$/,
+    );
     if (!match) return false;
     const job = this.deps.db.jobs.get(match[1]) || fail("Work not found", 404);
+    if (method === "GET" && match[2] === "steer" && match[3]) {
+      const messageId = `steer-${createHash("sha256").update(match[3]).digest("hex")}`;
+      const receipt = this.deps.tasks.store.conversations.message(
+        job.sessionId!,
+        messageId,
+      );
+      if (!receipt || receipt.delivery?.kind !== "steer")
+        fail("Steering receipt not found", 404);
+      reply(res, receipt);
+      return true;
+    }
+    if (match[3]) return false;
     if (method === "GET" && !match[2]) {
       reply(res, {
         job,

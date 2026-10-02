@@ -11,12 +11,16 @@ Implemented design and limits: [single-assistant.md](docs/single-assistant.md). 
 
 - The executor was reachable by successful commands after the reported disconnect; this work is preserved in committed increments.
 - `npm run check:docs`, `npm run build`: passed.
-- Last full `npm test`: **310 passed**, 0 failed. `/tmp/apsis-tests-final.log`.
-- Final SSE routing refinement: **28 focused tests passed** in `test/single-assistant.test.ts`, `test/bot-product.test.ts`, `test/steering-delivery.test.ts`. `/tmp/apsis-routing-final.log`. The final full suite also passed all 310 tests with conservative startup-target classification and nonexistent-target assertions. Final head CI follows the last commit.
-- Assistant desktop/mobile fixture browser: passed, including chat B during A, scoped stop, selected-avatar states, waiting approval, failure, disconnect/reconnect, reduced motion, stale-progress pause, distinct session-owned browser pages and reload. `/tmp/apsis-visual.log`.
+- Last full `npm test`: **314 passed**, 0 failed. `/tmp/apsis-review-final-tests.log`.
+- Acceptance regressions pass: real `runDeep` and integrated product completion into an existing main checkpoint; durable result cursor through paging/restart/compaction/concurrent arrival; backslash-path overwrite approval in auto/yolo; simultaneous absent-target writes require fresh overwrite consent while main chat responds. Final full suite includes these tests.
+- Assistant desktop/mobile fixture browser: passed, including chat B during A, scoped stop, selected-avatar states, waiting approval, failure, disconnect/reconnect, reduced motion, stale-progress pause, distinct session-owned browser pages and reload. Dropped accepted POST responses for creation and steering survive reload and reconcile receipts without duplicate execution/adoption; approval location is visible. `/tmp/apsis-review-browser.log`.
 - Settings browser: **23 checks passed**, no unexpected browser errors or external requests. `artifacts/settings-verification/report.json`.
 - Synthetic screenshots: `docs/assets/single-assistant/`. Desktop, mobile, approval and stale states were visually inspected.
 - No paid inference or live-model reliability claims. Local Node 24.19; CI checks Windows/Ubuntu Node 22.19. macOS unverified.
+
+## Acceptance review follow-up
+
+All five reported gaps were fixed on this branch: checkpoint completion delivery, canonical file targets, final consent inside per-file serialization, durable browser request identities with receipt reconciliation, and visible background approval working locations. The draft PR body records final-head CI after push. Shell/remote-process limitations remain documented; these fixes do not claim an OS sandbox.
 
 ## Continuation if interrupted
 
