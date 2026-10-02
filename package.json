@@ -67,7 +67,7 @@
     "@rainbowatcher/toml-edit-js": "0.6.5",
     "@xmldom/xmldom": "^0.8.15",
     "croner": "^10.0.1",
-    "deepagents": "1.14.0",
+    "deepagents": "1.14.1",
     "diff": "8.0.4",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
