@@ -67,7 +67,7 @@ test("createApp with only dataDir keeps workspace and status in that directory",
 
 test(
   "real CLI starts beside schema 3 data without migration, overrides or rewriting old files",
-  { timeout: 15000 },
+  { timeout: 45000 },
   async (t) => {
     const dir = await mkdtemp(join(tmpdir(), "apsis-cli-"));
     const oldDirectory = join(dir, ".apsis");
@@ -112,7 +112,10 @@ test(
       await exited;
       await rm(dir, { recursive: true, force: true });
     });
-    const deadline = Date.now() + 10000;
+    // This verifies startup compatibility, not cold-runner latency. Windows
+    // can spend more than 10s importing the CLI while other test files run.
+    // Match the cold Deep Agents fixture budget and still fail on early exit.
+    const deadline = Date.now() + 30000;
     while (!output.includes("http://localhost:")) {
       if (
         child.exitCode !== null ||
