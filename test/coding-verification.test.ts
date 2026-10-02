@@ -9,6 +9,8 @@ import {
   verificationStale,
   verifyWeb,
 } from "../server/coding-verification.ts";
+import { ProductTools } from "../server/product-tools.ts";
+import { WebCheckFailure } from "../server/tool-failure-guard.ts";
 import type { WebCheckStep } from "../shared/coding-verification.ts";
 
 async function fixture(t: TestContext, html?: string) {
@@ -83,6 +85,91 @@ test("real headless interactions fail an uninvoked IIFE and pass its repaired de
     script + "();\n// changed after the check\n",
   );
   assert.equal(await verificationStale(root, repaired), true);
+});
+
+test("web checks can assert checkbox state and filtered items hidden after reload", async (t) => {
+  const root = await fixture(
+    t,
+    `<!doctype html><html><body>
+      <label id="done-label" for="done">Complete task</label>
+      <input id="done" type="checkbox" style="display:none"><div id="task">Task T2</div>
+      <script>
+        const input = document.querySelector('#done');
+        const task = document.querySelector('#task');
+        input.checked = localStorage.getItem('done') === 'yes';
+        const render = () => { task.hidden = input.checked; };
+        input.addEventListener('change', () => {
+          localStorage.setItem('done', input.checked ? 'yes' : 'no');
+          render();
+        });
+        render();
+      </script></body></html>`,
+  );
+  const steps: WebCheckStep[] = [
+    { action: "expect_checked", selector: "#done", value: "false" },
+    { action: "click", selector: "#done-label" },
+    { action: "expect_checked", selector: "#done" },
+    { action: "expect_hidden", selector: "#task" },
+    { action: "reload" },
+    { action: "expect_checked", selector: "#done" },
+    { action: "expect_hidden", selector: "#task" },
+  ];
+  const receipt = await verifyWeb(root, "task", "run", "index.html", steps);
+  assert.equal(receipt.status, "passed", JSON.stringify(receipt));
+  assert.equal(receipt.assertions, 5);
+  assert.throws(
+    () =>
+      parseWebSteps([
+        { action: "expect_checked", selector: "#done", value: "yes" },
+      ]),
+    /網頁操作/,
+  );
+  const visible = await verifyWeb(
+    root,
+    "task",
+    "failed-run",
+    "index.html",
+    [{ action: "expect_hidden", selector: "#task" }],
+    undefined,
+    { assertionTimeoutMs: 250 },
+  );
+  assert.equal(visible.steps[0].status, "failed");
+  assert.equal(visible.status, "failed");
+});
+
+test("verify_web reports the failed step to the Bot retry guard", async (t) => {
+  const root = await fixture(t);
+  const recorded: unknown[] = [];
+  const registry = new ProductTools({
+    db: {
+      jobs: {
+        list: () => [{ runId: "run", botId: "bot", workContextId: "topic" }],
+      },
+      put: (_kind: string, value: unknown) => recorded.push(value),
+    },
+    workLocation: () => ({ path: root }),
+    notify: () => {},
+  } as unknown as ConstructorParameters<typeof ProductTools>[0]);
+  const tool = registry
+    .tools({ id: "bot" } as Parameters<ProductTools["tools"]>[0], "run")
+    .find((item) => item.name === "verify_web")!;
+  await assert.rejects(
+    tool.execute("call", {
+      path: "index.html",
+      steps: JSON.stringify([
+        { action: "expect_visible", selector: "#amount" },
+        { action: "expect_hidden", selector: "#result" },
+      ]),
+    }),
+    (error) => {
+      assert.ok(error instanceof WebCheckFailure);
+      assert.equal(error.check?.action, "expect_hidden");
+      assert.equal(error.check?.selector, "#result");
+      assert.match(error.message, /第 2 步 expect_hidden/);
+      return true;
+    },
+  );
+  assert.equal(recorded.length, 1);
 });
 
 test("verification requires an assertion and rejects paths outside the workspace before launching", async (t) => {

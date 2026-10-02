@@ -1,6 +1,12 @@
 export type WebCheckStep =
   | { action: "reload"; selector?: never; value?: never; property?: never }
   | {
+      action: "expect_checked";
+      selector: string;
+      value?: "true" | "false";
+      property?: never;
+    }
+  | {
       action: "expect_style";
       selector: string;
       property: string;
@@ -13,7 +19,8 @@ export type WebCheckStep =
         | "press"
         | "expect_text"
         | "expect_value"
-        | "expect_visible";
+        | "expect_visible"
+        | "expect_hidden";
       selector: string;
       value?: string;
       property?: never;

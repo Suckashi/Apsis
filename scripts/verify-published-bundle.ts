@@ -294,6 +294,13 @@ try {
             "aria-modal",
             "true",
           );
+          assert.equal(
+            await page
+              .locator("dialog[open]")
+              .evaluate((node) => node.matches(":modal")),
+            true,
+            "expanded preview must be a native modal",
+          );
           await expect(frame.locator("#result")).toHaveText("NT$ 250.00");
           await expect(frame.locator("#note")).toHaveValue(
             "尚未送出的旅程草稿",
@@ -303,8 +310,16 @@ try {
             0,
             "application has no errors before audit",
           );
+          const note = preview.locator(".html-preview-note");
+          if (await note.isVisible()) {
+            await note.scrollIntoViewIfNeeded();
+            await expect(note).toBeInViewport();
+          }
           const auditStart = errors.length;
+          // Scan the active modal separately: axe cannot reliably determine
+          // background contrast for inert controls behind its iframe.
           const audit = await new AxeBuilder({ page })
+            .include("dialog[open]")
             .withTags([
               "wcag2a",
               "wcag2aa",
@@ -344,9 +359,9 @@ try {
             incomplete: audit.incomplete,
             scannerErrors,
           });
+          await page.screenshot({ path: join(output, `${profile}.png`) });
           assert.deepEqual(audit.violations, [], profile);
           assert.deepEqual(audit.incomplete, [], profile);
-          await page.screenshot({ path: join(output, `${profile}.png`) });
           await frame.locator("#note").press("Escape");
           await expect(page.locator("dialog[open]")).toHaveCount(0);
           await expect(
