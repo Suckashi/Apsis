@@ -48,6 +48,8 @@ Linux 若缺少瀏覽器系統套件，使用 `npx playwright install --with-dep
 
 Deep Agents 原生 `task` 子代理用於同一次執行內的研究與分析；`list_bots`／`delegate_task` 則交辦給有獨立身分與歷史的另一位 Bot。原生 `execute` 已停用，主機命令經 Apsis 的 Shell 工具核准與記錄。詳見[架構](docs/architecture.md)。
 
+製作靜態網頁時，`verify_web` 可操作真實瀏覽器，檢查項目隱藏、勾選狀態及重新整理後的狀態。重試限制依實際失敗的檢查計數，其他檢查失敗不會提早中止 Bot 工作。
+
 ## 資料與執行範圍
 
 預設資料目錄為 `.apsis-v4/`，包含設定、對話資料庫、記憶、成果、瀏覽器狀態與預設工作區。可在選用的 `.env` 中設定 `APSIS_DATA_DIR`。連結到目錄外的既有專案仍留在原處，需要另外備份。
